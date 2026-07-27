@@ -248,3 +248,33 @@ export async function fetchRankdownWithTitleViaBrowser(
 ) {
   return fetchWithTitleViaBrowser(context, domain, date, 'rankdown', platform)
 }
+
+// Mint a fresh anonymous Baidu session cookie via a real headless browser visit
+// (homepage + one warm-up search), for scripts/crawl.ts's index-pages step.
+// fetchBaiduIndexPages() in lib/crawler.ts already chains Referer correctly
+// between pages and rotates its cookie from each page's Set-Cookie response —
+// the only weak link is the *starting* cookie: its own fallback (a single
+// plain fetch() to the homepage) doesn't pass Baidu's anti-bot as reliably as
+// a real browser visit does, which is why a manually-pasted cookie pool was
+// needed before. No login involved — purely anonymous, same as what a user
+// gets from an unauthenticated browser tab (confirmed live 2026-07-27: this
+// got a clean 10-result page for a site: search, no "百度安全验证" captcha).
+export async function mintBaiduCookie(): Promise<string> {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const context = await browser.newContext({ userAgent: randomBrowserUA() })
+    const page = await context.newPage()
+    await page.goto('https://www.baidu.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(1000)
+    await page.goto(`https://www.baidu.com/s?wd=${encodeURIComponent('百度')}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000,
+      referer: 'https://www.baidu.com/',
+    }).catch(() => {})
+    await page.waitForTimeout(1000)
+    const cookies = await context.cookies()
+    return cookies.map((c) => `${c.name}=${c.value}`).join('; ')
+  } finally {
+    await browser.close()
+  }
+}

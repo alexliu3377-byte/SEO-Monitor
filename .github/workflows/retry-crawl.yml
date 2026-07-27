@@ -136,14 +136,14 @@ jobs:
           echo "Retry step: $STEP (group ${{ matrix.group }}/${{ needs.setup.outputs.total }})"
 
       - name: Cache Playwright browsers
-        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title'
+        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title' || steps.vars.outputs.step == 'index-pages'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright Chromium
-        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title'
+        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title' || steps.vars.outputs.step == 'index-pages'
         run: npx playwright install --with-deps chromium
 
       - name: Run retry crawl

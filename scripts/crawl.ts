@@ -9,7 +9,7 @@ import {
   type BaiduIndexedPage,
   type BaiduIndexFailReason,
 } from '../lib/crawler'
-import { createAizhanBrowserSession, fetchRankChangesViaBrowser } from '../lib/crawler-browser'
+import { createAizhanBrowserSession, fetchRankChangesViaBrowser, mintBaiduCookie } from '../lib/crawler-browser'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
@@ -1097,20 +1097,33 @@ async function main() {
   }
   if (step === 'index-pages') {
     const aid = await activityStart(supabase, { ...logBase, step: 'index-pages' })
-    const { data: cookieSetting } = await supabase.from('app_settings').select('value').eq('key', 'baidu_index_cookie').maybeSingle()
-    const rawCookie = (cookieSetting as { value: string } | null)?.value ?? ''
+    // Mint a fresh anonymous cookie via a real headless browser visit first —
+    // this replaces the need to manually paste cookies into the Cookie 池.
+    // Falls back to the manual pool only if minting itself throws (e.g. no
+    // Chromium available); an empty/weak mint isn't distinguishable here so
+    // the pool stays as a safety net rather than being removed outright.
     let baiduCookie: string | undefined
-    if (rawCookie) {
-      try {
-        const pool = JSON.parse(rawCookie)
-        if (Array.isArray(pool) && pool.length > 0) {
-          const item = pool[Math.floor(Math.random() * pool.length)]
-          baiduCookie = typeof item === 'string' ? item : (item as { value: string }).value
-        } else {
+    try {
+      baiduCookie = await mintBaiduCookie()
+      console.log(`  🍪 已通过 Playwright 自动获取百度 cookie`)
+    } catch (e) {
+      console.log(`  ⚠ Playwright 获取百度 cookie 失败，回退到手动 Cookie 池: ${e instanceof Error ? e.message : e}`)
+    }
+    if (!baiduCookie) {
+      const { data: cookieSetting } = await supabase.from('app_settings').select('value').eq('key', 'baidu_index_cookie').maybeSingle()
+      const rawCookie = (cookieSetting as { value: string } | null)?.value ?? ''
+      if (rawCookie) {
+        try {
+          const pool = JSON.parse(rawCookie)
+          if (Array.isArray(pool) && pool.length > 0) {
+            const item = pool[Math.floor(Math.random() * pool.length)]
+            baiduCookie = typeof item === 'string' ? item : (item as { value: string }).value
+          } else {
+            baiduCookie = rawCookie
+          }
+        } catch {
           baiduCookie = rawCookie
         }
-      } catch {
-        baiduCookie = rawCookie
       }
     }
     const supplementDomain = process.env.SUPPLEMENT_DOMAIN
