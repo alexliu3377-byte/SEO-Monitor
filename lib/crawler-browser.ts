@@ -99,10 +99,17 @@ function isChallengePage(html: string, title: string): boolean {
 //   [未知空页]      no <tbody> AND doesn't match a known challenge marker —
 //                   a still-uncatalogued blocking page, if this ever fires
 //   [请求异常]      page.goto() itself threw (timeout/network error)
-async function fetchHtml(page: Page, url: string): Promise<string> {
+// `referer` should be the URL of the page the user would have clicked "next
+// page" from — i.e. the previous page in this same pagination sequence, not
+// a static value. 2026-07-27: pagination consistently died at page 2 (never
+// page 3+) with a normal-looking 200/<tbody> response, suggesting the new
+// anti-bot layer checks that a page request's Referer chains from the prior
+// page, unlike the old (pre-challenge) crawler which used one static Referer
+// for every request and never needed to care.
+async function fetchHtml(page: Page, url: string, referer?: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000, referer })
       const [html, title] = await Promise.all([page.content(), page.title()])
       const status = res?.status() ?? 'null'
 
@@ -147,9 +154,11 @@ export async function fetchRankChangesViaBrowser(
       pages.map(async (page, i) => {
         const rankPos = i + 1
         const entries: { keyword: string; volume: number }[] = []
+        let referer = 'https://baidurank.aizhan.com/'
         for (let p = 1; p <= 15; p++) {
           const url = buildRankUrl(domain, type, rankPos, date, p, 'mobile', isToday)
-          const html = await fetchHtml(page, url)
+          const html = await fetchHtml(page, url, referer)
+          referer = url
           const pageEntries = parseSimpleRankRows(html)
           if (pageEntries.length === 0) {
             console.log(`    [${domain} ${type} 段${rankPos}] 第${p}页0条，停止翻页（此前已累积${entries.length}条）`)
@@ -188,9 +197,11 @@ async function fetchWithTitleViaBrowser(
       pages.map(async (page, i) => {
         const rankPos = i + 1
         const entries: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
+        let referer = 'https://baidurank.aizhan.com/'
         for (let p = 1; p <= 15; p++) {
           const url = buildRankUrl(domain, type, rankPos, date, p, platform, isToday)
-          const html = await fetchHtml(page, url)
+          const html = await fetchHtml(page, url, referer)
+          referer = url
           const pageEntries = parseTitledRankRows(html)
           if (pageEntries.length === 0) {
             console.log(`    [${domain} ${platform}/${type} 段${rankPos}] 第${p}页0条，停止翻页（此前已累积${entries.length}条）`)

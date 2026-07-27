@@ -53,7 +53,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关，cron 不会自动修改该字段' },
       { label: '数据来源', text: '爱站移动端 baidurank.aizhan.com/mobile/…，抓涨入词与跌出词及搜索量' },
       { label: '浏览器验证', text: '爱站 2026-07 起给排名页加了浏览器指纹验证（简单层：302跳转+Set-Cookie；深层：约2分钟自动完成的环境探测挑战，纯 fetch 请求无法通过），抓取改用 Playwright headless Chromium：job 开始时用 createAizhanBrowserSession() 过一次验证（约2分钟，UA 随机选一个但整个 job 内固定不变），验证通过后本 job 内全部站点/页面复用同一浏览器 context 直接抓取，不逐页重新验证；job 若150秒内未通过验证会直接失败（AIZHAN_CHALLENGE_TIMEOUT），由 retry-crawl.yml 补跑；workflow 里对应加了 Install Playwright Chromium 步骤（仅 rank/rank-title 步骤触发）。即使验证通过后，单个页面请求仍可能被临时打回挑战页（2026-07-27 生产环境实测发现，如 greenxf.com 涨入从705条掉到0）：fetchHtml() 会识别挑战页（标题 Embed Iframe/安全检测中）并在同一页面请求内重试最多3次（间隔3秒），而不是当成"该页无数据"直接判定翻页结束' },
-      { label: '并行策略', text: '排名段1-5同时并行（各开一个浏览器 page），段内按页顺序，每页间隔300ms' },
+      { label: '并行策略', text: '排名段1-5同时并行（各开一个浏览器 page），段内按页顺序，每页间隔300ms；每页请求带 Referer=上一页URL（第1页 Referer=站点首页），模拟真实"点下一页"的跳转链，而不是每次都用固定 Referer（2026-07-27 加入：实测发现翻页 100% 卡在第1-2页、从未翻到第3页，怀疑新反爬专门检查翻页请求的 Referer 链）' },
       { label: '限流保护', text: '涨入完成后随机等3-5秒抓跌出（随机间隔减少爱站检测风险）；涨跌其中一方为0时等5秒重试1次；连续3站均为空触发熔断，暂停5分钟后补抓；涨入/跌出任一方>150但另一方=0时标记 suspect（疑似漏抓），不影响已有数据写入，由 retry-crawl.yml 05:00 MYT 自动重抓；站点间45秒间隔' },
       { label: '去重', text: '同关键词出现在多个排名段时保留搜索量最高的记录' },
       { label: '写入表', text: 'rank_changes（有数据时先删当日旧记录再插入）/ keyword_volume（涨入+跌出词搜索量，永久表，含 latest_trend 字段标记最新趋势；已有记录不被 volume=0 覆盖）' },
