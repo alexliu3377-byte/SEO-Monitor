@@ -17,7 +17,7 @@ const USER_AGENTS = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 ]
 
-function randomUA() {
+export function randomUA() {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
 }
 
@@ -394,6 +394,41 @@ function getRankHeaders(ua: string) {
   }
 }
 
+// Parse a rankup/rankdown listing page's <tbody> rows (keyword + volume only).
+// Shared by the fetch-based path (fetchRankPage) and the Playwright-based path
+// in lib/crawler-browser.ts, which navigates the same pages with a real browser.
+export function parseSimpleRankRows(html: string): { keyword: string; volume: number }[] {
+  const $ = cheerio.load(html)
+  const results: { keyword: string; volume: number }[] = []
+  $('tbody tr').each((_, tr) => {
+    const keyword = $(tr).find('td.title a').first().text().trim()
+    const volume = parseInt($(tr).find('td.ip').eq(2).text().trim(), 10) || 0
+    if (keyword) results.push({ keyword, volume })
+  })
+  return results
+}
+
+// Parse a rankup/rankdown listing page's <tbody> rows, including rank position
+// and title/url columns. Shared by fetchRankdownPage/fetchRankupPage (fetch-based)
+// and the Playwright-based path in lib/crawler-browser.ts.
+export function parseTitledRankRows(html: string): { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] {
+  const $ = cheerio.load(html)
+  const results: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
+  $('tbody tr').each((_, tr) => {
+    const keyword = $(tr).find('td.title a').first().text().trim()
+    const rank_position = parseRankPosition($(tr).find('td.ip').eq(0).text().trim())
+    const prev_rank = parseRankPosition($(tr).find('td.ip').eq(1).text().trim())
+    const volume = parseInt($(tr).find('td.ip').eq(2).text().trim(), 10) || 0
+    // Title is the 6th column (index 5); falls back to last td
+    const titleTd = $(tr).find('td').eq(5)
+    const title = (titleTd.length ? titleTd : $(tr).find('td').last()).text().trim()
+    // URL is the href on the 标题 column anchor (second td.title in the row)
+    const url = $(tr).find('td.title').last().find('a').first().attr('href') || ''
+    if (keyword) results.push({ keyword, volume, title, url, rank_position, prev_rank })
+  })
+  return results
+}
+
 async function fetchRankPage(
   domain: string,
   type: string,
@@ -435,14 +470,7 @@ async function fetchRankPage(
       return null
     }
 
-    const $ = cheerio.load(html)
-    const results: { keyword: string; volume: number }[] = []
-    $('tbody tr').each((_, tr) => {
-      const keyword = $(tr).find('td.title a').first().text().trim()
-      const volume = parseInt($(tr).find('td.ip').eq(2).text().trim(), 10) || 0
-      if (keyword) results.push({ keyword, volume })
-    })
-    return results
+    return parseSimpleRankRows(html)
   } catch {
     return []
   }
@@ -534,21 +562,7 @@ async function fetchRankdownPage(
       if (challengeCookie === cookie) return []
       return fetchRankdownPage(domain, rankPos, date, page, challengeCookie, ua, isToday, platform)
     }
-    const $ = cheerio.load(html)
-    const results: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
-    $('tbody tr').each((_, tr) => {
-      const keyword = $(tr).find('td.title a').first().text().trim()
-      const rank_position = parseRankPosition($(tr).find('td.ip').eq(0).text().trim())
-      const prev_rank = parseRankPosition($(tr).find('td.ip').eq(1).text().trim())
-      const volume = parseInt($(tr).find('td.ip').eq(2).text().trim(), 10) || 0
-      // Title is the 6th column (index 5); falls back to last td
-      const titleTd = $(tr).find('td').eq(5)
-      const title = (titleTd.length ? titleTd : $(tr).find('td').last()).text().trim()
-      // URL is the href on the 标题 column anchor (second td.title in the row)
-      const url = $(tr).find('td.title').last().find('a').first().attr('href') || ''
-      if (keyword) results.push({ keyword, volume, title, url, rank_position, prev_rank })
-    })
-    return results
+    return parseTitledRankRows(html)
   } catch {
     return []
   }
@@ -621,19 +635,7 @@ async function fetchRankupPage(
       if (challengeCookie === cookie) return []
       return fetchRankupPage(domain, rankPos, date, page, challengeCookie, ua, isToday, platform)
     }
-    const $ = cheerio.load(html)
-    const results: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
-    $('tbody tr').each((_, tr) => {
-      const keyword = $(tr).find('td.title a').first().text().trim()
-      const rank_position = parseRankPosition($(tr).find('td.ip').eq(0).text().trim())
-      const prev_rank = parseRankPosition($(tr).find('td.ip').eq(1).text().trim())
-      const volume = parseInt($(tr).find('td.ip').eq(2).text().trim(), 10) || 0
-      const titleTd = $(tr).find('td').eq(5)
-      const title = (titleTd.length ? titleTd : $(tr).find('td').last()).text().trim()
-      const url = $(tr).find('td.title').last().find('a').first().attr('href') || ''
-      if (keyword) results.push({ keyword, volume, title, url, rank_position, prev_rank })
-    })
-    return results
+    return parseTitledRankRows(html)
   } catch {
     return []
   }

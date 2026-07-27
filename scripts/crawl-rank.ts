@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { fetchRankupWithTitle, fetchRankdownWithTitle } from '../lib/crawler'
+import { createAizhanBrowserSession, fetchRankupWithTitleViaBrowser, fetchRankdownWithTitleViaBrowser } from '../lib/crawler-browser'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 
 const supabase = createClient(
@@ -121,6 +121,15 @@ async function main() {
   let emptySites = 0
   let failSites = 0
 
+  // 爱站 2026-07 起给排名页加了浏览器指纹验证（约需等待2分钟自动通过，详见
+  // lib/crawl-rules.ts "rank-title" 小节）。这个验证是浏览器会话级、跨站点/
+  // 跨页面通用的，所以只需要在本次抓取开始时过一次，下面整个站点循环复用
+  // 同一个已通过验证的 context。
+  console.log(`  ⏳ 正在通过爱站浏览器验证（约需2分钟）… (${ts()})`)
+  const { browser, context } = await createAizhanBrowserSession()
+  console.log(`  ✓ 浏览器验证通过 (${ts()})`)
+
+  try {
   for (let i = 0; i < sites.length; i++) {
     const { id: siteId, domain } = sites[i]
     console.log(`\n${'─'.repeat(50)}`)
@@ -143,8 +152,8 @@ async function main() {
         const label = `${platform}/${type}`
         try {
           const entries = type === 'rankup'
-            ? await fetchRankupWithTitle(domain, today, platform)
-            : await fetchRankdownWithTitle(domain, today, platform)
+            ? await fetchRankupWithTitleViaBrowser(context, domain, today, platform)
+            : await fetchRankdownWithTitleViaBrowser(context, domain, today, platform)
 
           if (entries.length === 0) {
             console.log(`    ${label.padEnd(16)} ⚠  无数据（疑似限流或无词）`)
@@ -251,6 +260,9 @@ async function main() {
       console.log(`    等待 60s 再抓下一个站点…`)
       await delay(60000)
     }
+  }
+  } finally {
+    await browser.close()
   }
 
   const dur = Date.now() - totalStart
