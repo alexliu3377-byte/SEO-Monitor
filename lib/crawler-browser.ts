@@ -28,10 +28,6 @@ function randomBrowserUA() {
   return BROWSER_UAS[Math.floor(Math.random() * BROWSER_UAS.length)]
 }
 
-function randomDelayMs(minMs: number, maxMs: number): number {
-  return minMs + Math.floor(Math.random() * (maxMs - minMs))
-}
-
 type RankType = 'rankup' | 'rankdown'
 type Platform = 'mobile' | 'pc'
 
@@ -111,13 +107,9 @@ async function fetchHtml(page: Page, url: string): Promise<string> {
 
 // Fetch all rank changes (涨入 or 跌出) for a domain on a given date, via an
 // already-challenge-passed browser context. Mirrors fetchRankChanges in
-// lib/crawler.ts: 5 rank positions in parallel (one page per position, each
-// staggered by a random 0-2s start so they don't all fire in lockstep), pages
-// within a position fetched sequentially with a random 3-5s delay (mimics
-// human browsing pace — a fixed short interval across 5 parallel tabs looked
-// too bot-like and correlated with sites getting bounced to challenge pages
-// in production 2026-07-27), stop at first empty page, dedup by keyword
-// keeping the highest volume.
+// lib/crawler.ts: 5 rank positions in parallel (one page per position), pages
+// within a position fetched sequentially with a 300ms delay, stop at first
+// empty page, dedup by keyword keeping the highest volume.
 export async function fetchRankChangesViaBrowser(
   context: BrowserContext,
   domain: string,
@@ -130,7 +122,6 @@ export async function fetchRankChangesViaBrowser(
     const allResults = await Promise.all(
       pages.map(async (page, i) => {
         const rankPos = i + 1
-        await page.waitForTimeout(randomDelayMs(0, 2000))
         const entries: { keyword: string; volume: number }[] = []
         for (let p = 1; p <= 15; p++) {
           const url = buildRankUrl(domain, type, rankPos, date, p, 'mobile', isToday)
@@ -138,7 +129,7 @@ export async function fetchRankChangesViaBrowser(
           const pageEntries = parseSimpleRankRows(html)
           if (pageEntries.length === 0) break
           entries.push(...pageEntries.filter((e) => e.volume > 0))
-          if (p < 15) await page.waitForTimeout(randomDelayMs(3000, 5000))
+          if (p < 15) await page.waitForTimeout(300)
         }
         return entries
       })
@@ -169,7 +160,6 @@ async function fetchWithTitleViaBrowser(
     const allResults = await Promise.all(
       pages.map(async (page, i) => {
         const rankPos = i + 1
-        await page.waitForTimeout(randomDelayMs(0, 2000))
         const entries: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
         for (let p = 1; p <= 15; p++) {
           const url = buildRankUrl(domain, type, rankPos, date, p, platform, isToday)
@@ -177,7 +167,7 @@ async function fetchWithTitleViaBrowser(
           const pageEntries = parseTitledRankRows(html)
           if (pageEntries.length === 0) break
           entries.push(...pageEntries)
-          if (p < 15) await page.waitForTimeout(randomDelayMs(3000, 5000))
+          if (p < 15) await page.waitForTimeout(300)
         }
         return entries
       })
