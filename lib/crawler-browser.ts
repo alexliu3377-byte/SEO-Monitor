@@ -90,17 +90,41 @@ function isChallengePage(html: string, title: string): boolean {
   return title.includes('Embed Iframe') || title.includes('安全检测中') || html.includes('_jsc_sbu')
 }
 
+// Diagnostic-only logging (2026-07-27): only anomalies are logged — a full
+// crawl fires hundreds of page fetches, so logging every success would drown
+// the GitHub Actions log. Four buckets, so the next investigation has actual
+// evidence instead of guesses:
+//   [挑战页]        matched a known challenge-page marker (see isChallengePage)
+//   [挑战页-放弃]    still a challenge page after 3 retries
+//   [未知空页]      no <tbody> AND doesn't match a known challenge marker —
+//                   a still-uncatalogued blocking page, if this ever fires
+//   [请求异常]      page.goto() itself threw (timeout/network error)
 async function fetchHtml(page: Page, url: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
       const [html, title] = await Promise.all([page.content(), page.title()])
-      if (!isChallengePage(html, title)) return html
-      console.log(`    ⚠ 挑战页拦截（第${attempt}次），3秒后重试: ${url}`)
-    } catch {
-      // fall through to retry
+      const status = res?.status() ?? 'null'
+
+      if (isChallengePage(html, title)) {
+        if (attempt < 3) {
+          console.log(`    ⚠ [挑战页] 第${attempt}次 status=${status} title="${title}" ${url}`)
+          await page.waitForTimeout(3000)
+          continue
+        }
+        console.log(`    ✗ [挑战页-放弃] 重试3次仍拦截 status=${status} title="${title}" ${url}`)
+        return ''
+      }
+
+      if (!html.includes('<tbody')) {
+        console.log(`    ? [未知空页] status=${status} title="${title}" htmlLen=${html.length} ${url}`)
+      }
+
+      return html
+    } catch (e) {
+      console.log(`    ✗ [请求异常] 第${attempt}次 ${e instanceof Error ? e.message : e} ${url}`)
+      if (attempt < 3) await page.waitForTimeout(3000)
     }
-    if (attempt < 3) await page.waitForTimeout(3000)
   }
   return ''
 }
