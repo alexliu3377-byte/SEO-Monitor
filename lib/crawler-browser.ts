@@ -151,7 +151,10 @@ export async function fetchRankChangesViaBrowser(
           const url = buildRankUrl(domain, type, rankPos, date, p, 'mobile', isToday)
           const html = await fetchHtml(page, url)
           const pageEntries = parseSimpleRankRows(html)
-          if (pageEntries.length === 0) break
+          if (pageEntries.length === 0) {
+            console.log(`    [${domain} ${type} 段${rankPos}] 第${p}页0条，停止翻页（此前已累积${entries.length}条）`)
+            break
+          }
           entries.push(...pageEntries.filter((e) => e.volume > 0))
           if (p < 15) await page.waitForTimeout(300)
         }
@@ -189,7 +192,10 @@ async function fetchWithTitleViaBrowser(
           const url = buildRankUrl(domain, type, rankPos, date, p, platform, isToday)
           const html = await fetchHtml(page, url)
           const pageEntries = parseTitledRankRows(html)
-          if (pageEntries.length === 0) break
+          if (pageEntries.length === 0) {
+            console.log(`    [${domain} ${platform}/${type} 段${rankPos}] 第${p}页0条，停止翻页（此前已累积${entries.length}条）`)
+            break
+          }
           entries.push(...pageEntries)
           if (p < 15) await page.waitForTimeout(300)
         }
