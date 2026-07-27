@@ -80,13 +80,29 @@ export async function createAizhanBrowserSession(
   return { browser, context }
 }
 
+// Even inside an already-challenge-passed context, individual requests can still
+// get bounced back to a challenge/blocked page (observed in production 2026-07-27:
+// sites showing 0 results on the first attempt, sometimes correcting on the
+// site-level retry in scripts/crawl.ts, sometimes not — e.g. greenxf.com dropped
+// from 705/595 five days prior to 0/100). Without this check, that page parses to
+// zero <tbody> rows indistinguishable from a genuinely-empty result.
+function isChallengePage(html: string, title: string): boolean {
+  return title.includes('Embed Iframe') || title.includes('安全检测中') || html.includes('_jsc_sbu')
+}
+
 async function fetchHtml(page: Page, url: string): Promise<string> {
-  try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    return await page.content()
-  } catch {
-    return ''
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const [html, title] = await Promise.all([page.content(), page.title()])
+      if (!isChallengePage(html, title)) return html
+      console.log(`    ⚠ 挑战页拦截（第${attempt}次），3秒后重试: ${url}`)
+    } catch {
+      // fall through to retry
+    }
+    if (attempt < 3) await page.waitForTimeout(3000)
   }
+  return ''
 }
 
 // Fetch all rank changes (涨入 or 跌出) for a domain on a given date, via an
