@@ -60,13 +60,6 @@ function formatCardTime(iso: string): string {
   return `${mm}/${dd} ${hhmm}`
 }
 
-function formatCardDate(iso: string): string {
-  const d = toMyt(iso)
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  return `${mm}/${dd}`
-}
-
 function formatDuration(ms: number | null): string {
   if (!ms) return '-'
   if (ms < 1000) return `${ms}ms`
@@ -275,16 +268,6 @@ export default function CrawlLogPage() {
     indexPages: null,
   })
 
-  // Cookie pool
-  interface CookieEntry { name: string; value: string }
-  const [cookieUpdatedAt, setCookieUpdatedAt] = useState<string | null>(null)
-  const [cookiePool, setCookiePool] = useState<CookieEntry[]>([])
-  const [showCookieModal, setShowCookieModal] = useState(false)
-  const [newCookieName, setNewCookieName] = useState('')
-  const [newCookieInput, setNewCookieInput] = useState('')
-  const [cookieSaving, setCookieSaving] = useState(false)
-  const [cookieSaveMsg, setCookieSaveMsg] = useState('')
-
   // Filters
   const [filterDate, setFilterDate] = useState('')
   const [filterType, setFilterType] = useState('')
@@ -362,26 +345,6 @@ export default function CrawlLogPage() {
       indexPages: latestIndexPages,
     })
 
-    // Cookie pool status
-    const cookieRes = await fetch('/api/settings?key=baidu_index_cookie')
-    if (cookieRes.ok) {
-      const cd = await cookieRes.json()
-      setCookieUpdatedAt(cd.updated_at ?? null)
-      if (cd.value) {
-        try {
-          const pool = JSON.parse(cd.value)
-          if (Array.isArray(pool) && pool.length > 0) {
-            if (typeof pool[0] === 'string') {
-              // backward compat: old string[] format → convert to named entries
-              setCookiePool(pool.map((v: string, i: number) => ({ name: `Cookies ${i + 1}`, value: v })))
-            } else {
-              setCookiePool(pool)
-            }
-          }
-        } catch { setCookiePool([]) }
-      }
-    }
-
     const { data: logsData } = await supabase
       .from('activity_log')
       .select('*')
@@ -391,51 +354,6 @@ export default function CrawlLogPage() {
     setLogs((logsData || []) as ActivityLog[])
     setLoading(false)
   }, [])
-
-  function parseBlockToCookieString(raw: string): string {
-    const pairs: string[] = []
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      if (trimmed.includes('\t')) {
-        const cols = trimmed.split('\t')
-        const n = cols[0]?.trim(); const v = cols[1]?.trim()
-        if (n && v) pairs.push(`${n}=${v}`)
-      } else if (trimmed.includes('=')) {
-        pairs.push(trimmed)
-      }
-    }
-    return pairs.join('; ')
-  }
-
-  function nextCookieName(): string {
-    const nums = cookiePool
-      .map(e => e.name.match(/^Cookies\s+(\d+)$/i))
-      .filter(Boolean).map(m => parseInt(m![1]))
-    return `Cookies ${nums.length > 0 ? Math.max(...nums) + 1 : cookiePool.length + 1}`
-  }
-
-  function addCookieEntry() {
-    const value = parseBlockToCookieString(newCookieInput)
-    if (!value) { setCookieSaveMsg('未识别到有效 Cookie，请检查格式'); return }
-    const name = newCookieName.trim() || nextCookieName()
-    setCookiePool(prev => [...prev, { name, value }])
-    setNewCookieName(''); setNewCookieInput(''); setCookieSaveMsg('')
-  }
-
-  async function saveCookie() {
-    setCookieSaving(true); setCookieSaveMsg('')
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'baidu_index_cookie', value: JSON.stringify(cookiePool) }),
-    })
-    if (res.ok) {
-      setCookieUpdatedAt(new Date().toISOString())
-      setCookieSaveMsg(`已保存 ${cookiePool.length} 个 Cookie`)
-    } else { setCookieSaveMsg('保存失败') }
-    setCookieSaving(false)
-  }
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -722,19 +640,7 @@ export default function CrawlLogPage() {
                     ) : (
                       <span className="text-xs text-gray-400">尚无记录</span>
                     )}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-400 whitespace-nowrap">
-                        {cookiePool.length > 0
-                          ? `池中 ${cookiePool.length} 个 Cookie${cookieUpdatedAt ? ' · ' + formatCardDate(cookieUpdatedAt) : ''}`
-                          : 'Cookie 池未设置'}
-                      </span>
-                      <button
-                        onClick={() => { setShowCookieModal(true); setCookieSaveMsg('') }}
-                        className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-2 py-0.5 hover:border-blue-200 whitespace-nowrap"
-                      >
-                        管理 Cookie 池
-                      </button>
-                    </div>
+                    <span className="text-xs text-gray-400 whitespace-nowrap">Cookie 池管理已移至"分组任务"页</span>
                   </div>
                 </div>
                 {row2.indexPages ? (
@@ -971,99 +877,6 @@ export default function CrawlLogPage() {
             setExpandedStep(null)
           }}
         />
-      )}
-
-      {/* Cookie Update Modal */}
-      {showCookieModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCookieModal(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="font-semibold text-gray-900">Cookie 轮换池</h3>
-                <p className="text-xs text-gray-400 mt-0.5">每次定时抓取随机取一个账号的 Cookie</p>
-              </div>
-              <button onClick={() => setShowCookieModal(false)} className="text-gray-400 hover:text-gray-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              {/* Existing cookies list */}
-              {cookiePool.length > 0 && (
-                <div className="space-y-2">
-                  {cookiePool.map((entry, idx) => (
-                    <div key={idx} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
-                      <span className="text-xs font-medium text-gray-700 w-28 flex-shrink-0 truncate">{entry.name}</span>
-                      <span className="text-xs text-gray-400 font-mono flex-1 truncate">{entry.value.slice(0, 60)}…</span>
-                      <button
-                        onClick={() => setCookiePool(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-gray-300 hover:text-red-400 flex-shrink-0 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Add new cookie */}
-              <div className="border border-dashed border-gray-200 rounded-lg p-4 space-y-3">
-                <p className="text-xs font-medium text-gray-600">添加新账号 Cookie</p>
-                <input
-                  type="text"
-                  value={newCookieName}
-                  onChange={e => setNewCookieName(e.target.value)}
-                  placeholder={nextCookieName()}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-                <textarea
-                  value={newCookieInput}
-                  onChange={e => { setNewCookieInput(e.target.value); setCookieSaveMsg('') }}
-                  placeholder={"从 Chrome DevTools → Application → Cookies 全选复制粘贴到这里\n（每行一个 cookie，Tab 分隔格式自动识别）"}
-                  rows={7}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400 font-mono resize-none"
-                />
-                {cookieSaveMsg && (
-                  <p className={`text-xs ${cookieSaveMsg.includes('失败') || cookieSaveMsg.includes('重复') || cookieSaveMsg.includes('未识别') ? 'text-red-500' : 'text-green-600'}`}>
-                    {cookieSaveMsg}
-                  </p>
-                )}
-                <button
-                  onClick={() => {
-                    const value = parseBlockToCookieString(newCookieInput)
-                    if (!value) { setCookieSaveMsg('未识别到有效 Cookie，请检查格式'); return }
-                    if (cookiePool.some(e => e.value === value)) { setCookieSaveMsg('该 Cookie 已存在，请勿重复添加'); return }
-                    const name = newCookieName.trim() || nextCookieName()
-                    setCookiePool(prev => [...prev, { name, value }])
-                    setNewCookieName(''); setNewCookieInput(''); setCookieSaveMsg('')
-                  }}
-                  disabled={!newCookieInput.trim()}
-                  className="w-full py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 disabled:opacity-40 transition-colors"
-                >
-                  添加到列表
-                </button>
-              </div>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
-              <button onClick={() => setShowCookieModal(false)}
-                className="flex-1 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50">
-                取消
-              </button>
-              <button
-                onClick={saveCookie}
-                disabled={cookieSaving}
-                className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40"
-              >
-                {cookieSaving ? '保存中…' : `保存（${cookiePool.length} 个）`}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Rules Modal */}

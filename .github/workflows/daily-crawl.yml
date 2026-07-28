@@ -12,11 +12,6 @@ on:
         description: '单站域名（留空=全部站点，例如 y8l.com）'
         required: false
         default: ''
-      force_baidu_pool:
-        description: '仅 index-pages：强制用手动 Cookie 池而非 Playwright 自动获取（诊断用）'
-        type: boolean
-        required: false
-        default: false
   schedule:
     - cron: '30 15 * * *'  # 23:30 MYT (target ~00:30 MYT after ~1h queue) — keywords
     - cron: '30 16 * * *'  # 00:30 MYT (target ~01:30 MYT after ~1h queue) — weight
@@ -143,14 +138,14 @@ jobs:
           echo "Running step: $STEP (group ${{ matrix.group }}/${{ needs.setup.outputs.total }})"
 
       - name: Cache Playwright browsers
-        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title' || steps.vars.outputs.step == 'index-pages'
+        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright Chromium
-        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title' || steps.vars.outputs.step == 'index-pages'
+        if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title'
         run: npx playwright install --with-deps chromium
 
       - name: Run crawl
@@ -158,7 +153,6 @@ jobs:
           SITE_INPUT: ${{ github.event.inputs.site }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          FORCE_BAIDU_COOKIE_POOL: ${{ github.event.inputs.force_baidu_pool }}
         run: |
           SITE_ARG=""
           if [ -n "$SITE_INPUT" ]; then

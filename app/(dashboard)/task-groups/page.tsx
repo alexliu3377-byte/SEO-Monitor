@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useUser } from '@/lib/user-context'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
+import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -1948,18 +1949,21 @@ export default function TaskGroupsPage() {
           <h1 className="text-2xl font-bold text-gray-900">分组任务</h1>
           <p className="text-gray-400 text-sm mt-0.5">按分组认领今日关键词</p>
         </div>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            <button onClick={openCreateModal} className="btn-primary">
-              <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              新增分组
-            </button>
-            {activeGroup && <button onClick={openEditModal} className="inline-flex items-center px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-600 transition-colors">编辑分组</button>}
-            {activeGroup && <button onClick={() => setDeleteId(activeGroup.id)} className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md border border-red-300 text-red-400 hover:bg-red-50 transition-colors">删除分组</button>}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <BaiduCookiePoolManager />
+          {canManage && (
+            <div className="flex items-center gap-2">
+              <button onClick={openCreateModal} className="btn-primary">
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                新增分组
+              </button>
+              {activeGroup && <button onClick={openEditModal} className="inline-flex items-center px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-600 transition-colors">编辑分组</button>}
+              {activeGroup && <button onClick={() => setDeleteId(activeGroup.id)} className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md border border-red-300 text-red-400 hover:bg-red-50 transition-colors">删除分组</button>}
+            </div>
+          )}
+        </div>
       </div>
 
       {groups.length === 0 ? (

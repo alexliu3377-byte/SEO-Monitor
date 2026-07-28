@@ -9,7 +9,7 @@ import {
   type BaiduIndexedPage,
   type BaiduIndexFailReason,
 } from '../lib/crawler'
-import { createAizhanBrowserSession, fetchRankChangesViaBrowser, mintBaiduCookie } from '../lib/crawler-browser'
+import { createAizhanBrowserSession, fetchRankChangesViaBrowser } from '../lib/crawler-browser'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
@@ -1098,39 +1098,25 @@ async function main() {
   if (step === 'index-pages') {
     const aid = await activityStart(supabase, { ...logBase, step: 'index-pages' })
     console.log(`  ⏱ index-pages job 启动 ${new Date().toISOString()}`)
-    // Mint a fresh anonymous cookie via a real headless browser visit first —
-    // this replaces the need to manually paste cookies into the Cookie 池.
-    // Falls back to the manual pool only if minting itself throws (e.g. no
-    // Chromium available); an empty/weak mint isn't distinguishable here so
-    // the pool stays as a safety net rather than being removed outright.
-    // FORCE_BAIDU_COOKIE_POOL=true skips the mint entirely — for A/B comparing
-    // Playwright-minted cookies against the manual pool (2026-07-27 diagnostic).
+    // 2026-07-27 A/B test: a Playwright-minted anonymous cookie was tried here and
+    // measured against the manual pool on real GitHub Actions runs — the manual
+    // pool won clearly (aged cookies with real browsing history behind them get
+    // through Baidu's anti-bot far more often than a cookie that's seconds old),
+    // so minting was removed. See project_baidu_index_cookie memory for the data.
     let baiduCookie: string | undefined
-    if (process.env.FORCE_BAIDU_COOKIE_POOL === 'true') {
-      console.log(`  🔧 FORCE_BAIDU_COOKIE_POOL=true，跳过 Playwright，强制走手动 Cookie 池`)
-    } else {
+    const { data: cookieSetting } = await supabase.from('app_settings').select('value').eq('key', 'baidu_index_cookie').maybeSingle()
+    const rawCookie = (cookieSetting as { value: string } | null)?.value ?? ''
+    if (rawCookie) {
       try {
-        baiduCookie = await mintBaiduCookie()
-        console.log(`  🍪 已通过 Playwright 自动获取百度 cookie`)
-      } catch (e) {
-        console.log(`  ⚠ Playwright 获取百度 cookie 失败，回退到手动 Cookie 池: ${e instanceof Error ? e.message : e}`)
-      }
-    }
-    if (!baiduCookie) {
-      const { data: cookieSetting } = await supabase.from('app_settings').select('value').eq('key', 'baidu_index_cookie').maybeSingle()
-      const rawCookie = (cookieSetting as { value: string } | null)?.value ?? ''
-      if (rawCookie) {
-        try {
-          const pool = JSON.parse(rawCookie)
-          if (Array.isArray(pool) && pool.length > 0) {
-            const item = pool[Math.floor(Math.random() * pool.length)]
-            baiduCookie = typeof item === 'string' ? item : (item as { value: string }).value
-          } else {
-            baiduCookie = rawCookie
-          }
-        } catch {
+        const pool = JSON.parse(rawCookie)
+        if (Array.isArray(pool) && pool.length > 0) {
+          const item = pool[Math.floor(Math.random() * pool.length)]
+          baiduCookie = typeof item === 'string' ? item : (item as { value: string }).value
+        } else {
           baiduCookie = rawCookie
         }
+      } catch {
+        baiduCookie = rawCookie
       }
     }
     const supplementDomain = process.env.SUPPLEMENT_DOMAIN

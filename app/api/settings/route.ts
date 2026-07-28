@@ -25,10 +25,9 @@ export async function POST(req: Request) {
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // baidu_index_cookie 池由全体登录用户共同维护（不限管理员），故无角色限制
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!profile || profile.role === 'normal') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
   const key = body.key as SettingKey
