@@ -830,6 +830,7 @@ export async function fetchBaiduIndexPages(
 
   // If user provided cookies, use them directly; otherwise pre-fetch Baidu homepage to acquire session cookies
   let sessionCookie = initialCookie?.trim() ?? ''
+  let cookieSource: 'caller' | 'auto-fallback' = sessionCookie ? 'caller' : 'auto-fallback'
   if (!sessionCookie) {
     try {
       const homeRes = await fetch('https://www.baidu.com/', {
@@ -840,6 +841,9 @@ export async function fetchBaiduIndexPages(
       sessionCookie = setCookies.map((c: string) => c.split(';')[0]).join('; ')
     } catch { /* ignore — proceed without cookie */ }
   }
+  // Diagnostic (2026-07-27): fingerprint only (name count + total length), never the raw cookie value.
+  const cookieNames = sessionCookie ? sessionCookie.split(';').map((c) => c.trim().split('=')[0]).join(',') : '(none)'
+  console.log(`    [${domain}] cookie来源=${cookieSource} 字段数=${sessionCookie ? sessionCookie.split(';').length : 0} 长度=${sessionCookie.length} names=${cookieNames}`)
 
   let failReason: BaiduIndexFailReason = null
   let consecutiveDupPages = 0
@@ -857,8 +861,13 @@ export async function fetchBaiduIndexPages(
       const headers: Record<string, string> = { ...getBrowserHeaders(), Referer: referer }
       if (sessionCookie) headers['Cookie'] = sessionCookie
 
+      const fetchStartedAt = new Date().toISOString()
       const { ok, html, setCookies } = await fetchHtmlDecoded(currentUrl, headers)
-      if (!ok || !html) { failReason = 'http_error'; break }
+      if (!ok || !html) {
+        failReason = 'http_error'
+        console.log(`    [${domain}] 第${page}页 ${fetchStartedAt} ✗ http_error（ok=${ok} htmlLen=${html?.length ?? 0}）`)
+        break
+      }
 
       // Update session cookie from each page's Set-Cookie (Baidu rotates anti-bot tokens per request)
       if (setCookies.length > 0) {
@@ -866,8 +875,16 @@ export async function fetchBaiduIndexPages(
         sessionCookie = sessionCookie ? `${sessionCookie}; ${newPairs}` : newPairs
       }
 
-      if (html.includes('百度安全验证') || html.includes('verify')) { failReason = 'captcha'; break }
-      if (!html.includes('content_left')) { failReason = 'no_content'; break }
+      if (html.includes('百度安全验证') || html.includes('verify')) {
+        failReason = 'captcha'
+        console.log(`    [${domain}] 第${page}页 ${fetchStartedAt} ✗ captcha拦截`)
+        break
+      }
+      if (!html.includes('content_left')) {
+        failReason = 'no_content'
+        console.log(`    [${domain}] 第${page}页 ${fetchStartedAt} ✗ no_content（无content_left，htmlLen=${html.length}）`)
+        break
+      }
 
       const $ = cheerio.load(html)
       let rawCount = 0   // how many results Baidu actually returned (before dedup)
@@ -927,12 +944,17 @@ export async function fetchBaiduIndexPages(
         pageCount++
       })
 
+      console.log(`    [${domain}] 第${page}页 ${fetchStartedAt} ✓ raw=${rawCount} new=${pageCount}`)
+
       if (rawCount === 0) break  // Baidu returned nothing — truly end of results
 
       // Stop immediately if this page's URLs are all contained in the previous page's URLs —
       // Baidu is repeating the same last page (end-of-results cycling behaviour)
       if (thisPageUrlSet.size > 0 && prevPageUrlSet.size > 0) {
-        if (Array.from(thisPageUrlSet).every(u => prevPageUrlSet.has(u))) break
+        if (Array.from(thisPageUrlSet).every(u => prevPageUrlSet.has(u))) {
+          console.log(`    [${domain}] 第${page}页与上一页URL完全重复，停止翻页`)
+          break
+        }
       }
 
       if (pageCount === 0) {

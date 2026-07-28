@@ -1097,17 +1097,24 @@ async function main() {
   }
   if (step === 'index-pages') {
     const aid = await activityStart(supabase, { ...logBase, step: 'index-pages' })
+    console.log(`  ⏱ index-pages job 启动 ${new Date().toISOString()}`)
     // Mint a fresh anonymous cookie via a real headless browser visit first —
     // this replaces the need to manually paste cookies into the Cookie 池.
     // Falls back to the manual pool only if minting itself throws (e.g. no
     // Chromium available); an empty/weak mint isn't distinguishable here so
     // the pool stays as a safety net rather than being removed outright.
+    // FORCE_BAIDU_COOKIE_POOL=true skips the mint entirely — for A/B comparing
+    // Playwright-minted cookies against the manual pool (2026-07-27 diagnostic).
     let baiduCookie: string | undefined
-    try {
-      baiduCookie = await mintBaiduCookie()
-      console.log(`  🍪 已通过 Playwright 自动获取百度 cookie`)
-    } catch (e) {
-      console.log(`  ⚠ Playwright 获取百度 cookie 失败，回退到手动 Cookie 池: ${e instanceof Error ? e.message : e}`)
+    if (process.env.FORCE_BAIDU_COOKIE_POOL === 'true') {
+      console.log(`  🔧 FORCE_BAIDU_COOKIE_POOL=true，跳过 Playwright，强制走手动 Cookie 池`)
+    } else {
+      try {
+        baiduCookie = await mintBaiduCookie()
+        console.log(`  🍪 已通过 Playwright 自动获取百度 cookie`)
+      } catch (e) {
+        console.log(`  ⚠ Playwright 获取百度 cookie 失败，回退到手动 Cookie 池: ${e instanceof Error ? e.message : e}`)
+      }
     }
     if (!baiduCookie) {
       const { data: cookieSetting } = await supabase.from('app_settings').select('value').eq('key', 'baidu_index_cookie').maybeSingle()
