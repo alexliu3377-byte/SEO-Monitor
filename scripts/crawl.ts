@@ -768,17 +768,20 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       // built despite real keyword overlap existing (confirmed by direct
       // query). Batching (chunkArray + loop, merging results) instead of
       // truncating fixes this — matches the pattern already used for
-      // pageUrlVariants in the own-site-tracking section above. Keyword
-      // chunks stay at 500 (short strings); URL-bearing chunks use 150 to
-      // stay under the same ~16KB header limit that bit the URL-variant query.
+      // pageUrlVariants in the own-site-tracking section above. Every chunk
+      // here uses 150, not just the URL ones — CJK keywords get %XX-percent-
+      // encoded 3 bytes per character, so even 291 short keywords blew the
+      // ~16KB header limit in testing (2026-07-29); 150 keywords tops out
+      // around 7KB, safely under.
       const newIndexKwSet = new Set<string>()
       for (const chunk of chunkArray(Array.from(newIndexUrls), 150)) {
-        const { data: urlKwRows } = await supabase
+        const { data: urlKwRows, error: newIdxKwErr } = await supabase
           .from('raw_keywords')
           .select('keyword, source_url')
           .eq('site_id', site.id)
           .in('source_url', chunk)
           .gte('content_date', window60)
+        if (newIdxKwErr) console.error(`${prefix} raw_keywords(source_url) 查询失败: ${JSON.stringify(newIdxKwErr)}`)
         for (const r of (urlKwRows || []) as { keyword: string; source_url: string }[]) {
           newIndexKwSet.add(r.keyword)
         }
@@ -786,12 +789,13 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
 
       // 1.5. URL-based rank signals: cross-ref site_keyword_ranks.url with raw_keywords.source_url
       for (const chunk of chunkArray(Array.from(urlRankDataMap.keys()), 150)) {
-        const { data: urlKwMappings } = await supabase
+        const { data: urlKwMappings, error: urlRankKwErr } = await supabase
           .from('raw_keywords')
           .select('keyword, source_url')
           .eq('site_id', site.id)
           .in('source_url', chunk)
           .gte('content_date', window60)
+        if (urlRankKwErr) console.error(`${prefix} raw_keywords(source_url) 查询失败: ${JSON.stringify(urlRankKwErr)}`)
         for (const r of (urlKwMappings || []) as { keyword: string; source_url: string }[]) {
           const urlRank = urlRankDataMap.get(r.source_url)
           if (urlRank && (!rankMap.has(r.keyword) || rankMap.get(r.keyword)!.type !== 'rankup')) {
@@ -812,14 +816,15 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       // 4. Cross-ref with raw_keywords (last 60 days) — only include keywords with submission records
       type KwMeta = { content_type: string | null; content_date: string | null; source_url: string | null; count: number }
       const kwMetaMap = new Map<string, KwMeta>()
-      for (const chunk of chunkArray(Array.from(allSignalKws), 500)) {
-        const { data: rawKwRows } = await supabase
+      for (const chunk of chunkArray(Array.from(allSignalKws), 150)) {
+        const { data: rawKwRows, error: rawKwErr } = await supabase
           .from('raw_keywords')
           .select('keyword, content_type, content_date, source_url')
           .eq('site_id', site.id)
           .in('keyword', chunk)
           .gte('content_date', window60)
           .order('content_date', { ascending: false })
+        if (rawKwErr) console.error(`${prefix} raw_keywords(keyword) 查询失败: ${JSON.stringify(rawKwErr)}`)
         for (const r of (rawKwRows || []) as { keyword: string; content_type: string | null; content_date: string; source_url: string | null }[]) {
           if (!kwMetaMap.has(r.keyword)) {
             kwMetaMap.set(r.keyword, { content_type: r.content_type, content_date: r.content_date, source_url: r.source_url, count: 1 })
@@ -839,11 +844,12 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
 
       // 5. Search volumes
       const volMap = new Map<string, number>()
-      for (const chunk of chunkArray(trackedKws, 500)) {
+      for (const chunk of chunkArray(trackedKws, 150)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: volRows } = await (supabase.from('keyword_volume') as any)
+        const { data: volRows, error: volErr } = await (supabase.from('keyword_volume') as any)
           .select('keyword, volume')
           .in('keyword', chunk)
+        if (volErr) console.error(`${prefix} keyword_volume 查询失败: ${JSON.stringify(volErr)}`)
         for (const r of (volRows || []) as { keyword: string; volume: number }[]) volMap.set(r.keyword, r.volume)
       }
 
@@ -852,10 +858,11 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       const indexFirstSeenMap = new Map<string, string>() // url → first_seen_date
       for (const chunk of chunkArray(sourceUrls, 150)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: idxRows } = await (supabase.from('site_indexed_pages') as any)
+        const { data: idxRows, error: idxErr } = await (supabase.from('site_indexed_pages') as any)
           .select('url, first_seen_date')
           .eq('site_id', site.id)
           .in('url', chunk)
+        if (idxErr) console.error(`${prefix} site_indexed_pages 查询失败: ${JSON.stringify(idxErr)}`)
         for (const r of (idxRows || []) as { url: string; first_seen_date: string }[]) {
           if (r.first_seen_date) indexFirstSeenMap.set(r.url, r.first_seen_date)
         }

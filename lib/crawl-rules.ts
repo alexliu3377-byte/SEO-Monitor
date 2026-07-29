@@ -127,7 +127,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同）' },
       { label: '竞品信号来源', text: '① 排名信号（by keyword + by URL）：site_keyword_ranks 表中 stat_date=today + platform=mobile 的当日涨跌词；还通过 site_keyword_ranks.url 与 raw_keywords.source_url 交叉匹配（URL 优先级高，能捕获 keyword 名称不一致的案例）；② 收录信号：site_indexed_pages 表中 first_seen_date=today 的新收录 URL，通过 source_url 反查 raw_keywords 得到关键词' },
       { label: '竞品过滤条件', text: '信号词必须同时存在于 raw_keywords（60天内有提交记录）才会被记录；无提交记录的信号词跳过' },
-      { label: '匹配查询分批大小', text: '信号词/信号URL 与 raw_keywords 交叉匹配时按批查询，关键词每批500个、URL每批150个（2026-07-29 修复：此前固定 .slice(0,500) 截断成信号词/URL列表的前500个就不再查，某站点单日信号词可达2791个，导致约82%信号词根本没被拿去比对，competitor_tracking_records 表因此自建表以来一直是空的、规则中心8条规则成功/失败次数全部为0；现改成分批查询覆盖全部信号词，不再截断）' },
+      { label: '匹配查询分批大小', text: '信号词/信号URL 与 raw_keywords 交叉匹配时按批查询，关键词和URL都是每批150个（2026-07-29 修复：此前固定 .slice(0,500) 截断成信号词/URL列表的前500个就不再查，某站点单日信号词可达2791个，导致约82%信号词根本没被拿去比对，competitor_tracking_records 表因此自建表以来一直是空的、规则中心8条规则成功/失败次数全部为0；改成分批查询后发现中文关键词 URL 编码后体积膨胀，500个关键词一批仍会超过约16KB的HTTP header上限，实测150个安全，故关键词和URL统一用150一批）' },
       { label: '竞品成效判断', text: '有效：rank_type=rankup 或 source_url 对应页面今日新收录；追踪中：rankdown 信号；无效：discovery_date < today-60 且 effectiveness 仍为"追踪中"（由本步骤自动更新）' },
       { label: '竞品规则匹配', text: '规则 #1（跌后更新观察）：rankdown 词 + 近 7 天内有提交记录 → 标记 rule_id；规则 #2（批量下拉词更新）：同日期相同 4 字前缀 ≥3 个词有信号 → 标记 rule_id' },
       { label: '竞品写入表', text: 'competitor_tracking_records（按 site_id+keyword+discovery_date 唯一，upsert；同时将 >60 天的"追踪中"记录更新为"无效"；永久保留）' },
