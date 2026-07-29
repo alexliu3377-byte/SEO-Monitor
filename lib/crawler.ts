@@ -105,7 +105,7 @@ export async function fetchHtmlList(
 
     let date: string | undefined
     if (dateSelector) {
-      let container = $(el).closest('li, article, .item, tr')
+      let container = $(el).closest('li, article, .item, tr, p, dd')
       if (!container.length) container = $(el).closest('div').parent()
       const dateEl = container.find(dateSelector).first()
       if (dateEl.length) date = dateEl.text().trim()
@@ -214,14 +214,14 @@ export async function fetchHtmlListPages(
           const defaultHref = $(el).attr('href') || $(el).closest('a').attr('href') || $(el).find('a').first().attr('href') || ''
           let href = defaultHref
           if (source.urlSelector) {
-            let container = $(el).closest('li, article, .item, tr')
+            let container = $(el).closest('li, article, .item, tr, p, dd')
             if (!container.length) container = $(el).closest('div').parent()
             href = container.find(source.urlSelector).first().attr('href') || ''
           }
           const fullUrl = href.startsWith('http') ? href : (href ? new URL(href, currentUrl!).href : '')
           let date: string | undefined
           if (source.dateSelector) {
-            let container = $(el).closest('li, article, .item, tr')
+            let container = $(el).closest('li, article, .item, tr, p, dd')
             if (!container.length) container = $(el).closest('div').parent()
             const dateEl = container.find(source.dateSelector).first()
             if (dateEl.length) date = dateEl.text().trim()
@@ -289,7 +289,7 @@ export async function fetchJsonHtmlPages(
         const title = $(el).text().trim()
         let href = $(el).attr('href') || ''
         if (urlSelector) {
-          let container = $(el).closest('li, article, .item, tr')
+          let container = $(el).closest('li, article, .item, tr, p, dd')
           if (!container.length) container = $(el).closest('div').parent()
           href = container.find(urlSelector).first().attr('href') || href
         }
@@ -297,7 +297,7 @@ export async function fetchJsonHtmlPages(
 
         let date: string | undefined
         if (dateSelector) {
-          let container = $(el).closest('li, article, .item, tr')
+          let container = $(el).closest('li, article, .item, tr, p, dd')
           if (!container.length) container = $(el).closest('div').parent()
           const dateEl = container.find(dateSelector).first()
           if (dateEl.length) date = dateEl.text().trim()
