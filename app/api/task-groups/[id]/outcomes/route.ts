@@ -107,6 +107,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
+  // Fetch every matched rank keyword (not just the single "best" one on
+  // site_tracking_records), so 分组报告 can show all of them. The table
+  // accumulates one row set per (claim_id, record_date) every tracking run, so
+  // key by "claimId|recordDate" — matching each dedupedRow's own kept
+  // record_date — otherwise older days' matches for the same claim would leak
+  // into the current display.
+  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
+  const rankMatchesMap = new Map<string, RankMatch[]>()
+  for (let i = 0; i < claimIds.length; i += BATCH) {
+    const { data: matchRows } = await service
+      .from('site_tracking_rank_matches')
+      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
+      .in('claim_id', claimIds.slice(i, i + BATCH))
+      .order('rank_position', { ascending: true, nullsFirst: false })
+    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
+      const key = `${m.claim_id}|${m.record_date}`
+      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
+      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
+    }
+  }
+
   let rows = dedupedRows.map(r => ({
     ...r,
     username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
@@ -115,6 +136,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       : null,
     env_excluded: badDates.has(r.record_date),
     experiment_group: expGroupMap.get(r.claim_id) ?? null,
+    rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
   }))
 
   // Post-fetch filters

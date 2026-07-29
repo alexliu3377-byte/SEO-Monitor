@@ -7,6 +7,27 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
   return chunks
 }
+
+// Strip a leading www./m. host label and a trailing slash so tracking can match
+// a claimed page_url against site_indexed_pages/site_keyword_ranks URLs even
+// when the subdomain/protocol/trailing-slash format differs. Mirrors
+// scripts/crawl.ts's bareUrl()/urlSubdomainVariants() — see that file for the
+// full rationale (2026-07-29).
+function bareUrl(url: string): string {
+  return url.replace(/^(https?:\/\/)?(www\.|m\.)?/i, '').replace(/\/$/, '')
+}
+function urlSubdomainVariants(url: string): string[] {
+  const bare = bareUrl(url)
+  const hosts = [bare, `www.${bare}`, `m.${bare}`]
+  const variants = new Set<string>()
+  for (const host of hosts) {
+    for (const proto of ['', 'http://', 'https://']) {
+      variants.add(`${proto}${host}`)
+      variants.add(`${proto}${host}/`)
+    }
+  }
+  return Array.from(variants)
+}
 import { createServiceClient } from '@/lib/supabase-server'
 import {
   fetchHtmlListPages,
@@ -773,34 +794,40 @@ export async function GET(request: Request) {
         const claims = (claimRows || []) as ClaimRow[]
 
         if (claims.length > 0) {
-          const pageUrls = Array.from(new Set(claims.filter(c => c.page_url).map(c => c.page_url!)))
+          const pageUrlVariants = Array.from(new Set(claims.filter(c => c.page_url).flatMap(c => urlSubdomainVariants(c.page_url!))))
 
           const indexMap = new Map<string, { first_seen_date: string; disappeared_date: string | null }>()
-          for (const chunk of chunkArray(pageUrls, 500)) {
+          for (const chunk of chunkArray(pageUrlVariants, 500)) {
             const { data: idxRows } = await supabase.from('site_indexed_pages')
               .select('url, first_seen_date, disappeared_date').in('url', chunk)
             for (const r of (idxRows || []) as { url: string; first_seen_date: string; disappeared_date: string | null }[]) {
-              indexMap.set(r.url, { first_seen_date: r.first_seen_date, disappeared_date: r.disappeared_date })
+              indexMap.set(bareUrl(r.url), { first_seen_date: r.first_seen_date, disappeared_date: r.disappeared_date })
             }
           }
 
           const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
-          for (const chunk of chunkArray(pageUrls, 500)) {
+          const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
+          for (const chunk of chunkArray(pageUrlVariants, 500)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const { data: rRows } = await (supabase.from('site_keyword_ranks') as any)
               .select('url, keyword, rank_position, prev_rank, volume, stat_date')
               .in('url', chunk).not('url', 'is', null).eq('platform', 'mobile')
               .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
             for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
-              if (!rankByUrlMap.has(r.url)) rankByUrlMap.set(r.url, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
+              const key = bareUrl(r.url)
+              if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
+              if (!rankMatchesByUrlMap.has(key)) rankMatchesByUrlMap.set(key, new Map())
+              const kwMap = rankMatchesByUrlMap.get(key)!
+              if (!kwMap.has(r.keyword)) kwMap.set(r.keyword, { rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume })
             }
           }
 
           const ownUpsertRows: Record<string, unknown>[] = []
+          const rankMatchRows: Record<string, unknown>[] = []
           for (const claim of claims) {
             const url = claim.page_url
-            const idx = url ? indexMap.get(url) : undefined
-            const rank = url ? rankByUrlMap.get(url) : undefined
+            const idx = url ? indexMap.get(bareUrl(url)) : undefined
+            const rank = url ? rankByUrlMap.get(bareUrl(url)) : undefined
             const is_indexed = !!idx && !idx.disappeared_date
             const submitDate = claim.submitted_at ? claim.submitted_at.slice(0, 10) : claim.claimed_date
             const daysSince = Math.max(0, Math.floor((new Date(today).getTime() - new Date(submitDate).getTime()) / 86400000))
@@ -822,12 +849,29 @@ export async function GET(request: Request) {
               rank_date: rank?.stat_date ?? null, effectiveness,
               updated_at: new Date().toISOString(),
             })
+
+            const matches = url ? rankMatchesByUrlMap.get(bareUrl(url)) : undefined
+            if (matches) {
+              for (const [keyword, m] of Array.from(matches.entries())) {
+                rankMatchRows.push({
+                  claim_id: claim.id, record_date: today, keyword,
+                  rank_position: m.rank_position, prev_rank_position: m.prev_rank,
+                  volume: m.volume ? Number(m.volume) : 0,
+                })
+              }
+            }
           }
 
           for (const chunk of chunkArray(ownUpsertRows, 500)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('site_tracking_records') as any).upsert(chunk, {
               onConflict: 'claim_id,record_date', ignoreDuplicates: false,
+            })
+          }
+          for (const chunk of chunkArray(rankMatchRows, 500)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (supabase.from('site_tracking_rank_matches') as any).upsert(chunk, {
+              onConflict: 'claim_id,record_date,keyword', ignoreDuplicates: false,
             })
           }
           ownRows = ownUpsertRows.length

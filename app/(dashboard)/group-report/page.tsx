@@ -75,6 +75,7 @@ interface OutcomeRow {
   effectiveness: string
   env_excluded?: boolean
   experiment_group?: 'control' | 'treatment' | null
+  rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_change' | 'rank_volume'
@@ -567,7 +568,6 @@ export default function GroupReportPage() {
                         </div>
                         <div className="divide-y divide-gray-50 min-w-[962px]">
                           {pagedO.map(row => {
-                            const rc = row.rank_change
                             return (
                               <div key={row.id} className={`grid ${OCOLS} gap-x-2 px-4 py-2.5 hover:bg-gray-50/60 transition-colors items-center`}>
                                 <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
@@ -590,22 +590,57 @@ export default function GroupReportPage() {
                                     ? <span className="text-sm text-blue-600">{row.index_first_seen ? row.index_first_seen.slice(5).replace('-', '/') : '已收录'}</span>
                                     : <span className="text-sm text-red-400">未收录</span>}
                                 </div>
-                                <div className="flex items-center justify-center gap-1.5">
-                                  {row.rank_position != null
-                                    ? <span className="text-sm text-gray-700">第{row.rank_position}名</span>
-                                    : <span className="text-sm text-gray-300">—</span>}
-                                  {rc != null && rc !== 0 && (
-                                    <span className={`text-xs font-semibold tabular-nums ${rc > 0 ? 'text-green-600' : 'text-red-400'}`}>
-                                      {rc > 0 ? `+${rc}` : `${rc}`}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="min-w-0">
-                                  {row.rank_keyword
-                                    ? <div className="text-sm text-gray-700 truncate" title={row.rank_keyword}>{row.rank_keyword}</div>
-                                    : <span className="text-sm text-gray-300">—</span>}
-                                </div>
-                                <div className="text-sm text-gray-500 tabular-nums text-center">{row.rank_volume ? fmtVol(row.rank_volume) : '—'}</div>
+                                {(() => {
+                                  // rank_matches holds every 爱站 keyword matched to this claim's page_url
+                                  // (not just the single "best" one on the row itself) — show them all,
+                                  // stacked, per the user's request. Falls back to the single scalar
+                                  // fields for rows predating this table / with no matches.
+                                  const matches = row.rank_matches && row.rank_matches.length > 0
+                                    ? row.rank_matches
+                                    : (row.rank_keyword || row.rank_position != null)
+                                      ? [{ keyword: row.rank_keyword, rank_position: row.rank_position, prev_rank_position: row.prev_rank_position, volume: row.rank_volume }]
+                                      : []
+                                  if (matches.length === 0) {
+                                    return (
+                                      <>
+                                        <div className="flex items-center justify-center"><span className="text-sm text-gray-300">—</span></div>
+                                        <div className="min-w-0"><span className="text-sm text-gray-300">—</span></div>
+                                        <div className="text-sm text-gray-300 text-center">—</div>
+                                      </>
+                                    )
+                                  }
+                                  return (
+                                    <>
+                                      <div className="flex flex-col gap-1">
+                                        {matches.map((m, i) => {
+                                          const mc = (m.rank_position != null && m.prev_rank_position != null) ? m.prev_rank_position - m.rank_position : null
+                                          return (
+                                            <div key={i} className="flex items-center justify-center gap-1.5">
+                                              {m.rank_position != null
+                                                ? <span className="text-sm text-gray-700">第{m.rank_position}名</span>
+                                                : <span className="text-sm text-gray-300">—</span>}
+                                              {mc != null && mc !== 0 && (
+                                                <span className={`text-xs font-semibold tabular-nums ${mc > 0 ? 'text-green-600' : 'text-red-400'}`}>
+                                                  {mc > 0 ? `+${mc}` : `${mc}`}
+                                                </span>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                      <div className="flex flex-col gap-1 min-w-0">
+                                        {matches.map((m, i) => (
+                                          <div key={i} className="text-sm text-gray-700 truncate" title={m.keyword ?? ''}>{m.keyword ?? '—'}</div>
+                                        ))}
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        {matches.map((m, i) => (
+                                          <div key={i} className="text-sm text-gray-500 tabular-nums text-center">{m.volume ? fmtVol(m.volume) : '—'}</div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )
+                                })()}
                                 <div className="flex justify-center">
                                   {row.effectiveness === '获取排名' && <span className="text-xs bg-green-50 text-green-600 border border-green-200 px-1.5 py-0.5 rounded-full">获取排名</span>}
                                   {row.effectiveness === '获取收录' && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded-full">获取收录</span>}

@@ -133,7 +133,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '自己站点追踪对象', text: '全部分组中 status=submitted + page_url 已填写 + claimed_date >= 90天内 的 member_claimed_keywords 记录' },
       { label: '自己站点信号来源', text: '① 收录信号：site_indexed_pages 表 by URL（page_url）→ is_indexed / index_first_seen / index_disappeared；② 排名信号：site_keyword_ranks 表 by URL（platform=mobile，取最新 stat_date + 最佳 rank_position）→ rank_keyword / rank_position / prev_rank；匹配前双方 URL 都去掉开头的 www./m. 子域名再比较（2026-07-29 加入：组员提交 page_url 时常漏填"m."，而收录/排名数据抓的多是移动端 m. 子域名，字符串精确匹配会漏判为"未收录"）' },
       { label: '自己站点成效判断', text: '获取排名：rank_position 不为空；获取收录：已收录（is_indexed=true）但 rank_position 为空；追踪中：未收录且提交未满 90 天；无效：提交已超过 90 天且仍未获取收录/排名' },
-      { label: '自己站点写入表', text: 'site_tracking_records（按 claim_id+record_date 唯一，每日 upsert 一行，积累历史曲线；永久保留）' },
+      { label: '自己站点写入表', text: 'site_tracking_records（按 claim_id+record_date 唯一，每日 upsert 一行，积累历史曲线；永久保留）；site_tracking_rank_matches（按 claim_id+record_date+keyword 唯一，2026-07-29 加入：同一 page_url 在 site_keyword_ranks 里命中多个不同排名词时，全部匹配都写入本表供成效追踪页面展示，不像 site_tracking_records 只保留最佳一条；永久保留）' },
     ],
   },
   {
@@ -185,6 +185,7 @@ export const RETENTION = {
   site_keyword_ranks: '永久保留',
   competitor_tracking_records: '永久保留',
   site_tracking_records: '永久保留',
+  site_tracking_rank_matches: '永久保留',
   activity_log: '7天（按 logged_at）',
   activity_site_log: '7天（随 activity_log 级联删除）',
 }

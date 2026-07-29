@@ -973,7 +973,16 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
         }
       }
 
+      // rankByUrlMap: single best match per URL (latest date, best rank_position) —
+      // feeds site_tracking_records' scalar rank_* columns, which effectiveness/
+      // rule-discovery/rule-stats depend on. Left exactly as before.
+      // rankMatchesByUrlMap: every DISTINCT keyword matched per URL (deduped by
+      // keyword, keeping the first/best occurrence per the same sort order —
+      // a keyword can otherwise appear many times across positions/dates) —
+      // feeds the separate site_tracking_rank_matches table so 分组报告 can show
+      // all of them, without touching the scalar columns' existing semantics.
       const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
+      const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
       for (const chunk of chunkArray(pageUrlVariants, 500)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: rRows } = await (supabase.from('site_keyword_ranks') as any)
@@ -983,10 +992,14 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
         for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
           const key = bareUrl(r.url)
           if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
+          if (!rankMatchesByUrlMap.has(key)) rankMatchesByUrlMap.set(key, new Map())
+          const kwMap = rankMatchesByUrlMap.get(key)!
+          if (!kwMap.has(r.keyword)) kwMap.set(r.keyword, { rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume })
         }
       }
 
       const ownUpsertRows: Record<string, unknown>[] = []
+      const rankMatchRows: Record<string, unknown>[] = []
       for (const claim of claims) {
         const url = claim.page_url
         const idx = url ? indexMap.get(bareUrl(url)) : undefined
@@ -1012,6 +1025,19 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
           rank_date: rank?.stat_date ?? null, effectiveness,
           updated_at: new Date().toISOString(),
         })
+
+        // 分组报告用：这个 URL 匹配到的全部排名词（不只是上面那一个"最佳"的），
+        // 写进独立的 site_tracking_rank_matches 表，不影响 site_tracking_records 的语义
+        const matches = url ? rankMatchesByUrlMap.get(bareUrl(url)) : undefined
+        if (matches) {
+          for (const [keyword, m] of Array.from(matches.entries())) {
+            rankMatchRows.push({
+              claim_id: claim.id, record_date: today, keyword,
+              rank_position: m.rank_position, prev_rank_position: m.prev_rank,
+              volume: m.volume ? Number(m.volume) : 0,
+            })
+          }
+        }
       }
 
       for (const chunk of chunkArray(ownUpsertRows, 500)) {
@@ -1020,8 +1046,14 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
           onConflict: 'claim_id,record_date', ignoreDuplicates: false,
         })
       }
+      for (const chunk of chunkArray(rankMatchRows, 500)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase.from('site_tracking_rank_matches') as any).upsert(chunk, {
+          onConflict: 'claim_id,record_date,keyword', ignoreDuplicates: false,
+        })
+      }
       ownRows = ownUpsertRows.length
-      console.log(`  [自己站点追踪] ${claims.length} 条记录写入完成`)
+      console.log(`  [自己站点追踪] ${claims.length} 条记录写入完成，${rankMatchRows.length} 条排名词匹配`)
     } else {
       console.log('  [自己站点追踪] 无活跃提交记录，跳过')
     }
