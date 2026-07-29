@@ -634,30 +634,32 @@ export async function GET(request: Request) {
           // day (verified 2026-07-29: one site had 2791) — `.slice(0, 500)`
           // silently dropped everything past the first 500, which is why
           // competitor_tracking_records has been empty since this feature was
-          // built despite real keyword overlap existing. Batching instead of
-          // truncating fixes it. Every chunk here uses 150, not just the URL
-          // ones — CJK keywords get %XX-percent-encoded 3 bytes per character,
-          // so even 291 short keywords blew the ~16KB header limit in testing
-          // (2026-07-29); 150 keywords tops out around 7KB, safely under.
+          // built despite real keyword overlap existing. Chunked `.in()`
+          // batching (even at 150/batch) turned out to still fail
+          // unpredictably under many rapid consecutive requests (verified
+          // 2026-07-29: every batch in a 19-batch run errored with the same
+          // ~16KB header overflow despite each individual request being well
+          // under that). Switched to Postgres RPC functions instead —
+          // parameters travel in the POST body, not the URL query string, so
+          // array size no longer matters at all. See migration
+          // add_competitor_tracking_match_rpcs.
           const newIndexKwSet = new Set<string>()
-          for (const chunk of chunkArray(Array.from(newIndexUrls), 150)) {
-            const { data: urlKwRows, error: newIdxKwErr } = await supabase.from('raw_keywords')
-              .select('keyword, source_url')
-              .eq('site_id', site.id)
-              .in('source_url', chunk)
-              .gte('content_date', window60)
-            if (newIdxKwErr) console.error(`[竞品追踪] raw_keywords(source_url) 查询失败: ${JSON.stringify(newIdxKwErr)}`)
+          if (newIndexUrls.size > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: urlKwRows, error: newIdxKwErr } = await (supabase as any).rpc('match_raw_keywords_by_url', {
+              p_site_id: site.id, p_urls: Array.from(newIndexUrls), p_since: window60,
+            })
+            if (newIdxKwErr) console.error(`[竞品追踪] match_raw_keywords_by_url 查询失败: ${JSON.stringify(newIdxKwErr)}`)
             for (const r of (urlKwRows || []) as { keyword: string; source_url: string }[]) newIndexKwSet.add(r.keyword)
           }
 
           // 1.5. URL-based rank signals: cross-ref site_keyword_ranks.url with raw_keywords.source_url
-          for (const chunk of chunkArray(Array.from(urlRankDataMap.keys()), 150)) {
-            const { data: urlKwMappings, error: urlRankKwErr } = await supabase.from('raw_keywords')
-              .select('keyword, source_url')
-              .eq('site_id', site.id)
-              .in('source_url', chunk)
-              .gte('content_date', window60)
-            if (urlRankKwErr) console.error(`[竞品追踪] raw_keywords(source_url) 查询失败: ${JSON.stringify(urlRankKwErr)}`)
+          if (urlRankDataMap.size > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: urlKwMappings, error: urlRankKwErr } = await (supabase as any).rpc('match_raw_keywords_by_url', {
+              p_site_id: site.id, p_urls: Array.from(urlRankDataMap.keys()), p_since: window60,
+            })
+            if (urlRankKwErr) console.error(`[竞品追踪] match_raw_keywords_by_url 查询失败: ${JSON.stringify(urlRankKwErr)}`)
             for (const r of (urlKwMappings || []) as { keyword: string; source_url: string }[]) {
               const urlRank = urlRankDataMap.get(r.source_url)
               if (urlRank && (!rankMap.has(r.keyword) || rankMap.get(r.keyword)!.type !== 'rankup')) {
@@ -675,14 +677,12 @@ export async function GET(request: Request) {
 
           type KwMeta = { content_type: string | null; content_date: string | null; source_url: string | null; count: number }
           const kwMetaMap = new Map<string, KwMeta>()
-          for (const chunk of chunkArray(Array.from(allSignalKws), 150)) {
-            const { data: rawKwRows, error: rawKwErr } = await supabase.from('raw_keywords')
-              .select('keyword, content_type, content_date, source_url')
-              .eq('site_id', site.id)
-              .in('keyword', chunk)
-              .gte('content_date', window60)
-              .order('content_date', { ascending: false })
-            if (rawKwErr) console.error(`[竞品追踪] raw_keywords(keyword) 查询失败: ${JSON.stringify(rawKwErr)}`)
+          {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: rawKwRows, error: rawKwErr } = await (supabase as any).rpc('match_raw_keywords_by_keyword', {
+              p_site_id: site.id, p_keywords: Array.from(allSignalKws), p_since: window60,
+            })
+            if (rawKwErr) console.error(`[竞品追踪] match_raw_keywords_by_keyword 查询失败: ${JSON.stringify(rawKwErr)}`)
             for (const r of (rawKwRows || []) as { keyword: string; content_type: string | null; content_date: string; source_url: string | null }[]) {
               if (!kwMetaMap.has(r.keyword)) kwMetaMap.set(r.keyword, { content_type: r.content_type, content_date: r.content_date, source_url: r.source_url, count: 1 })
               else kwMetaMap.get(r.keyword)!.count++
@@ -696,21 +696,20 @@ export async function GET(request: Request) {
           }
 
           const volMap = new Map<string, number>()
-          for (const chunk of chunkArray(trackedKws, 150)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: volRows, error: volErr } = await (supabase.from('keyword_volume') as any)
-              .select('keyword, volume').in('keyword', chunk)
-            if (volErr) console.error(`[竞品追踪] keyword_volume 查询失败: ${JSON.stringify(volErr)}`)
+          {
+            const { data: volRows, error: volErr } = await (supabase as any).rpc('match_keyword_volume', { p_keywords: trackedKws })
+            if (volErr) console.error(`[竞品追踪] match_keyword_volume 查询失败: ${JSON.stringify(volErr)}`)
             for (const r of (volRows || []) as { keyword: string; volume: number }[]) volMap.set(r.keyword, r.volume)
           }
 
           const sourceUrls = trackedKws.map(kw => kwMetaMap.get(kw)?.source_url).filter((u): u is string => !!u)
           const indexFirstSeenMap = new Map<string, string>()
-          for (const chunk of chunkArray(sourceUrls, 150)) {
+          if (sourceUrls.length > 0) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: idxRows, error: idxErr } = await (supabase.from('site_indexed_pages') as any)
-              .select('url, first_seen_date').eq('site_id', site.id).in('url', chunk)
-            if (idxErr) console.error(`[竞品追踪] site_indexed_pages 查询失败: ${JSON.stringify(idxErr)}`)
+            const { data: idxRows, error: idxErr } = await (supabase as any).rpc('match_site_indexed_pages', {
+              p_site_id: site.id, p_urls: sourceUrls,
+            })
+            if (idxErr) console.error(`[竞品追踪] match_site_indexed_pages 查询失败: ${JSON.stringify(idxErr)}`)
             for (const r of (idxRows || []) as { url: string; first_seen_date: string }[]) {
               if (r.first_seen_date) indexFirstSeenMap.set(r.url, r.first_seen_date)
             }
