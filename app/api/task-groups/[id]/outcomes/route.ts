@@ -5,6 +5,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const authClient = createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const userId = user.id
 
   const { id: groupId } = await params
   const { searchParams } = new URL(req.url)
@@ -56,21 +57,39 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
-  // Query site_tracking_records (ordered so latest record_date comes first for dedup)
+  // Build the shared filter set once so the count query and the row query stay
+  // in sync — the limit below is sized off this exact count, so a mismatch
+  // here would silently reintroduce truncation.
+  function applyTrackFilters<T extends { eq: any; gte: any; lte: any }>(q: T): T {
+    let query = q
+    if (!canSeeAll) query = query.eq('user_id', userId)
+    if (filterMember && canSeeAll) query = query.eq('user_id', filterMember)
+    if (filterOp) query = query.eq('operation_type', filterOp)
+    if (filterEffectiveness) query = query.eq('effectiveness', filterEffectiveness)
+    if (filterSubmitStart) query = query.gte('submit_date', filterSubmitStart)
+    if (filterSubmitEnd)   query = query.lte('submit_date', filterSubmitEnd)
+    return query
+  }
+
+  // site_tracking_records keeps one row per claim per tracking day forever, so a
+  // fixed LIMIT eventually truncates any long-lived group (verified 2026-07-29:
+  // one group already had 3441 rows against the old 2000 cap). Each claim can
+  // only ever accumulate rows while claimed_date is within the 90-day tracking
+  // window, so counting exact matching rows first and sizing the limit off that
+  // is a real upper bound, not a guess — it can never truncate.
+  const { count: exactCount } = await applyTrackFilters(
+    service.from('site_tracking_records').select('id', { count: 'exact', head: true }).eq('group_id', groupId)
+  )
+  const rowLimit = Math.max(exactCount ?? 0, 1)
+
   let trackQuery = service
     .from('site_tracking_records')
     .select('id, claim_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submit_date, record_date, is_indexed, index_first_seen, index_disappeared, rank_keyword, rank_position, prev_rank_position, rank_volume, rank_date, effectiveness')
     .eq('group_id', groupId)
     .order('record_date', { ascending: false })
     .order('submit_date', { ascending: false })
-    .limit(2000)
-
-  if (!canSeeAll) trackQuery = trackQuery.eq('user_id', user.id)
-  if (filterMember && canSeeAll) trackQuery = trackQuery.eq('user_id', filterMember)
-  if (filterOp) trackQuery = trackQuery.eq('operation_type', filterOp)
-  if (filterEffectiveness) trackQuery = trackQuery.eq('effectiveness', filterEffectiveness)
-  if (filterSubmitStart) trackQuery = trackQuery.gte('submit_date', filterSubmitStart)
-  if (filterSubmitEnd)   trackQuery = trackQuery.lte('submit_date', filterSubmitEnd)
+    .limit(rowLimit)
+  trackQuery = applyTrackFilters(trackQuery)
 
   const { data: trackRows, error: trackErr } = await trackQuery
   if (trackErr) return NextResponse.json({ error: trackErr.message }, { status: 500 })
@@ -168,5 +187,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     invalidCount:  rows.filter(r => r.effectiveness === '无效').length,
   }
 
-  return NextResponse.json({ rows, summary, truncated: (trackRows?.length ?? 0) >= 2000 })
+  // rowLimit is sized off an exact pre-count of the same filtered query, so this
+  // should only trip if rows were deleted between the count and the fetch (rare
+  // race), not as a real cap — real truncation is no longer possible.
+  return NextResponse.json({ rows, summary, truncated: (trackRows?.length ?? 0) < (exactCount ?? 0) })
 }

@@ -416,7 +416,7 @@ export default function GroupReportPage() {
                 {outcomesTruncated && (
                   <div className="mx-4 mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
                     <span className="font-bold">⚠</span>
-                    数据已截断至前 2000 条记录。请使用筛选器缩小范围以查看完整数据。
+                    数据获取时发生变化（可能有记录被同时修改），请刷新页面重试。
                   </div>
                 )}
                 {outcomeSummary && (
