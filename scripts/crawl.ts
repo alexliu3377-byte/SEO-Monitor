@@ -759,13 +759,25 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
         .limit(500)
       for (const r of (newIdxRows || []) as { url: string }[]) newIndexUrls.add(r.url)
 
+      // A single site can easily have 1000s of distinct signal keywords/URLs on
+      // a given day (verified 2026-07-29: one site had 2791). `.in()` was
+      // previously capped with `.slice(0, 500)`, silently dropping everything
+      // past the first 500 — for a site with e.g. 2791 signal keywords, ~82%
+      // never even got checked against raw_keywords. This is why
+      // competitor_tracking_records has been empty since the feature was
+      // built despite real keyword overlap existing (confirmed by direct
+      // query). Batching (chunkArray + loop, merging results) instead of
+      // truncating fixes this — matches the pattern already used for
+      // pageUrlVariants in the own-site-tracking section above. Keyword
+      // chunks stay at 500 (short strings); URL-bearing chunks use 150 to
+      // stay under the same ~16KB header limit that bit the URL-variant query.
       const newIndexKwSet = new Set<string>()
-      if (newIndexUrls.size > 0) {
+      for (const chunk of chunkArray(Array.from(newIndexUrls), 150)) {
         const { data: urlKwRows } = await supabase
           .from('raw_keywords')
           .select('keyword, source_url')
           .eq('site_id', site.id)
-          .in('source_url', Array.from(newIndexUrls).slice(0, 500))
+          .in('source_url', chunk)
           .gte('content_date', window60)
         for (const r of (urlKwRows || []) as { keyword: string; source_url: string }[]) {
           newIndexKwSet.add(r.keyword)
@@ -773,12 +785,12 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       }
 
       // 1.5. URL-based rank signals: cross-ref site_keyword_ranks.url with raw_keywords.source_url
-      if (urlRankDataMap.size > 0) {
+      for (const chunk of chunkArray(Array.from(urlRankDataMap.keys()), 150)) {
         const { data: urlKwMappings } = await supabase
           .from('raw_keywords')
           .select('keyword, source_url')
           .eq('site_id', site.id)
-          .in('source_url', Array.from(urlRankDataMap.keys()).slice(0, 500))
+          .in('source_url', chunk)
           .gte('content_date', window60)
         for (const r of (urlKwMappings || []) as { keyword: string; source_url: string }[]) {
           const urlRank = urlRankDataMap.get(r.source_url)
@@ -798,20 +810,22 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       }
 
       // 4. Cross-ref with raw_keywords (last 60 days) — only include keywords with submission records
-      const { data: rawKwRows } = await supabase
-        .from('raw_keywords')
-        .select('keyword, content_type, content_date, source_url')
-        .eq('site_id', site.id)
-        .in('keyword', Array.from(allSignalKws).slice(0, 500))
-        .gte('content_date', window60)
-        .order('content_date', { ascending: false })
       type KwMeta = { content_type: string | null; content_date: string | null; source_url: string | null; count: number }
       const kwMetaMap = new Map<string, KwMeta>()
-      for (const r of (rawKwRows || []) as { keyword: string; content_type: string | null; content_date: string; source_url: string | null }[]) {
-        if (!kwMetaMap.has(r.keyword)) {
-          kwMetaMap.set(r.keyword, { content_type: r.content_type, content_date: r.content_date, source_url: r.source_url, count: 1 })
-        } else {
-          kwMetaMap.get(r.keyword)!.count++
+      for (const chunk of chunkArray(Array.from(allSignalKws), 500)) {
+        const { data: rawKwRows } = await supabase
+          .from('raw_keywords')
+          .select('keyword, content_type, content_date, source_url')
+          .eq('site_id', site.id)
+          .in('keyword', chunk)
+          .gte('content_date', window60)
+          .order('content_date', { ascending: false })
+        for (const r of (rawKwRows || []) as { keyword: string; content_type: string | null; content_date: string; source_url: string | null }[]) {
+          if (!kwMetaMap.has(r.keyword)) {
+            kwMetaMap.set(r.keyword, { content_type: r.content_type, content_date: r.content_date, source_url: r.source_url, count: 1 })
+          } else {
+            kwMetaMap.get(r.keyword)!.count++
+          }
         }
       }
       const trackedKws = Array.from(allSignalKws).filter(kw => kwMetaMap.has(kw))
@@ -824,21 +838,24 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       }
 
       // 5. Search volumes
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: volRows } = await (supabase.from('keyword_volume') as any)
-        .select('keyword, volume')
-        .in('keyword', trackedKws.slice(0, 500))
-      const volMap = new Map(((volRows || []) as { keyword: string; volume: number }[]).map(r => [r.keyword, r.volume]))
+      const volMap = new Map<string, number>()
+      for (const chunk of chunkArray(trackedKws, 500)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: volRows } = await (supabase.from('keyword_volume') as any)
+          .select('keyword, volume')
+          .in('keyword', chunk)
+        for (const r of (volRows || []) as { keyword: string; volume: number }[]) volMap.set(r.keyword, r.volume)
+      }
 
       // 6. Index first_seen_date for source_urls
       const sourceUrls = trackedKws.map(kw => kwMetaMap.get(kw)?.source_url).filter((u): u is string => !!u)
       const indexFirstSeenMap = new Map<string, string>() // url → first_seen_date
-      if (sourceUrls.length > 0) {
+      for (const chunk of chunkArray(sourceUrls, 150)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: idxRows } = await (supabase.from('site_indexed_pages') as any)
           .select('url, first_seen_date')
           .eq('site_id', site.id)
-          .in('url', sourceUrls.slice(0, 500))
+          .in('url', chunk)
         for (const r of (idxRows || []) as { url: string; first_seen_date: string }[]) {
           if (r.first_seen_date) indexFirstSeenMap.set(r.url, r.first_seen_date)
         }
