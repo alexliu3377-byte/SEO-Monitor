@@ -61,7 +61,7 @@ interface OutcomeRow {
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
 interface PilotStats { ctrlCount: number; trtCount: number; ctrlScore: number | null; trtScore: number | null; diff: number | null }
-type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_change' | 'rank_volume'
+type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume'
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
 type ReportTab = 'submissions' | 'outcomes'
@@ -546,7 +546,7 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400">关键词 → 最终词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">搜索量{oSortIcons('search_volume')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">收录</span>
-                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名{oSortIcons('rank_change')}</span>
+                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名{oSortIcons('rank_position')}</span>
                           <span className="text-[11px] font-medium text-gray-400">排名词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名量{oSortIcons('rank_volume')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成效</span>

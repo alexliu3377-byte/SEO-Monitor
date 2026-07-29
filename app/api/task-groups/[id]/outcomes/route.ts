@@ -129,21 +129,53 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
-  let rows = dedupedRows.map(r => ({
-    ...r,
-    // A page can't rank in search without being indexed — if site_keyword_ranks
-    // found a rank_position, it's indexed even when our own site_indexed_pages
-    // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
-    // overridden here at read time (2026-07-29), not at write time, so this
-    // self-heals for historical rows too without a backfill.
-    is_indexed: r.is_indexed || r.rank_position != null,
-    username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
-    rank_change: (r.rank_position != null && r.prev_rank_position != null)
-      ? r.prev_rank_position - r.rank_position
-      : null,
-    env_excluded: badDates.has(r.record_date),
-    experiment_group: expGroupMap.get(r.claim_id) ?? null,
-  }))
+  // Fetch every matched rank keyword for the full filtered set (not just the
+  // page being returned) — "排名"/"排名量" now sort by the best position and
+  // summed volume across ALL of a claim's matched keywords, not the single
+  // "best pick" scalar columns, so we need the whole picture before sorting.
+  // The same map is reused below to attach matches to the paginated response,
+  // so this isn't a second query on top of the per-page one.
+  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
+  const rankMatchesMap = new Map<string, RankMatch[]>()
+  for (let i = 0; i < claimIds.length; i += BATCH) {
+    const { data: matchRows } = await service
+      .from('site_tracking_rank_matches')
+      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
+      .in('claim_id', claimIds.slice(i, i + BATCH))
+      .order('rank_position', { ascending: true, nullsFirst: false })
+    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
+      const key = `${m.claim_id}|${m.record_date}`
+      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
+      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
+    }
+  }
+
+  let rows = dedupedRows.map(r => {
+    const matches = rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? []
+    const matchedPositions = matches.map(m => m.rank_position).filter((p): p is number => p != null)
+    // Best (lowest = highest-ranking) position across every matched keyword,
+    // falling back to the single scalar rank_position for rows predating this
+    // table. No rank at all sorts as worst regardless of direction.
+    const bestRankPosition = matchedPositions.length > 0 ? Math.min(...matchedPositions) : r.rank_position
+    // Sum of volume across every matched keyword, not just the one "best pick".
+    const totalRankVolume = matches.length > 0 ? matches.reduce((s, m) => s + (m.volume || 0), 0) : (r.rank_volume ?? 0)
+    return {
+      ...r,
+      // A page can't rank in search without being indexed — if site_keyword_ranks
+      // found a rank_position, it's indexed even when our own site_indexed_pages
+      // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
+      // overridden here at read time (2026-07-29), not at write time, so this
+      // self-heals for historical rows too without a backfill.
+      is_indexed: r.is_indexed || r.rank_position != null,
+      username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
+      rank_change: (r.rank_position != null && r.prev_rank_position != null)
+        ? r.prev_rank_position - r.rank_position
+        : null,
+      env_excluded: badDates.has(r.record_date),
+      experiment_group: expGroupMap.get(r.claim_id) ?? null,
+      bestRankPosition, totalRankVolume,
+    }
+  })
 
   // Post-fetch filters
   if (filterKw)              rows = rows.filter(r => r.keyword.toLowerCase().includes(filterKw) || (r.final_keyword ?? '').toLowerCase().includes(filterKw))
@@ -156,11 +188,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   rows.sort((a, b) => {
     switch (sortBy) {
       case 'search_volume': return dir * ((a.search_volume ?? 0) - (b.search_volume ?? 0))
-      case 'rank_change': {
-        const ra = a.rank_change ?? -9999; const rb = b.rank_change ?? -9999
+      case 'rank_position': {
+        // No rank (null) always sorts last, in either direction — it's worse
+        // than any real position, not just "low" or "high".
+        const ra = a.bestRankPosition; const rb = b.bestRankPosition
+        if (ra == null && rb == null) return 0
+        if (ra == null) return 1
+        if (rb == null) return -1
         return dir * (ra - rb)
       }
-      case 'rank_volume': return dir * ((a.rank_volume ?? 0) - (b.rank_volume ?? 0))
+      case 'rank_volume': return dir * (a.totalRankVolume - b.totalRankVolume)
       case 'record_date': return dir * a.record_date.localeCompare(b.record_date)
       default: return dir * (a.submit_date ?? '').localeCompare(b.submit_date ?? '')
     }
@@ -197,24 +234,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const totalRows = rows.length
   const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
 
-  // rank_matches is only fetched for the page actually being returned — with
-  // full history this table can have far more matches than fit on one page,
-  // and the other pages' matches would just be discarded client-side anyway.
-  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
-  const rankMatchesMap = new Map<string, RankMatch[]>()
-  const pagedClaimIds = pagedRows.map(r => r.claim_id)
-  for (let i = 0; i < pagedClaimIds.length; i += BATCH) {
-    const { data: matchRows } = await service
-      .from('site_tracking_rank_matches')
-      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
-      .in('claim_id', pagedClaimIds.slice(i, i + BATCH))
-      .order('rank_position', { ascending: true, nullsFirst: false })
-    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
-      const key = `${m.claim_id}|${m.record_date}`
-      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
-      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
-    }
-  }
+  // rankMatchesMap was already fetched for the full filtered set above (needed
+  // for sorting) — reuse it here instead of querying again.
   const pagedRowsWithMatches = pagedRows.map(r => ({
     ...r,
     rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
