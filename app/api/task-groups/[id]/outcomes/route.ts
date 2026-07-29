@@ -131,6 +131,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   let rows = dedupedRows.map(r => ({
     ...r,
+    // A page can't rank in search without being indexed — if site_keyword_ranks
+    // found a rank_position, it's indexed even when our own site_indexed_pages
+    // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
+    // overridden here at read time (2026-07-29), not at write time, so this
+    // self-heals for historical rows too without a backfill.
+    is_indexed: r.is_indexed || r.rank_position != null,
     username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
     rank_change: (r.rank_position != null && r.prev_rank_position != null)
       ? r.prev_rank_position - r.rank_position
