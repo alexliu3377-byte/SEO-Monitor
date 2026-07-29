@@ -203,6 +203,11 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
           return true
         })
 
+      // 日期解析失败（date_selector 没匹配到，或匹配到的文本认不出格式）不再静默处理——
+      // 写库时仍按 yesterday 填充（避免破坏下游一堆按 content_date 分组/统计的功能），
+      // 但这里统计出来，抓取日志里会显示这个站点这次有几条，方便定位选择器坏了的站点。
+      const nullDateCount = cleanedEntries.filter((e) => !e.content_date).length
+
       let newCount = 0
 
       if (cleanedEntries.length > 0) {
@@ -263,7 +268,8 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
 
       const isEmptyFetch = hasCrawlConfig && rawEntries.length === 0
       const warn = isEmptyFetch ? '  ⚠ 抓取为空，请检查URL/选择器' : ''
-      console.log(`${prefix} ✓  抓到=${String(rawEntries.length).padStart(4)}  新增=${String(newCount).padStart(4)}${warn}`)
+      const dateWarn = nullDateCount > 0 ? `  ⚠ ${nullDateCount}条日期解析失败` : ''
+      console.log(`${prefix} ✓  抓到=${String(rawEntries.length).padStart(4)}  新增=${String(newCount).padStart(4)}${warn}${dateWarn}`)
       if (hasCrawlConfig) {
         if (isEmptyFetch) {
           empty++
@@ -271,7 +277,8 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
         } else {
           ok++
           totalRows += newCount
-          if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新增${newCount}条` })
+          const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（按昨日填充，请检查日期CSS选择器）` : ''
+          if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新增${newCount}条${dateDetail}` })
         }
       } else {
         ok++

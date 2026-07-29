@@ -149,6 +149,10 @@ export async function GET(request: Request) {
               return true
             })
 
+          // 日期解析失败仍按 yesterday 填充写库（避免影响下游按 content_date 分组的功能），
+          // 但统计出来放进 activity_site_log 的 detail，方便定位选择器坏了的站点
+          const nullDateCount = cleanedEntries.filter((e) => !e.content_date).length
+
           let newCount = 0
 
           if (cleanedEntries.length > 0) {
@@ -257,7 +261,8 @@ export async function GET(request: Request) {
             } else {
               kwOk++
               kwRows += newCount
-              if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新词${newCount}条` })
+              const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（按昨日填充，请检查日期CSS选择器）` : ''
+              if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新词${newCount}条${dateDetail}` })
             }
           } else {
             if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: 'skip', detail: '无list_url配置' })

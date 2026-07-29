@@ -30,6 +30,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '写入表', text: 'raw_keywords（新词）/ competitor_kw_stats（app/game分类计数）' },
       { label: '清理', text: '每日关键词步骤结束后由 group0 执行：raw_keywords 30天，rank_changes 30天，competitor_kw_stats 10天' },
       { label: '静默失败风险', text: 'HTML fetch 返回空时不报错，只在 activity_log 标记 empty；选择器配置错误会导致持续为空' },
+      { label: '日期解析失败', text: '日期CSS选择器未匹配到内容、或匹配到的文本无法识别为日期时，content_date 仍按 yesterday（爬取目标日）填充写库（不存 NULL，避免影响近期榜单/竞品日收/热词雷达等十几处按 content_date 分组统计的下游功能）；但该站点当次解析失败的条数会统计出来，写进 activity_site_log 的 detail（"⚠N条日期解析失败（按昨日填充，请检查日期CSS选择器）"），在抓取日志页面站点明细里可见，用于定位选择器失效的站点' },
     ],
   },
   {
