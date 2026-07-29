@@ -2,6 +2,7 @@ export const maxDuration = 60
 
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { callGeminiJSON } from '@/lib/gemini'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -157,31 +158,8 @@ ${newCasesSummary}${ruleReviewSummary}
 
   // ── Layer 2: Gemini call (non-streaming JSON mode) ──────────────────────
 
-  const MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash']
-  let aiResult: { new_rule_drafts?: unknown[]; rule_review_drafts?: unknown[] } | null = null
-  let lastErr = ''
-
-  for (const model of MODELS) {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 2048, responseMimeType: 'application/json' },
-        }),
-      }
-    )
-    if (r.ok) {
-      const data = await r.json()
-      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-      try { aiResult = JSON.parse(text) } catch { lastErr = `JSON parse error: ${text.slice(0, 200)}` }
-      break
-    }
-    lastErr = await r.text()
-    if (r.status !== 429) break
-  }
+  type DiscoverResult = { new_rule_drafts?: unknown[]; rule_review_drafts?: unknown[] }
+  const { result: aiResult, error: lastErr } = await callGeminiJSON<DiscoverResult>(prompt)
 
   if (!aiResult) return NextResponse.json({ error: lastErr || 'Gemini call failed' }, { status: 500 })
 

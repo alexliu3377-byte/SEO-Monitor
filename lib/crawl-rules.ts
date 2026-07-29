@@ -145,7 +145,7 @@ export const CRAWL_RULES: RuleSection[] = [
     items: [
       { label: '触发方式', text: 'Vercel Cron（vercel.json："30 23 * * 6"），每周日 07:30 MYT（UTC 周六 23:30）自动 GET /api/rules/ai-discover（含 Bearer CRON_SECRET 鉴权）；也可由 admin/super 手动 POST 同一端点触发' },
       { label: 'Layer 1 SQL', text: '① 查询近90天 competitor_tracking_records 中 effectiveness=有效 且 rule_id IS NULL 的案例（最多300条）；② 查询近90天所有有 rule_id 的记录，计算各规则近30天 vs 历史成功率，找出下降超过20百分点且数据量充足的规则' },
-      { label: 'Layer 2 AI', text: 'Gemini（gemini-2.5-flash-lite，fallback to gemini-2.5-flash / gemini-2.0-flash）；仅将 Layer 1 的压缩摘要（按站点+月份分组，最多300条→50行摘要）传给 AI，而非原始数据库；responseMimeType=application/json 返回结构化 JSON' },
+      { label: 'Layer 2 AI', text: 'Gemini，模型列表见 lib/gemini.ts 的 callGeminiJSON（2026-07-29 因 gemini-2.5-flash-lite/gemini-2.5-flash 被 Google 下架改为 gemini-flash-latest 起，四个模型任一请求失败都会往下试下一个，不再只在限流时才切换）；仅将 Layer 1 的压缩摘要（按站点+月份分组，最多300条→50行摘要）传给 AI，而非原始数据库；responseMimeType=application/json 返回结构化 JSON' },
       { label: '最低触发阈值', text: '新案例不足10条 且 无下降规则 → 跳过（返回 skipped:true），避免无数据时浪费 API 调用' },
       { label: '写入表', text: 'rule_drafts（status=pending；draft_category=new_rule 表示新规则发现，rule_review 表示旧规则预警；永久保留，由管理员在规则中心审核后 approve/reject）' },
       { label: '不写入', text: '不直接写入 rules 表，所有 AI 建议须经人工审核' },

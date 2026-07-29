@@ -41,6 +41,84 @@ interface AddSiteModalProps {
   onSaved: () => void
 }
 
+interface AiSelectorSuggestion {
+  title_selector: string
+  date_selector: string
+  url_selector: string
+  confidence: number | null
+  notes: string
+}
+
+// 粘贴一段列表页HTML，让 Gemini 分析出 标题/日期/文章链接 三个CSS选择器——
+// 手动摸 CSS 选择器经常要来回试，容易配错，2026-07-29 加入。每个"来源"块独立
+// 一份，本地状态自己管理，通过 onApply 把结果写回父组件的表单字段。
+function AiSelectorHelper({ onApply }: { onApply: (sug: { title_selector: string; date_selector: string; url_selector: string }) => void }) {
+  const [open, setOpen] = useState(false)
+  const [htmlInput, setHtmlInput] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<AiSelectorSuggestion | null>(null)
+
+  async function analyze() {
+    if (!htmlInput.trim() || analyzing) return
+    setAnalyzing(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await fetch('/api/sites/analyze-selector', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: htmlInput }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'AI 分析失败')
+      setResult(data)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'AI 分析失败')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  return (
+    <div className="border border-dashed border-indigo-200 rounded-lg p-3 bg-indigo-50/30">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="text-xs font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+        <span>{open ? '▾' : '▸'}</span> AI 帮我识别选择器
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <textarea
+            value={htmlInput}
+            onChange={(e) => setHtmlInput(e.target.value)}
+            placeholder="粘贴一条或几条列表项的HTML代码（右键“检查”复制出来）；如果这个站是翻页JSON接口，也可以直接粘贴整段JSON响应"
+            rows={5}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white resize-none"
+          />
+          <button type="button" onClick={analyze} disabled={analyzing || !htmlInput.trim()}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {analyzing ? '分析中...' : 'AI 分析'}
+          </button>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          {result && (
+            <div className="border border-indigo-200 rounded-lg bg-white p-3 space-y-1.5">
+              <div className="text-xs text-gray-600"><span className="font-medium text-gray-500">标题选择器：</span><code className="text-indigo-700">{result.title_selector || '（空）'}</code></div>
+              <div className="text-xs text-gray-600"><span className="font-medium text-gray-500">日期选择器：</span><code className="text-indigo-700">{result.date_selector || '（空）'}</code></div>
+              <div className="text-xs text-gray-600"><span className="font-medium text-gray-500">链接选择器：</span><code className="text-indigo-700">{result.url_selector || '（空）'}</code></div>
+              {result.notes && <p className="text-xs text-gray-400 italic">{result.notes}</p>}
+              <button type="button"
+                onClick={() => { onApply(result); setOpen(false); setResult(null); setHtmlInput('') }}
+                className="mt-1 px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 transition-colors">
+                应用到上面的选择器
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const defaultForm: Site = {
   domain: '',
   name: '',
@@ -120,6 +198,22 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
 
   function updateSource(idx: number, field: keyof HtmlSource, value: string) {
     const next = htmlSources.map((s, i) => i === idx ? { ...s, [field]: value } : s)
+    setHtmlSources(next)
+    const valid = next.filter((s) => s.url.trim())
+    setForm((prev) => ({
+      ...prev,
+      list_url: valid.map((s) => s.url).join(SRC_SEP),
+      title_selector: valid.map((s) => s.titleSelector).join(SRC_SEP),
+      date_selector: valid.map((s) => s.dateSelector).join(SRC_SEP),
+      source_types: valid.map((s) => s.contentType).join(SRC_SEP),
+      url_selectors: valid.map((s) => s.urlSelector).join(SRC_SEP),
+    }))
+  }
+
+  function applyAiSuggestion(idx: number, sug: { title_selector: string; date_selector: string; url_selector: string }) {
+    const next = htmlSources.map((s, i) => i === idx
+      ? { ...s, titleSelector: sug.title_selector, dateSelector: sug.date_selector, urlSelector: sug.url_selector }
+      : s)
     setHtmlSources(next)
     const valid = next.filter((s) => s.url.trim())
     setForm((prev) => ({
@@ -379,6 +473,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
                     />
                   </div>
+                  <AiSelectorHelper onApply={(sug) => applyAiSuggestion(idx, sug)} />
                 </div>
               ))}
               <button
