@@ -520,7 +520,7 @@ export default function GroupReportPage() {
                                 {outcomePilotStats.ctrlScore != null ? outcomePilotStats.ctrlScore : <span className="text-sm text-gray-300">数据不足</span>}
                                 {outcomePilotStats.ctrlScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
                               </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">不执行规则，自然追踪</div>
+                              <div className="text-[10px] text-gray-400 mt-0.5">不执行规则，自然追踪（含未手动标记、认领时也非规则推荐的记录）</div>
                             </div>
                             <div className="bg-white rounded-lg px-3 py-2 border border-amber-100">
                               <div className="flex items-center gap-1.5 mb-1">
@@ -532,7 +532,7 @@ export default function GroupReportPage() {
                                 {outcomePilotStats.trtScore != null ? outcomePilotStats.trtScore : <span className="text-sm text-gray-300">数据不足</span>}
                                 {outcomePilotStats.trtScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
                               </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">执行规则，验证效果</div>
+                              <div className="text-[10px] text-gray-400 mt-0.5">执行规则，验证效果（含未手动标记、但认领时来自"规则推荐"的记录）</div>
                             </div>
                           </div>
                         </div>

@@ -115,17 +115,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return true
   })
 
-  // Fetch experiment_group for deduped claim_ids (batched to avoid URL length limits)
+  // Fetch experiment_group + source_rule_id for deduped claim_ids (batched to
+  // avoid URL length limits — UUIDs are fixed-width so 200/batch is safe here,
+  // unlike the CJK-keyword case elsewhere in this codebase).
   const claimIds = dedupedRows.map(r => r.claim_id)
   const expGroupMap = new Map<string, 'control' | 'treatment' | null>()
+  const sourceRuleMap = new Map<string, string | null>()
   const BATCH = 200
   for (let i = 0; i < claimIds.length; i += BATCH) {
     const { data: claimMeta } = await service
       .from('member_claimed_keywords')
-      .select('id, experiment_group')
+      .select('id, experiment_group, source_rule_id')
       .in('id', claimIds.slice(i, i + BATCH))
-    for (const c of (claimMeta ?? []) as { id: string; experiment_group: 'control' | 'treatment' | null }[]) {
+    for (const c of (claimMeta ?? []) as { id: string; experiment_group: 'control' | 'treatment' | null; source_rule_id: string | null }[]) {
       expGroupMap.set(c.id, c.experiment_group)
+      sourceRuleMap.set(c.id, c.source_rule_id)
     }
   }
 
@@ -173,6 +177,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         : null,
       env_excluded: badDates.has(r.record_date),
       experiment_group: expGroupMap.get(r.claim_id) ?? null,
+      // Pilot 对比用的分组：手动标的 experiment_group 优先；组员没手动标过的，
+      // 按认领时是否来自"规则推荐"（source_rule_id 非空）自动分组——2026-07-29
+      // 加入，此前从不手动打C的记录永远不计入对照组，导致对照组样本量长期为0。
+      // 只影响 Pilot 汇总统计，不改 row.experiment_group 本身，所以成效追踪表
+      // 格里的 C/T 按钮高亮状态不受影响，仍然只反映组员真正手动点过的选择。
+      effective_experiment_group: expGroupMap.get(r.claim_id) ?? (sourceRuleMap.get(r.claim_id) ? 'treatment' : 'control'),
       bestRankPosition, totalRankVolume,
     }
   })
@@ -221,8 +231,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const total = valid.reduce((s, r) => s + computeOutcomeScore(r.rank_position, r.is_indexed, r.rank_change), 0)
     return Math.round(total / valid.length)
   }
-  const ctrlRows = rows.filter(r => r.experiment_group === 'control')
-  const trtRows  = rows.filter(r => r.experiment_group === 'treatment')
+  const ctrlRows = rows.filter(r => r.effective_experiment_group === 'control')
+  const trtRows  = rows.filter(r => r.effective_experiment_group === 'treatment')
   const ctrlScore = pilotAvgScore(ctrlRows)
   const trtScore  = pilotAvgScore(trtRows)
   const pilotStats = (ctrlRows.length === 0 && trtRows.length === 0) ? null : {
