@@ -233,6 +233,14 @@ export async function fetchHtmlListPages(
 
         const datedEntries = pageEntries.map((e) => parseEntryDateStr(e.date)).filter(Boolean) as string[]
         if (datedEntries.length > 0 && datedEntries.every((d) => d < cutoffDateStr)) break
+        // Entries with an unparseable date still get kept below (better to risk
+        // including something stale than silently drop something genuinely new
+        // when the date text just wasn't in a recognized format) — but if EVERY
+        // entry on this page failed to parse a date, the date_selector is most
+        // likely broken outright, not just hitting an odd format. In that case
+        // don't compound it by fetching maxPages worth of content that can't be
+        // freshness-checked at all — stop after this page.
+        if (pageEntries.length > 0 && datedEntries.length === 0) break
 
         currentUrl = findNextPageUrl($, currentUrl)
         if (currentUrl && !skipPageDelay) await randomDelay(10000, 15000)
@@ -313,6 +321,11 @@ export async function fetchJsonHtmlPages(
       // Stop early if all dated entries on this page are older than the cutoff
       const datedOnPage = pageEntries.map((e) => parseEntryDateStr(e.date)).filter(Boolean) as string[]
       if (datedOnPage.length > 0 && datedOnPage.every((d) => d < cutoffDateStr)) break
+      // Every entry on this page failed to parse a date at all — the date_selector
+      // is most likely broken, not just hitting an odd format. Don't compound it
+      // by fetching up to maxPages (30 for this JSON mode) worth of unverifiable
+      // content — stop after this page. See fetchHtmlListPages for the same guard.
+      if (pageEntries.length > 0 && datedOnPage.length === 0) break
 
       await randomDelay(2000, 4000)
     } catch {
