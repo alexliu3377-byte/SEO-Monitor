@@ -88,6 +88,20 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks
 }
 
+// Strip a leading www./m. host label so tracking can match a claimed page_url
+// (often typed without the "m." mobile prefix) against site_indexed_pages/
+// site_keyword_ranks URLs (often discovered as the m. mobile variant via
+// Baidu's mobile-oriented SERPs) even when the subdomain differs.
+function bareUrl(url: string): string {
+  return url.replace(/^(https?:\/\/)?(www\.|m\.)?/i, '')
+}
+// Both the bare host and the www./m. variants — used to widen the DB `.in()`
+// filter so a row stored under any of these subdomains gets fetched.
+function urlSubdomainVariants(url: string): string[] {
+  const bare = bareUrl(url)
+  return [bare, `www.${bare}`, `m.${bare}`]
+}
+
 // supabase-js 出错时不 throw，只在返回值带 error 字段，需要手动检查
 function sbCheck<T extends { error: unknown }>(res: T, label: string): T {
   if (res.error) throw new Error(`[Supabase] ${label}: ${JSON.stringify(res.error)}`)
@@ -929,34 +943,38 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
     const claims = (claimRows || []) as ClaimRow[]
 
     if (claims.length > 0) {
-      const pageUrls = Array.from(new Set(claims.filter(c => c.page_url).map(c => c.page_url!)))
+      // Query with www./m. variants of each page_url (widens the .in() filter),
+      // but key the lookup maps by the bare (subdomain-stripped) URL so a claim
+      // submitted as "site.com/x" still matches a row discovered as "m.site.com/x".
+      const pageUrlVariants = Array.from(new Set(claims.filter(c => c.page_url).flatMap(c => urlSubdomainVariants(c.page_url!))))
 
       const indexMap = new Map<string, { first_seen_date: string; disappeared_date: string | null }>()
-      for (const chunk of chunkArray(pageUrls, 500)) {
+      for (const chunk of chunkArray(pageUrlVariants, 500)) {
         const { data: idxRows } = await supabase.from('site_indexed_pages')
           .select('url, first_seen_date, disappeared_date').in('url', chunk)
         for (const r of (idxRows || []) as { url: string; first_seen_date: string; disappeared_date: string | null }[]) {
-          indexMap.set(r.url, { first_seen_date: r.first_seen_date, disappeared_date: r.disappeared_date })
+          indexMap.set(bareUrl(r.url), { first_seen_date: r.first_seen_date, disappeared_date: r.disappeared_date })
         }
       }
 
       const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
-      for (const chunk of chunkArray(pageUrls, 500)) {
+      for (const chunk of chunkArray(pageUrlVariants, 500)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: rRows } = await (supabase.from('site_keyword_ranks') as any)
           .select('url, keyword, rank_position, prev_rank, volume, stat_date')
           .in('url', chunk).not('url', 'is', null).eq('platform', 'mobile')
           .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
         for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
-          if (!rankByUrlMap.has(r.url)) rankByUrlMap.set(r.url, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
+          const key = bareUrl(r.url)
+          if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
         }
       }
 
       const ownUpsertRows: Record<string, unknown>[] = []
       for (const claim of claims) {
         const url = claim.page_url
-        const idx = url ? indexMap.get(url) : undefined
-        const rank = url ? rankByUrlMap.get(url) : undefined
+        const idx = url ? indexMap.get(bareUrl(url)) : undefined
+        const rank = url ? rankByUrlMap.get(bareUrl(url)) : undefined
         const is_indexed = !!idx && !idx.disappeared_date
         const submitDate = claim.submitted_at ? claim.submitted_at.slice(0, 10) : claim.claimed_date
         const daysSince = Math.max(0, Math.floor((new Date(today).getTime() - new Date(submitDate).getTime()) / 86400000))
