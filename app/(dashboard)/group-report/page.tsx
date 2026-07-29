@@ -3,28 +3,10 @@
 import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { useUser } from '@/lib/user-context'
+import { computeOutcomeScore } from '@/lib/outcome-score'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
-
-function computeOutcomeScore(rankPos: number | null, isIndexed: boolean, rankChange: number | null): number {
-  let rankScore = 0
-  if (rankPos != null) {
-    if (rankPos <= 3) rankScore = 60
-    else if (rankPos <= 10) rankScore = 50
-    else if (rankPos <= 20) rankScore = 40
-    else if (rankPos <= 30) rankScore = 30
-    else rankScore = 20
-  }
-  const indexScore = isIndexed ? 20 : 0
-  let changeScore = 0
-  if (rankChange != null && rankChange > 0) {
-    if (rankChange > 20) changeScore = 20
-    else if (rankChange >= 10) changeScore = 15
-    else changeScore = 10
-  }
-  return rankScore + indexScore + changeScore
-}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -78,6 +60,7 @@ interface OutcomeRow {
   rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
+interface PilotStats { ctrlCount: number; trtCount: number; ctrlScore: number | null; trtScore: number | null; diff: number | null }
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_change' | 'rank_volume'
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
@@ -188,6 +171,8 @@ export default function GroupReportPage() {
   // Outcomes tab state
   const [outcomes, setOutcomes] = useState<OutcomeRow[]>([])
   const [outcomeSummary, setOutcomeSummary] = useState<OutcomeSummary | null>(null)
+  const [outcomePilotStats, setOutcomePilotStats] = useState<PilotStats | null>(null)
+  const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
   const [oFilterSubmitStart, setOFilterSubmitStart] = useState('')
@@ -251,13 +236,18 @@ export default function GroupReportPage() {
     setOPage(0)
   }, [activeTabId])
 
-  // Load outcomes data
-  useEffect(() => {
+  // Load outcomes data — server-side paginated: every filter/sort/page change
+  // re-fetches just the one page being displayed, plus summary/pilot stats
+  // computed over the full filtered set. Changing a filter or sort resets
+  // oPage to 0 at the call site (see the various onChange handlers below);
+  // oPage itself is a dependency here so Prev/Next re-fetches the new page.
+  // Exposed as a plain function (not just inside the effect) so actions that
+  // mutate a row — e.g. assigning a pilot experiment_group below — can
+  // re-fetch afterward and keep the server-computed pilot stats in sync,
+  // since they're no longer derived from the full client-side dataset.
+  function loadOutcomes() {
     if (!activeTabId || reportTab !== 'outcomes') return
     setOutcomesLoading(true)
-    setOutcomes([])
-    setOutcomeSummary(null)
-    setOPage(0)
     const p = new URLSearchParams()
     if (oFilterSubmitStart)   p.set('submitStart',   oFilterSubmitStart)
     if (oFilterSubmitEnd)     p.set('submitEnd',     oFilterSubmitEnd)
@@ -269,11 +259,20 @@ export default function GroupReportPage() {
     if (oFilterOutcome)       p.set('outcome',       oFilterOutcome)
     p.set('sortBy',  oSortBy)
     p.set('sortDir', oSortDir)
+    p.set('page',     String(oPage))
+    p.set('pageSize', String(oPageSize))
     fetch(`/api/task-groups/${activeTabId}/outcomes?${p}`)
       .then(r => r.json())
-      .then(d => { setOutcomes(d.rows || []); setOutcomeSummary(d.summary || null); setOutcomesTruncated(!!d.truncated) })
+      .then(d => {
+        setOutcomes(d.rows || [])
+        setOutcomeSummary(d.summary || null)
+        setOutcomePilotStats(d.pilotStats || null)
+        setOutcomeTotalRows(d.totalRows ?? 0)
+        setOutcomesTruncated(!!d.truncated)
+      })
       .finally(() => setOutcomesLoading(false))
-  }, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir])
+  }
+  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
 
   // Load detail keywords on demand
   useEffect(() => {
@@ -393,12 +392,14 @@ export default function GroupReportPage() {
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
             const OCOLS = 'grid-cols-[70px_70px_70px_48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_42px]'
-            const oTotal = outcomes.length
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
-            const displayData = outcomes
-            const displayTotal = displayData.length
+            // outcomes already holds just the current page — pagination and
+            // totals are computed server-side against the full filtered set
+            // (see outcomeTotalRows) so this page never has to hold more than
+            // oPageSize rows in the browser at once.
+            const displayTotal = outcomeTotalRows
             const oTotalPages = Math.max(1, Math.ceil(displayTotal / oPageSize))
-            const pagedO = displayData.slice(oPage * oPageSize, (oPage + 1) * oPageSize)
+            const pagedO = outcomes
             function oSortIcons(col: OutcomeSortBy) {
               const isAsc  = oSortBy === col && oSortDir === 'asc'
               const isDesc = oSortBy === col && oSortDir === 'desc'
@@ -488,7 +489,7 @@ export default function GroupReportPage() {
                     <span className="text-sm font-semibold text-gray-700">动作成效明细</span>
                     <span className="text-xs text-gray-400 ml-2">每条提交动作的排名与收录结果</span>
                   </div>
-                  {outcomesLoading ? <Spinner /> : oTotal === 0 ? (
+                  {outcomesLoading ? <Spinner /> : displayTotal === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-gray-300">
                       <svg className="w-10 h-10 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -497,59 +498,45 @@ export default function GroupReportPage() {
                     </div>
                   ) : (
                     <>
-                      {/* ── Pilot 对比面板 ── */}
-                      {(() => {
-                        const ctrl = outcomes.filter(r => r.experiment_group === 'control')
-                        const trt  = outcomes.filter(r => r.experiment_group === 'treatment')
-                        if (ctrl.length === 0 && trt.length === 0) return null
-                        function pilotAvgScore(rows: typeof outcomes) {
-                          const valid = rows.filter(r => !r.env_excluded)
-                          if (valid.length === 0) return null
-                          const total = valid.reduce((s, r) => s + computeOutcomeScore(r.rank_position, r.is_indexed, r.rank_change), 0)
-                          return Math.round(total / valid.length)
-                        }
-                        const ctrlScore = pilotAvgScore(ctrl)
-                        const trtScore  = pilotAvgScore(trt)
-                        const diff = (ctrlScore != null && trtScore != null) ? trtScore - ctrlScore : null
-                        return (
-                          <div className="mx-4 mb-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3">
-                            <div className="flex items-center gap-2 mb-2.5">
-                              <span className="text-xs font-bold text-violet-700">Pilot 试点对比</span>
-                              {diff != null && (
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${diff > 0 ? 'bg-green-100 text-green-700' : diff < 0 ? 'bg-red-100 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
-                                  实验组 {diff > 0 ? `+${diff}` : diff} 分
-                                </span>
-                              )}
+                      {/* ── Pilot 对比面板（后端按完整筛选结果算好，不受当前页影响） ── */}
+                      {outcomePilotStats && (
+                        <div className="mx-4 mb-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3">
+                          <div className="flex items-center gap-2 mb-2.5">
+                            <span className="text-xs font-bold text-violet-700">Pilot 试点对比</span>
+                            {outcomePilotStats.diff != null && (
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${outcomePilotStats.diff > 0 ? 'bg-green-100 text-green-700' : outcomePilotStats.diff < 0 ? 'bg-red-100 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
+                                实验组 {outcomePilotStats.diff > 0 ? `+${outcomePilotStats.diff}` : outcomePilotStats.diff} 分
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-white rounded-lg px-3 py-2 border border-blue-100">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+                                <span className="text-xs font-medium text-blue-700">对照组 Control</span>
+                                <span className="text-xs text-gray-400 ml-auto">{outcomePilotStats.ctrlCount} 条</span>
+                              </div>
+                              <div className="text-xl font-bold tabular-nums text-blue-600">
+                                {outcomePilotStats.ctrlScore != null ? outcomePilotStats.ctrlScore : <span className="text-sm text-gray-300">数据不足</span>}
+                                {outcomePilotStats.ctrlScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
+                              </div>
+                              <div className="text-[10px] text-gray-400 mt-0.5">不执行规则，自然追踪</div>
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="bg-white rounded-lg px-3 py-2 border border-blue-100">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
-                                  <span className="text-xs font-medium text-blue-700">对照组 Control</span>
-                                  <span className="text-xs text-gray-400 ml-auto">{ctrl.length} 条</span>
-                                </div>
-                                <div className="text-xl font-bold tabular-nums text-blue-600">
-                                  {ctrlScore != null ? ctrlScore : <span className="text-sm text-gray-300">数据不足</span>}
-                                  {ctrlScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
-                                </div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">不执行规则，自然追踪</div>
+                            <div className="bg-white rounded-lg px-3 py-2 border border-amber-100">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                                <span className="text-xs font-medium text-amber-700">实验组 Treatment</span>
+                                <span className="text-xs text-gray-400 ml-auto">{outcomePilotStats.trtCount} 条</span>
                               </div>
-                              <div className="bg-white rounded-lg px-3 py-2 border border-amber-100">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                                  <span className="text-xs font-medium text-amber-700">实验组 Treatment</span>
-                                  <span className="text-xs text-gray-400 ml-auto">{trt.length} 条</span>
-                                </div>
-                                <div className="text-xl font-bold tabular-nums text-amber-600">
-                                  {trtScore != null ? trtScore : <span className="text-sm text-gray-300">数据不足</span>}
-                                  {trtScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
-                                </div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">执行规则，验证效果</div>
+                              <div className="text-xl font-bold tabular-nums text-amber-600">
+                                {outcomePilotStats.trtScore != null ? outcomePilotStats.trtScore : <span className="text-sm text-gray-300">数据不足</span>}
+                                {outcomePilotStats.trtScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
                               </div>
+                              <div className="text-[10px] text-gray-400 mt-0.5">执行规则，验证效果</div>
                             </div>
                           </div>
-                        )
-                      })()}
+                        </div>
+                      )}
                       <div className="overflow-x-auto">
                         <div className={`grid ${OCOLS} gap-x-2 px-4 py-2 bg-gray-50/40 border-b border-gray-100 min-w-[980px]`}>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
@@ -672,7 +659,10 @@ export default function GroupReportPage() {
                                       body: JSON.stringify({ claimId: row.claim_id, experiment_group: val }),
                                     })
                                     if (!res.ok) return
-                                    setOutcomes(prev => prev.map(r => r.id === row.id ? { ...r, experiment_group: val } : r))
+                                    // Re-fetch rather than patch local state — pilot stats are
+                                    // now computed server-side over the full filtered set, so a
+                                    // client-only patch would leave the Pilot 对比 panel stale.
+                                    loadOutcomes()
                                   }
                                   return (
                                     <div className="flex gap-0.5 justify-center">

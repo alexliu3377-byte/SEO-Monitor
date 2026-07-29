@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { computeOutcomeScore } from '@/lib/outcome-score'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
@@ -43,6 +44,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const filterEffectiveness = searchParams.get('outcome') || ''         // '获取排名'|'获取收录'|'追踪中'|'无效'
   const sortBy              = searchParams.get('sortBy') || 'submit_date'
   const sortDir             = searchParams.get('sortDir') || 'desc'
+  const page                = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
+  const pageSize            = Math.min(200, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10) || 20))
 
   // Fetch bad environment dates (crawl anomaly or site-wide index drop > 5%)
   const since90 = new Date(Date.now() + 8 * 3600000 - 90 * 86400000).toISOString().slice(0, 10)
@@ -126,27 +129,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
-  // Fetch every matched rank keyword (not just the single "best" one on
-  // site_tracking_records), so 分组报告 can show all of them. The table
-  // accumulates one row set per (claim_id, record_date) every tracking run, so
-  // key by "claimId|recordDate" — matching each dedupedRow's own kept
-  // record_date — otherwise older days' matches for the same claim would leak
-  // into the current display.
-  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
-  const rankMatchesMap = new Map<string, RankMatch[]>()
-  for (let i = 0; i < claimIds.length; i += BATCH) {
-    const { data: matchRows } = await service
-      .from('site_tracking_rank_matches')
-      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
-      .in('claim_id', claimIds.slice(i, i + BATCH))
-      .order('rank_position', { ascending: true, nullsFirst: false })
-    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
-      const key = `${m.claim_id}|${m.record_date}`
-      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
-      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
-    }
-  }
-
   let rows = dedupedRows.map(r => ({
     ...r,
     username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
@@ -155,7 +137,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       : null,
     env_excluded: badDates.has(r.record_date),
     experiment_group: expGroupMap.get(r.claim_id) ?? null,
-    rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
   }))
 
   // Post-fetch filters
@@ -179,6 +160,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   })
 
+  // Summary and pilot stats are computed over the full filtered set (every page
+  // combined), not just the page being returned — the browser only ever
+  // receives one page of raw rows below, but these aggregates still need to
+  // reflect everything so they don't silently shift as more history accumulates.
   const summary = {
     total:         rows.length,
     rankedCount:   rows.filter(r => r.effectiveness === '获取排名').length,
@@ -187,8 +172,53 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     invalidCount:  rows.filter(r => r.effectiveness === '无效').length,
   }
 
+  function pilotAvgScore(group: typeof rows) {
+    const valid = group.filter(r => !r.env_excluded)
+    if (valid.length === 0) return null
+    const total = valid.reduce((s, r) => s + computeOutcomeScore(r.rank_position, r.is_indexed, r.rank_change), 0)
+    return Math.round(total / valid.length)
+  }
+  const ctrlRows = rows.filter(r => r.experiment_group === 'control')
+  const trtRows  = rows.filter(r => r.experiment_group === 'treatment')
+  const ctrlScore = pilotAvgScore(ctrlRows)
+  const trtScore  = pilotAvgScore(trtRows)
+  const pilotStats = (ctrlRows.length === 0 && trtRows.length === 0) ? null : {
+    ctrlCount: ctrlRows.length, trtCount: trtRows.length,
+    ctrlScore, trtScore,
+    diff: (ctrlScore != null && trtScore != null) ? trtScore - ctrlScore : null,
+  }
+
+  const totalRows = rows.length
+  const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
+
+  // rank_matches is only fetched for the page actually being returned — with
+  // full history this table can have far more matches than fit on one page,
+  // and the other pages' matches would just be discarded client-side anyway.
+  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
+  const rankMatchesMap = new Map<string, RankMatch[]>()
+  const pagedClaimIds = pagedRows.map(r => r.claim_id)
+  for (let i = 0; i < pagedClaimIds.length; i += BATCH) {
+    const { data: matchRows } = await service
+      .from('site_tracking_rank_matches')
+      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
+      .in('claim_id', pagedClaimIds.slice(i, i + BATCH))
+      .order('rank_position', { ascending: true, nullsFirst: false })
+    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
+      const key = `${m.claim_id}|${m.record_date}`
+      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
+      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
+    }
+  }
+  const pagedRowsWithMatches = pagedRows.map(r => ({
+    ...r,
+    rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
+  }))
+
   // rowLimit is sized off an exact pre-count of the same filtered query, so this
   // should only trip if rows were deleted between the count and the fetch (rare
   // race), not as a real cap — real truncation is no longer possible.
-  return NextResponse.json({ rows, summary, truncated: (trackRows?.length ?? 0) < (exactCount ?? 0) })
+  return NextResponse.json({
+    rows: pagedRowsWithMatches, summary, pilotStats, totalRows, page, pageSize,
+    truncated: (trackRows?.length ?? 0) < (exactCount ?? 0),
+  })
 }
