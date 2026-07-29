@@ -88,18 +88,34 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks
 }
 
-// Strip a leading www./m. host label so tracking can match a claimed page_url
-// (often typed without the "m." mobile prefix) against site_indexed_pages/
-// site_keyword_ranks URLs (often discovered as the m. mobile variant via
-// Baidu's mobile-oriented SERPs) even when the subdomain differs.
+// Strip a leading www./m. host label and a trailing slash so tracking can match
+// a claimed page_url (often typed without the "m." mobile prefix, no trailing
+// slash) against site_indexed_pages/site_keyword_ranks URLs — the latter come
+// from Baidu's mobile SERPs (often m. prefixed) and 爱站's own listing pages
+// (sometimes with a stray trailing slash, e.g. ".../3908.html/"). Deliberately
+// does NOT strip other subdomains (site./mxm./xyjztzh. etc.) — those are real
+// distinct game microsites on 爱站-tracked domains, not formatting variants;
+// treating them as equivalent would produce false "已收录/已排名" matches.
 function bareUrl(url: string): string {
-  return url.replace(/^(https?:\/\/)?(www\.|m\.)?/i, '')
+  return url.replace(/^(https?:\/\/)?(www\.|m\.)?/i, '').replace(/\/$/, '')
 }
-// Both the bare host and the www./m. variants — used to widen the DB `.in()`
-// filter so a row stored under any of these subdomains gets fetched.
+// `.in()` needs the exact stored string, and storage format differs by table:
+// site_indexed_pages stores bare (no protocol, e.g. "m.site.com/x"), while
+// site_keyword_ranks stores with protocol and sometimes a trailing slash
+// (e.g. "http://www.site.com/x/") — verified against real data 2026-07-29.
+// Generate every combination so the DB filter actually finds the row,
+// regardless of which table/format it came from.
 function urlSubdomainVariants(url: string): string[] {
   const bare = bareUrl(url)
-  return [bare, `www.${bare}`, `m.${bare}`]
+  const hosts = [bare, `www.${bare}`, `m.${bare}`]
+  const variants = new Set<string>()
+  for (const host of hosts) {
+    for (const proto of ['', 'http://', 'https://']) {
+      variants.add(`${proto}${host}`)
+      variants.add(`${proto}${host}/`)
+    }
+  }
+  return Array.from(variants)
 }
 
 // supabase-js 出错时不 throw，只在返回值带 error 字段，需要手动检查
