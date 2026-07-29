@@ -635,7 +635,7 @@ export default function GroupReportPage() {
                                       </div>
                                       <div className="flex flex-col gap-1">
                                         {matches.map((m, i) => (
-                                          <div key={i} className="text-sm text-gray-500 tabular-nums text-center">{m.volume ? fmtVol(m.volume) : '—'}</div>
+                                          <div key={i} className="text-sm text-gray-500 tabular-nums text-center">{m.volume.toLocaleString()}</div>
                                         ))}
                                       </div>
                                     </>
