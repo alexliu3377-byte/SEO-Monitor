@@ -392,7 +392,7 @@ export default function GroupReportPage() {
 
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
-            const OCOLS = 'grid-cols-[70px_70px_70px_48px_2fr_60px_70px_88px_1.5fr_60px_58px_56px_42px]'
+            const OCOLS = 'grid-cols-[70px_70px_70px_48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_42px]'
             const oTotal = outcomes.length
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
             const displayData = outcomes
@@ -551,7 +551,7 @@ export default function GroupReportPage() {
                         )
                       })()}
                       <div className="overflow-x-auto">
-                        <div className={`grid ${OCOLS} gap-x-2 px-4 py-2 bg-gray-50/40 border-b border-gray-100 min-w-[962px]`}>
+                        <div className={`grid ${OCOLS} gap-x-2 px-4 py-2 bg-gray-50/40 border-b border-gray-100 min-w-[980px]`}>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
@@ -566,7 +566,7 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400 text-center">得分</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">试点</span>
                         </div>
-                        <div className="divide-y divide-gray-50 min-w-[962px]">
+                        <div className="divide-y divide-gray-50 min-w-[980px]">
                           {pagedO.map(row => {
                             return (
                               <div key={row.id} className={`grid ${OCOLS} gap-x-2 px-4 py-2.5 hover:bg-gray-50/60 transition-colors items-center`}>
@@ -642,10 +642,10 @@ export default function GroupReportPage() {
                                   )
                                 })()}
                                 <div className="flex justify-center">
-                                  {row.effectiveness === '获取排名' && <span className="text-xs bg-green-50 text-green-600 border border-green-200 px-1.5 py-0.5 rounded-full">获取排名</span>}
-                                  {row.effectiveness === '获取收录' && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded-full">获取收录</span>}
-                                  {row.effectiveness === '追踪中'   && <span className="text-xs bg-gray-100 text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded-full">追踪中</span>}
-                                  {row.effectiveness === '无效'     && <span className="text-xs bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
+                                  {row.effectiveness === '获取排名' && <span className="text-xs whitespace-nowrap bg-green-50 text-green-600 border border-green-200 px-1.5 py-0.5 rounded-full">获取排名</span>}
+                                  {row.effectiveness === '获取收录' && <span className="text-xs whitespace-nowrap bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded-full">获取收录</span>}
+                                  {row.effectiveness === '追踪中'   && <span className="text-xs whitespace-nowrap bg-gray-100 text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded-full">追踪中</span>}
+                                  {row.effectiveness === '无效'     && <span className="text-xs whitespace-nowrap bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
                                 </div>
                                 {(() => {
                                   const score = computeOutcomeScore(row.rank_position, row.is_indexed, row.rank_change)
