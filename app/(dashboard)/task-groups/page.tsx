@@ -464,7 +464,10 @@ export default function TaskGroupsPage() {
   const [rightTab, setRightTab] = useState<RightTab>(role === 'super' || role === 'admin' ? 'recommend' : 'cross')
   const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
   const [recSubTab, setRecSubTab] = useState<RecSubTab>('rankdown')
-  const [dismissedRec, setDismissedRec] = useState<Set<string>>(new Set())
+  // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
+  // 就重新出现的临时前端状态，2026-07-29 加入。
+  const [dismissedRecMap, setDismissedRecMap] = useState<Map<string, string>>(new Map())
+  const [dismissedRecKey, setDismissedRecKey] = useState<string | null>(null)
   const [siteRankdownData, setSiteRankdownData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]>([])
   const [siteRankdownLoading, setSiteRankdownLoading] = useState(false)
   const [siteRankdownGroupId, setSiteRankdownGroupId] = useState<string | null>(null)
@@ -734,6 +737,28 @@ export default function TaskGroupsPage() {
     }
   }
 
+  async function loadDismissedRec() {
+    if (!activeGroup || !effectiveViewingId) return
+    const key = `${activeGroup.id}|${effectiveViewingId}`
+    if (dismissedRecKey === key) return
+    try {
+      const supabase = getBrowserClient()
+      const since = new Date(Date.now() - RECOMMEND_COOLDOWN_UNIT_DAYS * 86400000).toISOString()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.from('member_rec_dismissals') as any)
+        .select('keyword, dismissed_at')
+        .eq('group_id', activeGroup.id)
+        .eq('user_id', effectiveViewingId)
+        .gte('dismissed_at', since)
+      const map = new Map<string, string>()
+      for (const r of (data || []) as { keyword: string; dismissed_at: string }[]) map.set(r.keyword, r.dismissed_at)
+      setDismissedRecMap(map)
+      setDismissedRecKey(key)
+    } catch {
+      // network error — dismissed items just won't be filtered this render
+    }
+  }
+
   // 冷却期按历史更新次数递增：新增后首次冷却7天；每被"更新"一次，下一次冷却再
   // +7天（更新1次=14天，更新2次=21天…），避免同一个词被短时间内反复更新。冷却期
   // 内的词直接不显示；冷却期一过，越早"刚满冷却"的词优先级越高（同一批信号里最
@@ -841,7 +866,14 @@ export default function TaskGroupsPage() {
   }
 
   function dismissRec(keyword: string) {
-    setDismissedRec(prev => { const next = new Set(prev); next.add(keyword); return next })
+    const now = new Date().toISOString()
+    setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, now); return next })
+    if (!activeGroupId || !effectiveViewingId) return
+    const supabase = getBrowserClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(supabase.from('member_rec_dismissals') as any)
+      .upsert({ group_id: activeGroupId, user_id: effectiveViewingId, keyword, dismissed_at: now }, { onConflict: 'group_id,user_id,keyword' })
+      .then(() => {})
   }
 
   async function dismissClaimed(claimId: string) {
@@ -1032,6 +1064,7 @@ export default function TaskGroupsPage() {
   useEffect(() => { if (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown')) loadSiteRankdown() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadSiteRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (rightTab === 'recommend') loadDismissedRec() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
@@ -1213,7 +1246,7 @@ export default function TaskGroupsPage() {
         const matched = data.filter(r =>
           submittedKwSet.has(r.keyword.toLowerCase()) ||
           (r.url && submittedUrlSet.has(normalizeUrl(r.url).toLowerCase()))
-        ).filter(r => !dismissedRec.has(r.keyword))
+        ).filter(r => !dismissedRecMap.has(r.keyword))
         return applyRecommendCooldown(matched)
       }
       const rankdownMatched = matchAndRank(siteRankdownData)
