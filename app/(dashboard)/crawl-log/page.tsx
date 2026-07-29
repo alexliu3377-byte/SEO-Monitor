@@ -640,7 +640,6 @@ export default function CrawlLogPage() {
                     ) : (
                       <span className="text-xs text-gray-400">尚无记录</span>
                     )}
-                    <span className="text-xs text-gray-400 whitespace-nowrap">Cookie 池管理已移至"分组任务"页</span>
                   </div>
                 </div>
                 {row2.indexPages ? (
