@@ -796,10 +796,15 @@ export async function GET(request: Request) {
         if (claims.length > 0) {
           const pageUrlVariants = Array.from(new Set(claims.filter(c => c.page_url).flatMap(c => urlSubdomainVariants(c.page_url!))))
 
+          // Chunk size 150 keeps the .in() query string well under the ~16KB
+          // HTTP header limit — 500 caused silent "HeadersOverflowError: fetch
+          // failed" (unchecked here before) that made every own-site rank/index
+          // match return empty for days without any visible error (verified 2026-07-29).
           const indexMap = new Map<string, { first_seen_date: string; disappeared_date: string | null }>()
-          for (const chunk of chunkArray(pageUrlVariants, 500)) {
-            const { data: idxRows } = await supabase.from('site_indexed_pages')
+          for (const chunk of chunkArray(pageUrlVariants, 150)) {
+            const { data: idxRows, error: idxErr } = await supabase.from('site_indexed_pages')
               .select('url, first_seen_date, disappeared_date').in('url', chunk)
+            if (idxErr) console.error(`[自己站点追踪] site_indexed_pages 查询失败: ${JSON.stringify(idxErr)}`)
             for (const r of (idxRows || []) as { url: string; first_seen_date: string; disappeared_date: string | null }[]) {
               indexMap.set(bareUrl(r.url), { first_seen_date: r.first_seen_date, disappeared_date: r.disappeared_date })
             }
@@ -807,12 +812,13 @@ export async function GET(request: Request) {
 
           const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
           const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
-          for (const chunk of chunkArray(pageUrlVariants, 500)) {
+          for (const chunk of chunkArray(pageUrlVariants, 150)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: rRows } = await (supabase.from('site_keyword_ranks') as any)
+            const { data: rRows, error: rankErr } = await (supabase.from('site_keyword_ranks') as any)
               .select('url, keyword, rank_position, prev_rank, volume, stat_date')
               .in('url', chunk).not('url', 'is', null).eq('platform', 'mobile')
               .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
+            if (rankErr) console.error(`[自己站点追踪] site_keyword_ranks 查询失败: ${JSON.stringify(rankErr)}`)
             for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
               const key = bareUrl(r.url)
               if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
