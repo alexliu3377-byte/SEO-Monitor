@@ -567,7 +567,7 @@ export default function GroupReportPage() {
                                   </span>
                                 </div>
                                 <div className="min-w-0">
-                                  <div className="text-sm text-gray-800 truncate" title={row.final_keyword || row.keyword}>{row.final_keyword || row.keyword}</div>
+                                  <div className="text-sm font-medium text-gray-800 truncate" title={row.final_keyword || row.keyword}>{row.final_keyword || row.keyword}</div>
                                   {row.final_keyword
                                     ? <div className="text-xs text-green-600 truncate" title={row.keyword}>→ {row.keyword}</div>
                                     : <div className="text-xs text-gray-300">—</div>}
@@ -656,7 +656,7 @@ export default function GroupReportPage() {
                                 </span>
                                 <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
                                 <span className="text-sm text-gray-500 text-center">{row.record_date.slice(5).replace('-', '/')}</span>
-                                <span className="text-sm text-gray-700 font-medium text-center truncate" title={row.username}>{row.username}</span>
+                                <span className="text-sm text-gray-700 text-center truncate" title={row.username}>{row.username}</span>
                               </div>
                             )
                           })}
