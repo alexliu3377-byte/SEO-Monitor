@@ -391,7 +391,7 @@ export default function GroupReportPage() {
 
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
-            const OCOLS = 'grid-cols-[70px_70px_70px_48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_42px]'
+            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_42px_70px_70px_70px]'
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
@@ -539,9 +539,6 @@ export default function GroupReportPage() {
                       )}
                       <div className="overflow-x-auto">
                         <div className={`grid ${OCOLS} gap-x-2 px-4 py-2 bg-gray-50/40 border-b border-gray-100 min-w-[980px]`}>
-                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
-                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
-                          <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">操作</span>
                           <span className="text-[11px] font-medium text-gray-400">关键词 → 最终词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">搜索量{oSortIcons('search_volume')}</span>
@@ -552,14 +549,14 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400 text-center">成效</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">得分</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">试点</span>
+                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
+                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
+                          <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
                         </div>
                         <div className="divide-y divide-gray-50 min-w-[980px]">
                           {pagedO.map(row => {
                             return (
                               <div key={row.id} className={`grid ${OCOLS} gap-x-2 px-4 py-2.5 hover:bg-gray-50/60 transition-colors items-center`}>
-                                <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
-                                <span className="text-sm text-gray-500 text-center">{row.record_date.slice(5).replace('-', '/')}</span>
-                                <span className="text-sm text-gray-700 font-medium text-center truncate" title={row.username}>{row.username}</span>
                                 <div className="flex justify-center">
                                   <span className={`text-xs px-1.5 py-0.5 rounded-full ${row.operation_type === '新增' ? 'bg-green-50 text-green-600' : row.operation_type === '更新' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
                                     {row.operation_type ?? '—'}
@@ -679,6 +676,9 @@ export default function GroupReportPage() {
                                     </div>
                                   )
                                 })()}
+                                <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
+                                <span className="text-sm text-gray-500 text-center">{row.record_date.slice(5).replace('-', '/')}</span>
+                                <span className="text-sm text-gray-700 font-medium text-center truncate" title={row.username}>{row.username}</span>
                               </div>
                             )
                           })}
