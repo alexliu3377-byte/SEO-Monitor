@@ -1770,7 +1770,7 @@ export default function TaskGroupsPage() {
   if (loading) return <div className="p-6"><Spinner /></div>
 
   const RIGHT_TABS: [RightTab, string][] = [
-    ...( canManage ? [['recommend', '今日推荐']] as [RightTab, string][] : []),
+    ['recommend', '今日推荐'],
     ['search', '搜索量查询'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
   ]
