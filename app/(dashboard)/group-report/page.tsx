@@ -65,7 +65,7 @@ interface PilotStats { ctrlCount: number; trtCount: number; ctrlScore: number | 
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume'
 // 认领来源短标签，跟 task-groups 页面的 SourceTag 保持同一套映射，
 // 2026-07-29 加入替代原来的"试点"C/T列。
-const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排' }
+const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品涨排', '连续上涨词': '连续上涨', '共新增词': '共新增词', '搜索量查询': '搜索查询', '交叉词': '交叉词', '更新词库': '更新词库', '手动添加': '手动添加', '跌词更新': '跌词更新', '跌排更新': '跌排更新', '涨排更新': '涨排更新' }
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
 type ReportTab = 'submissions' | 'outcomes'
@@ -395,7 +395,7 @@ export default function GroupReportPage() {
 
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
-            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_64px_70px_70px_70px]'
+            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_80px_70px_70px_70px]'
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
