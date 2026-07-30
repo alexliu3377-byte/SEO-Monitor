@@ -460,6 +460,7 @@ export default function TaskGroupsPage() {
   const [claimedKeywords, setClaimedKeywords] = useState<ClaimedKeyword[]>([])
   const [claimedLoading, setClaimedLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submittingOneId, setSubmittingOneId] = useState<string | null>(null)
 
   const [rightTab, setRightTab] = useState<RightTab>(role === 'super' || role === 'admin' ? 'recommend' : 'cross')
   const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
@@ -557,6 +558,7 @@ export default function TaskGroupsPage() {
     return claimedKeywords.filter(k => !seen.has(k.keyword) && !!seen.add(k.keyword))
   }, [claimedKeywords])
   const pendingCount = displayedClaims.filter(k => k.status === 'pending').length
+  const submittedCount = displayedClaims.filter(k => k.status === 'submitted').length
 
   const groupRankDomains = useMemo(() => new Set(activeGroup?.rank_domains || []), [activeGroup])
   const groupNewDomains = useMemo(() => new Set(activeGroup?.new_domains || []), [activeGroup])
@@ -892,6 +894,28 @@ export default function TaskGroupsPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ claimId, [field]: value }),
     })
+  }
+
+  // 单条提交——不用等攒够一批再一起点"提交"，填完这一条就能立刻单独提交，
+  // 2026-07-29 加入。校验逻辑跟批量提交一致（操作类型/最终词/URL 都要填）。
+  async function submitOne(claimId: string) {
+    if (!activeGroupId || submittingOneId === claimId) return
+    const claim = displayedClaims.find(k => k.id === claimId)
+    if (!claim || claim.status !== 'pending') return
+    if (!claim.operation_type || !claim.final_keyword?.trim() || !claim.page_url?.trim()) {
+      setInvalidClaimIds(prev => new Set([...Array.from(prev), claimId]))
+      setExpandedClaimIds(new Set([claimId]))
+      return
+    }
+    setInvalidClaimIds(prev => { const n = new Set(prev); n.delete(claimId); return n })
+    setSubmittingOneId(claimId)
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claimId, status: 'submitted' }),
+      })
+      if (res.ok) setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, status: 'submitted' } : k))
+    } finally { setSubmittingOneId(null) }
   }
 
   async function addManualKeyword() {
@@ -1903,7 +1927,7 @@ export default function TaskGroupsPage() {
                   </div>
                 )}
                 <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100">
-                  <span className="text-sm font-medium text-gray-700">今日任务</span>
+                  <span className="text-sm font-medium text-gray-700">今日任务 <span className="text-gray-400 font-normal">· {submittedCount}</span></span>
                   <input type="date" value={selectedDate} max={today}
                     onChange={e => setSelectedDate(e.target.value || today)}
                     className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-500 cursor-pointer" />
@@ -1975,6 +1999,12 @@ export default function TaskGroupsPage() {
                                     }
                                   }}
                                 />
+                                {k.status === 'pending' && (
+                                  <button onClick={() => submitOne(k.id)} disabled={submittingOneId === k.id}
+                                    className="w-full mt-1 py-1 text-xs font-medium bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-colors">
+                                    {submittingOneId === k.id ? '提交中...' : '提交这一条'}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
