@@ -89,18 +89,34 @@ export async function POST(
 
   const claimedDate = getMY()
 
-  // Check if already claimed today (non-dismissed)
+  // Check if ANY member of the group already claimed this keyword today (not
+  // just the caller) — 2026-07-29: previously only checked the caller's own
+  // claims, so two different members could unknowingly both claim and work on
+  // the same keyword. Same keyword + same day is now reserved group-wide.
   const { data: existing } = await service
     .from('member_claimed_keywords')
-    .select('id')
+    .select('id, user_id')
     .eq('group_id', groupId)
-    .eq('user_id', callerId)
     .eq('keyword', keyword)
     .eq('claimed_date', claimedDate)
     .neq('status', 'dismissed')
-    .single()
+    .maybeSingle()
 
-  if (existing) return NextResponse.json({ error: '已认领' }, { status: 409 })
+  if (existing) {
+    let claimedByName = '其他组员'
+    if (existing.user_id === callerId) {
+      claimedByName = '你自己'
+    } else {
+      const { data: member } = await service
+        .from('task_group_members')
+        .select('username')
+        .eq('group_id', groupId)
+        .eq('user_id', existing.user_id)
+        .maybeSingle()
+      if (member?.username) claimedByName = member.username
+    }
+    return NextResponse.json({ error: `这个词今天已经被${claimedByName}认领了`, claimedBy: claimedByName }, { status: 409 })
+  }
 
   const { data, error } = await service
     .from('member_claimed_keywords')

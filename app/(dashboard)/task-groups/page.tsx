@@ -461,6 +461,7 @@ export default function TaskGroupsPage() {
   const [claimedLoading, setClaimedLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submittingOneId, setSubmittingOneId] = useState<string | null>(null)
+  const [claimErrorMsg, setClaimErrorMsg] = useState<string | null>(null)
 
   const [rightTab, setRightTab] = useState<RightTab>(role === 'super' || role === 'admin' ? 'recommend' : 'cross')
   const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
@@ -853,7 +854,10 @@ export default function TaskGroupsPage() {
         body: JSON.stringify({ keyword, source, search_volume, operation_type: '新增', source_rule_id: source_rule_id ?? null }),
       })
       if (res.status === 409) {
-        // Another session already claimed it — refresh to show updated state
+        // Same keyword+day is reserved group-wide (2026-07-29) — someone (maybe
+        // the caller themself in another tab) already holds it. Surface who.
+        const data = await res.json().catch(() => ({}))
+        setClaimErrorMsg(data.error || '这个词已经被认领了')
         if (activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate)
         return
       }
@@ -939,6 +943,9 @@ export default function TaskGroupsPage() {
         setClaimedKeywords(prev => [...prev, data.keyword])
         setAddKw(''); setAddFinalKw(''); setAddUrl(''); setAddOpType('新增')
         setShowAddForm(false)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setClaimErrorMsg(data.error || '添加失败')
       }
     } finally { setAddingManual(false) }
   }
@@ -1082,6 +1089,11 @@ export default function TaskGroupsPage() {
   // ── Effects ─────────────────────────────────────────────────────────────────
 
   useEffect(() => { loadGroups(); loadDomainInfo() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!claimErrorMsg) return
+    const t = setTimeout(() => setClaimErrorMsg(null), 3500)
+    return () => clearTimeout(t)
+  }, [claimErrorMsg])
   useEffect(() => { if (activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate) }, [activeGroupId, effectiveViewingId, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (currentUserId && !viewingMemberId) setViewingMemberId(currentUserId) }, [currentUserId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab !== 'search') loadRadar() }, [rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1875,6 +1887,11 @@ export default function TaskGroupsPage() {
 
   return (
     <div className="p-6">
+      {claimErrorMsg && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 bg-gray-900 text-white text-sm rounded-lg shadow-lg">
+          {claimErrorMsg}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">分组任务</h1>
