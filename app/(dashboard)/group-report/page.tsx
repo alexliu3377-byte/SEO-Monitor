@@ -56,12 +56,16 @@ interface OutcomeRow {
   rank_change: number | null; rank_volume: number; rank_date: string | null
   effectiveness: string
   env_excluded?: boolean
+  source?: string | null
   experiment_group?: 'control' | 'treatment' | null
   rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
 interface PilotStats { ctrlCount: number; trtCount: number; ctrlScore: number | null; trtScore: number | null; diff: number | null }
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume'
+// 认领来源短标签，跟 task-groups 页面的 SourceTag 保持同一套映射，
+// 2026-07-29 加入替代原来的"试点"C/T列。
+const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排' }
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
 type ReportTab = 'submissions' | 'outcomes'
@@ -391,7 +395,7 @@ export default function GroupReportPage() {
 
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
-            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_42px_70px_70px_70px]'
+            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_64px_70px_70px_70px]'
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
@@ -548,7 +552,7 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名量{oSortIcons('rank_volume')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成效</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">得分</span>
-                          <span className="text-[11px] font-medium text-gray-400 text-center">试点</span>
+                          <span className="text-[11px] font-medium text-gray-400 text-center">来源</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
@@ -647,35 +651,9 @@ export default function GroupReportPage() {
                                     </div>
                                   )
                                 })()}
-                                {(() => {
-                                  const eg = row.experiment_group
-                                  async function setEG(val: 'control' | 'treatment' | null) {
-                                    const res = await fetch(`/api/task-groups/${activeTabId}/claimed`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ claimId: row.claim_id, experiment_group: val }),
-                                    })
-                                    if (!res.ok) return
-                                    // Re-fetch rather than patch local state — pilot stats are
-                                    // now computed server-side over the full filtered set, so a
-                                    // client-only patch would leave the Pilot 对比 panel stale.
-                                    loadOutcomes()
-                                  }
-                                  return (
-                                    <div className="flex gap-0.5 justify-center">
-                                      <button
-                                        onClick={() => setEG(eg === 'control' ? null : 'control')}
-                                        title="对照组（不执行规则）"
-                                        className={`text-[10px] font-bold w-5 h-5 rounded transition-colors ${eg === 'control' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-blue-100 hover:text-blue-500'}`}
-                                      >C</button>
-                                      <button
-                                        onClick={() => setEG(eg === 'treatment' ? null : 'treatment')}
-                                        title="实验组（执行规则）"
-                                        className={`text-[10px] font-bold w-5 h-5 rounded transition-colors ${eg === 'treatment' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-amber-100 hover:text-amber-500'}`}
-                                      >T</button>
-                                    </div>
-                                  )
-                                })()}
+                                <span className="text-xs text-gray-500 text-center truncate" title={row.source ?? ''}>
+                                  {SOURCE_LABEL[row.source ?? ''] ?? row.source ?? '—'}
+                                </span>
                                 <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
                                 <span className="text-sm text-gray-500 text-center">{row.record_date.slice(5).replace('-', '/')}</span>
                                 <span className="text-sm text-gray-700 font-medium text-center truncate" title={row.username}>{row.username}</span>

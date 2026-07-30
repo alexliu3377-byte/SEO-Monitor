@@ -181,6 +181,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         ? r.prev_rank_position - r.rank_position
         : null,
       env_excluded: badDates.has(r.record_date),
+      source: claimSourceMap.get(r.claim_id) ?? null,
       experiment_group: expGroupMap.get(r.claim_id) ?? null,
       // Pilot 对比用的分组：手动标的 experiment_group 优先；组员没手动标过的，
       // 按认领来源自动分组（CONTROL_SOURCES 之外都算实验组）——2026-07-29 加
