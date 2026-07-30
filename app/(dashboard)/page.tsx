@@ -425,7 +425,7 @@ export default function DashboardPage() {
                   )}
                   {w.mobileChange !== 0 && (
                     <span className={`text-xs font-semibold ${w.mobileChange > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      移 {w.mobileChange > 0 ? '+' : ''}{w.mobileChange}
+                      m {w.mobileChange > 0 ? '+' : ''}{w.mobileChange}
                     </span>
                   )}
                 </div>
