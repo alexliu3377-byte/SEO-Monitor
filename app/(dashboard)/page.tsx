@@ -991,7 +991,7 @@ export default function DashboardPage() {
 
 // ─── KeywordSearchCard ────────────────────────────────────────────────────────
 
-interface KwVolRow { keyword: string; volume: number; latest_trend?: string | null }
+interface KwVolRow { keyword: string; volume: number; latest_trend?: string | null; volume_change?: number | null }
 
 function KeywordSearchCard() {
   const { role } = useUser()
@@ -1126,8 +1126,14 @@ function KeywordSearchCard() {
                   <span className="text-xs text-gray-700 truncate mr-2">{r.keyword}</span>
                   <span className="text-xs font-medium text-gray-500 flex-shrink-0 tabular-nums flex items-center gap-0.5">
                     {r.volume > 0 ? r.volume.toLocaleString() : '—'}
-                    {r.latest_trend === 'rankup' && <span className="text-green-500 leading-none">↑</span>}
-                    {r.latest_trend === 'rankdown' && <span className="text-red-400 leading-none">↓</span>}
+                    {r.latest_trend === 'rankup' && <span className="text-green-500 leading-none" title="近期排名上升">↑</span>}
+                    {r.latest_trend === 'rankdown' && <span className="text-red-400 leading-none" title="近期排名下降">↓</span>}
+                    {(r.volume_change ?? 0) > 0 && (
+                      <span className="text-green-500 leading-none font-bold cursor-help" title={`搜索量较上次 +${r.volume_change}`}>+</span>
+                    )}
+                    {(r.volume_change ?? 0) < 0 && (
+                      <span className="text-red-400 leading-none font-bold cursor-help" title={`搜索量较上次 ${r.volume_change}`}>−</span>
+                    )}
                   </span>
                 </div>
               ))}
