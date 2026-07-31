@@ -464,7 +464,7 @@ export default function TaskGroupsPage() {
   const [submittingOneId, setSubmittingOneId] = useState<string | null>(null)
   const [claimErrorMsg, setClaimErrorMsg] = useState<string | null>(null)
 
-  const [rightTab, setRightTab] = useState<RightTab>(role === 'super' || role === 'admin' ? 'recommend' : 'volumeRising')
+  const [rightTab, setRightTab] = useState<RightTab>('recommend')
   const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
   const [recSubTab, setRecSubTab] = useState<RecSubTab>('rankdown')
   // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
