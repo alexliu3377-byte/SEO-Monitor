@@ -224,7 +224,7 @@ export default function HotRadarPage() {
   const [data, setData]           = useState<RadarData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>('cross')
+  const [activeTab, setActiveTab] = useState<Tab>('volumeRising')
   const [minSites, setMinSites]   = useState(1)
   const [minStreak, setMinStreak] = useState(2)
   const [filterSite, setFilterSite]       = useState('')
