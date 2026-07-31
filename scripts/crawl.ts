@@ -11,6 +11,7 @@ import {
 } from '../lib/crawler'
 import { createAizhanBrowserSession, fetchRankChangesViaBrowser } from '../lib/crawler-browser'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
+import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -377,10 +378,7 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
       .map(([keyword, v]) => ({ keyword, volume: v.volume, latest_trend: v.latest_trend, stat_date: today }))
     const kwNoVol = Array.from(kwMap.entries()).filter(([, v]) => v.volume <= 0)
       .map(([keyword, v]) => ({ keyword, volume: 0, latest_trend: v.latest_trend, stat_date: today }))
-    for (const chunk of chunkArray(kwWithVol, 500)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword' })
-    }
+    await upsertKeywordVolumeWithChange(supabase, kwWithVol)
     for (const chunk of chunkArray(kwNoVol, 500)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword', ignoreDuplicates: true })

@@ -18,6 +18,7 @@ interface WordLibEntry extends NewWord { longTailCount: number }
 interface RankWord { keyword: string; siteCount: number; volume: number; sites: string[]; last_date: string; first_date: string; rankDays: number }
 interface StreakWord { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }
 interface CrossWord { keyword: string; volume: number; last_date: string; first_date: string; newSites: string[]; rankSites: string[] }
+interface VolumeRisingWord { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string }
 
 interface ClaimedKeyword {
   id: string; keyword: string; source: string
@@ -25,7 +26,7 @@ interface ClaimedKeyword {
   operation_type: string | null; final_keyword: string | null; page_url: string | null
 }
 
-type RightTab = 'recommend' | 'search' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
+type RightTab = 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
 interface DetailRow { date: string; domain: string }
@@ -464,7 +465,7 @@ export default function TaskGroupsPage() {
   const [claimErrorMsg, setClaimErrorMsg] = useState<string | null>(null)
 
   const [rightTab, setRightTab] = useState<RightTab>(role === 'super' || role === 'admin' ? 'recommend' : 'cross')
-  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
+  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
   const [recSubTab, setRecSubTab] = useState<RecSubTab>('rankdown')
   // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
   // 就重新出现的临时前端状态，2026-07-29 加入。
@@ -484,7 +485,7 @@ export default function TaskGroupsPage() {
   const [rdPage, setRdPage] = useState(0)
   const [rankdownDate, setRankdownDate] = useState('')
 
-  const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[] } | null>(null)
+  const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
   const [radarLoaded, setRadarLoaded] = useState(false)
   const [radarLoading, setRadarLoading] = useState(false)
 
@@ -620,6 +621,13 @@ export default function TaskGroupsPage() {
       return b.streak - a.streak || b.volume - a.volume
     })
   }, [radarData, yesterday, groupRankDomains])
+
+  // 搜索量上涨：keyword_volume 没有站点归属，跟其他几类不一样不按分组的
+  // 站点域名过滤，全组共享同一份全局列表。
+  const volumeRisingWordsSorted = useMemo(() => {
+    if (!radarData) return []
+    return [...radarData.volumeRisingWords].sort((a, b) => b.change - a.change)
+  }, [radarData])
 
   const allNewWords = useMemo(() => {
     if (!radarData) return []
@@ -1455,6 +1463,47 @@ export default function TaskGroupsPage() {
 
     if (!radarLoaded || radarLoading) return <Spinner />
 
+    if (rightTab === 'volumeRising') {
+      const base_vr = volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
+        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'change' ? (a.change??0) : 0
+        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'change' ? (b.change??0) : 0
+        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        return sortDir === 'asc' ? va - vb : vb - va
+      }) : base_vr
+      const slice = sorted_vr.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      return (
+        <>
+          <table className="w-full table-fixed">
+            <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+              <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
+              <th className="px-2 py-2 text-left font-medium">关键词</th>
+              <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">涨幅{sortIcons('change')}</span></th>
+              <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
+              <th className="w-14" />
+            </tr></thead>
+            <tbody>
+              {slice.length === 0 ? (
+                <tr><td colSpan={5} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+              ) : slice.map((w, i) => (
+                <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
+                  badge={null}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={null} />}
+                  claimed={claimedSet.has(w.keyword)}
+                  onClaim={() => claimKeyword(w.keyword, '搜索上涨', w.volume)}
+                  onView={() => openDetail(w.keyword, '搜索上涨')}>
+                  <td className="px-2 py-2 text-center text-xs font-medium text-green-600">+{w.change.toLocaleString()}</td>
+                  <td className="px-2 py-2 text-center text-xs text-gray-500">{w.volume > 0 ? w.volume.toLocaleString() : '—'}</td>
+                </KwRow>
+              ))}
+            </tbody>
+          </table>
+          <Pager page={pg} total={sorted_vr.length} onPage={p => setPage('volumeRising', p)} />
+        </>
+      )
+    }
+
     if (rightTab === 'cross') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const base_cross = crossWords.filter(w => !submittedSet.has(w.keyword))
@@ -1771,12 +1820,12 @@ export default function TaskGroupsPage() {
 
   const RIGHT_TABS: [RightTab, string][] = [
     ['recommend', '今日推荐'],
-    ['search', '搜索量查询'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
+    ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
   ]
 
   function SourceTag({ s }: { s: string }) {
-    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排' }
+    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨' }
     return <span className="text-[10px] text-gray-300 flex-shrink-0">{map[s] ?? s}</span>
   }
 
@@ -1922,7 +1971,7 @@ export default function TaskGroupsPage() {
         <div className="card overflow-hidden">
           <div className="flex items-center gap-1.5 px-4 pt-3 pb-0 border-b border-gray-100 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
             {groups.map(g => (
-              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ recommend: 0, search: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
+              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
                 className={`px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap border-b-2 transition-colors ${activeGroupId === g.id ? 'border-green-500 text-green-700 bg-green-50/60' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
                 {g.name}
               </button>

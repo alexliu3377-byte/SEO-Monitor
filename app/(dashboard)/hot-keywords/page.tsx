@@ -27,11 +27,12 @@ interface StreakGrouped {
   keyword: string; streak: number; domains: string[]; volume: number
   last_date: string; first_date: string
 }
-interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[] }
+interface VolumeRisingEntry { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string }
+interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[] }
 interface WeightInfo { pc: number; mobile: number; pcChg: number; mobileChg: number }
 interface DetailRow  { date: string; domain: string }
 
-type Tab      = 'cross' | 'new' | 'rank' | 'streak' | 'wordLib'
+type Tab      = 'cross' | 'volumeRising' | 'new' | 'rank' | 'streak' | 'wordLib'
 type PageSize = 50 | 100 | 500
 const PAGE_SIZES: PageSize[] = [50, 100, 500]
 
@@ -211,6 +212,7 @@ function SiteBadges({ sites, weightMap, idMap, colorMap }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const TAB_CONFIG: { key: Tab; label: string }[] = [
+  { key: 'volumeRising', label: '搜索量上涨' },
   { key: 'cross',   label: '交叉词' },
   { key: 'rank',    label: '竞品涨排名' },
   { key: 'streak',  label: '连续上涨词' },
@@ -441,6 +443,9 @@ export default function HotRadarPage() {
       rankWords:   sortByDate(rw, yesterday, (a, b) => b.volume - a.volume || b.siteCount - a.siteCount),
       crossWords:  sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
       streakWords: data.streakWords || [],
+      // keyword_volume 没有站点归属，跟其他几类不一样不受 minSites 门槛过滤，
+      // 直接按涨幅排序。
+      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => b.change - a.change),
     }
   }, [data, minSites, yesterday])
 
@@ -477,10 +482,11 @@ export default function HotRadarPage() {
   )
 
   const baseList = !filtered ? [] :
-    activeTab === 'cross'   ? filtered.crossWords  :
-    activeTab === 'new'     ? filtered.newWords     :
-    activeTab === 'rank'    ? filtered.rankWords    :
-    activeTab === 'wordLib' ? wordLibFiltered          :
+    activeTab === 'cross'        ? filtered.crossWords        :
+    activeTab === 'volumeRising' ? filtered.volumeRisingWords :
+    activeTab === 'new'          ? filtered.newWords          :
+    activeTab === 'rank'         ? filtered.rankWords         :
+    activeTab === 'wordLib'      ? wordLibFiltered            :
     filteredStreakWords
 
   const activeList = useMemo(() => {
@@ -506,6 +512,7 @@ export default function HotRadarPage() {
           case 'count':         va = a.count ?? 0;      vb = b.count ?? 0;      break
           case 'rankDays':      va = a.rankDays ?? 0;   vb = b.rankDays ?? 0;   break
           case 'streak':        va = a.streak ?? 0;     vb = b.streak ?? 0;     break
+          case 'change':        va = a.change ?? 0;     vb = b.change ?? 0;     break
           case 'longTailCount': va = a.longTailCount ?? 0; vb = b.longTailCount ?? 0; break
           case 'siteCount':     va = a.siteCount ?? 0;  vb = b.siteCount ?? 0;  break
         }
@@ -782,6 +789,51 @@ export default function HotRadarPage() {
                           </td>
                           <td className="table-td text-center">
                             <button onClick={() => openDetail(w.keyword)} className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors">查看</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {/* 搜索量上涨：keyword_volume 没有站点归属，列比其他tab少 */}
+              {activeTab === 'volumeRising' && (
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-24" />
+                    <col className="w-64" />
+                    <col className="w-28" />
+                    <col className="w-28" />
+                    <col />
+                  </colgroup>
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="table-th"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
+                      <th className="table-th">关键词</th>
+                      <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">涨幅{sortIcons('change')}</span></th>
+                      <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">当前搜索量{sortIcons('volume')}</span></th>
+                      <th className="table-th">变化</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pagedList.length === 0 ? (
+                      <tr><td colSpan={5} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+                    ) : (
+                      (pagedList as VolumeRisingEntry[]).map(w => (
+                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={null} />
+                          <td className="table-td font-medium text-gray-900 overflow-hidden">
+                            <span className="block truncate" title={w.keyword}>{w.keyword}</span>
+                          </td>
+                          <td className="table-td text-center">
+                            <span className="font-semibold text-green-600">+{fmtVolume(w.change)}</span>
+                          </td>
+                          <td className="table-td text-center">
+                            <span className="font-semibold text-gray-900">{fmtVolume(w.volume)}</span>
+                          </td>
+                          <td className="table-td text-xs text-gray-400">
+                            {w.prevVolume != null ? `${w.prevVolume.toLocaleString()} → ${w.volume.toLocaleString()}` : '—'}
                           </td>
                         </tr>
                       ))

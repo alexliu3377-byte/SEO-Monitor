@@ -40,6 +40,7 @@ import {
   type HtmlSource,
 } from '@/lib/crawler'
 import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
+import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
 
 interface SiteRecord {
   id: string
@@ -355,10 +356,7 @@ export async function GET(request: Request) {
             .map(([keyword, v]) => ({ keyword, volume: v.volume, latest_trend: v.latest_trend, stat_date: rankDate }))
           const kwNoVol = Array.from(kwMap.entries()).filter(([, v]) => v.volume <= 0)
             .map(([keyword, v]) => ({ keyword, volume: 0, latest_trend: v.latest_trend, stat_date: rankDate }))
-          for (const chunk of chunkArray(kwWithVol, 500)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword' })
-          }
+          await upsertKeywordVolumeWithChange(supabase, kwWithVol)
           for (const chunk of chunkArray(kwNoVol, 500)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword', ignoreDuplicates: true })
@@ -557,10 +555,7 @@ export async function GET(request: Request) {
             .map(([keyword, v]) => ({ keyword, volume: v.volume, latest_trend: v.latest_trend, stat_date: today }))
           const rtKwNoVol = Array.from(rtKwMap.entries()).filter(([, v]) => v.volume <= 0)
             .map(([keyword, v]) => ({ keyword, volume: 0, latest_trend: v.latest_trend, stat_date: today }))
-          for (const chunk of chunkArray(rtKwWithVol, 500)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword' })
-          }
+          await upsertKeywordVolumeWithChange(supabase, rtKwWithVol)
           for (const chunk of chunkArray(rtKwNoVol, 500)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword', ignoreDuplicates: true })
