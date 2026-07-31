@@ -491,7 +491,7 @@ export default function TaskGroupsPage() {
 
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<{ keyword: string; volume: number; latest_trend?: string | null }[]>([])
+  const [searchResults, setSearchResults] = useState<{ keyword: string; volume: number; latest_trend?: string | null; volume_change?: number | null }[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchTotal, setSearchTotal] = useState(0)
   const [searchPage, setSearchPage] = useState(0)
@@ -1416,14 +1416,23 @@ export default function TaskGroupsPage() {
             <div className="text-center py-10 text-gray-400 text-sm">无结果</div>
           ) : (
             <>
-              <table className="w-full">
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                </colgroup>
                 <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="px-3 py-2 text-left font-medium">关键词</th>
-                  <th className="px-2 py-2 text-right font-medium w-24">搜索量</th>
+                  <th className="px-2 py-2 text-center font-medium">搜索量</th>
+                  <th className="px-2 py-2 text-center font-medium">近期涨排</th>
+                  <th className="px-2 py-2 text-center font-medium">搜索变更</th>
                 </tr></thead>
                 <tbody>
                   {searchResults.map((r, i) => {
                     const claimed = claimedSet.has(r.keyword)
+                    const change = r.volume_change ?? 0
                     return (
                       <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '搜索量查询', r.volume)}
                         className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
@@ -1434,12 +1443,18 @@ export default function TaskGroupsPage() {
                           >{r.keyword.length > 26 ? r.keyword.slice(0, 26) + '…' : r.keyword}</span>
                           {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
                         </td>
-                        <td className="px-2 py-2 text-right text-xs text-gray-500 whitespace-nowrap">
-                          <span className="inline-flex items-center gap-0.5">
-                            {r.volume > 0 ? r.volume.toLocaleString() : '—'}
-                            {r.latest_trend === 'rankup' && <span className="text-green-500 leading-none">↑</span>}
-                            {r.latest_trend === 'rankdown' && <span className="text-red-400 leading-none">↓</span>}
-                          </span>
+                        <td className="px-2 py-2 text-center text-xs text-gray-500">
+                          {r.volume > 0 ? r.volume.toLocaleString() : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs">
+                          {r.latest_trend === 'rankup' ? <span className="text-green-600 font-semibold">↑</span>
+                            : r.latest_trend === 'rankdown' ? <span className="text-red-500 font-semibold">↓</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs font-medium">
+                          {change > 0 ? <span className="text-green-600">+{change.toLocaleString()}</span>
+                            : change < 0 ? <span className="text-red-500">{change.toLocaleString()}</span>
+                            : <span className="text-gray-300">—</span>}
                         </td>
                       </tr>
                     )

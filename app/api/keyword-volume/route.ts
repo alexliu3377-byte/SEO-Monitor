@@ -82,7 +82,7 @@ export async function GET(req: Request) {
 
   let dataQuery = supabase
     .from('keyword_volume')
-    .select('keyword, volume, latest_trend')
+    .select('keyword, volume, latest_trend, volume_change')
     .order('volume', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1)
   if (q) dataQuery = dataQuery.ilike('keyword', `%${q}%`)
