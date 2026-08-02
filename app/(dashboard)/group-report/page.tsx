@@ -329,7 +329,7 @@ export default function GroupReportPage() {
 
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
-            const OCOLS = 'grid-cols-[48px_2fr_60px_70px_88px_1.5fr_60px_76px_56px_80px_70px_70px_70px]'
+            const OCOLS = 'grid-cols-[48px_2fr_60px_80px_70px_88px_1.5fr_60px_76px_56px_70px_70px_70px]'
             const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
@@ -480,13 +480,13 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400 text-center">操作</span>
                           <span className="text-[11px] font-medium text-gray-400">最终词 → 关键词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">搜索量{oSortIcons('search_volume')}</span>
+                          <span className="text-[11px] font-medium text-gray-400 text-center">来源</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">收录</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名{oSortIcons('rank_position')}</span>
                           <span className="text-[11px] font-medium text-gray-400">排名词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名量{oSortIcons('rank_volume')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成效</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">得分</span>
-                          <span className="text-[11px] font-medium text-gray-400 text-center">来源</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
@@ -507,6 +507,9 @@ export default function GroupReportPage() {
                                     : <div className="text-xs text-gray-300">—</div>}
                                 </div>
                                 <div className="text-sm text-gray-600 tabular-nums text-center">{fmtVol(row.search_volume)}</div>
+                                <span className="text-xs text-gray-500 text-center truncate" title={row.source ?? ''}>
+                                  {SOURCE_LABEL[row.source ?? ''] ?? row.source ?? '—'}
+                                </span>
                                 <div className="text-center">
                                   {row.is_indexed
                                     ? <span className="text-sm text-blue-600">{row.index_first_seen ? row.index_first_seen.slice(5).replace('-', '/') : '已收录'}</span>
@@ -585,9 +588,6 @@ export default function GroupReportPage() {
                                     </div>
                                   )
                                 })()}
-                                <span className="text-xs text-gray-500 text-center truncate" title={row.source ?? ''}>
-                                  {SOURCE_LABEL[row.source ?? ''] ?? row.source ?? '—'}
-                                </span>
                                 <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
                                 <span className="text-sm text-gray-500 text-center">{row.record_date.slice(5).replace('-', '/')}</span>
                                 <span className="text-sm text-gray-700 text-center truncate" title={row.username}>{row.username}</span>
