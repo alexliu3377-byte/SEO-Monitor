@@ -9,7 +9,7 @@ import {
   type BaiduIndexedPage,
   type BaiduIndexFailReason,
 } from '../lib/crawler'
-import { createAizhanBrowserSession, fetchRankChangesViaBrowser } from '../lib/crawler-browser'
+import { createAizhanHttpSession, fetchRankChangesViaHttp } from '../lib/crawler-aizhan-http'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
@@ -347,13 +347,14 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
   let ok = 0, failed = 0, emptyCount = 0, suspectCount = 0, totalRows = 0, consecutiveEmpty = 0
   const retryQueue: SiteRecord[] = [] // 因限流而为空的站，熔断后补抓
 
-  // 爱站 2026-07 起给涨跌排行加了浏览器指纹验证（约需等待2分钟自动通过，
-  // 详见 lib/crawl-rules.ts "rank" 小节）。这个验证是浏览器会话级、跨站点/
-  // 跨页面通用的，所以只需要在本次抓取开始时过一次，下面整个站点循环
-  // 复用同一个已通过验证的 context。
-  console.log(`  ⏳ 正在通过爱站浏览器验证（约需2分钟）… (${ts()})`)
-  const { browser, context } = await createAizhanBrowserSession()
-  console.log(`  ✓ 浏览器验证通过 (${ts()})`)
+  // 爱站的验证机制到 2026-08 已经简化回轻量的 cookie 挑战（不再是 2026-07
+  // 那套要等~2分钟的浏览器指纹验证，详见 lib/crawl-rules.ts "rank" 小节的
+  // 历史记录），一次 HTTP 请求即可拿到会话 cookie，下面整个站点循环复用
+  // 同一个 session。如果爱站之后又把验证加重，lib/crawler-browser.ts 里的
+  // Playwright 方案还在，换回来只需改这里和上面的 import。
+  console.log(`  ⏳ 正在获取爱站会话 cookie… (${ts()})`)
+  const session = await createAizhanHttpSession()
+  console.log(`  ✓ 会话就绪 (${ts()})`)
 
   // 将一个站点的抓取结果写入数据库
   async function saveRankResult(s: SiteRecord, up: { keyword: string; volume: number }[], down: { keyword: string; volume: number }[]) {
@@ -396,7 +397,6 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
     }
   }
 
-  try {
   for (let idx = 0; idx < sites.length; idx++) {
     const site = sites[idx]
     const prefix = `  [${String(idx + 1).padStart(2)}/${sites.length}] ${site.domain.padEnd(30)}`
@@ -411,9 +411,9 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
       for (const rs of toRetry) {
         const rp = `  [补抓] ${rs.domain.padEnd(30)}`
         try {
-          const up = await fetchRankChangesViaBrowser(context, rs.domain, today, 'rankup')
+          const up = await fetchRankChangesViaHttp(session, rs.domain, today, 'rankup')
           await delay(2000)
-          const down = await fetchRankChangesViaBrowser(context, rs.domain, today, 'rankdown')
+          const down = await fetchRankChangesViaHttp(session, rs.domain, today, 'rankdown')
           await saveRankResult(rs, up, down)
           const stillEmpty = up.length === 0 && down.length === 0
           console.log(`${rp} ✓  涨入=${String(up.length).padStart(4)}  跌出=${String(down.length).padStart(4)}${stillEmpty ? '  ⚠ 仍为空' : '  ✓ 已补数据'}`)
@@ -426,21 +426,21 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
     }
 
     try {
-      let rankupEntries = await fetchRankChangesViaBrowser(context, site.domain, today, 'rankup')
+      let rankupEntries = await fetchRankChangesViaHttp(session, site.domain, today, 'rankup')
       await delay(3000 + Math.floor(Math.random() * 2000)) // 随机 3-5 秒，减少爱站限流概率
-      let rankdownEntries = await fetchRankChangesViaBrowser(context, site.domain, today, 'rankdown')
+      let rankdownEntries = await fetchRankChangesViaHttp(session, site.domain, today, 'rankdown')
       await delay(2000)
 
       if (rankupEntries.length === 0) {
         console.log(`${prefix}   ↺ 涨入为空，重试中…`)
         await delay(5000)
-        rankupEntries = await fetchRankChangesViaBrowser(context, site.domain, today, 'rankup')
+        rankupEntries = await fetchRankChangesViaHttp(session, site.domain, today, 'rankup')
         await delay(2000)
       }
       if (rankdownEntries.length === 0) {
         console.log(`${prefix}   ↺ 跌出为空，重试中…`)
         await delay(5000)
-        rankdownEntries = await fetchRankChangesViaBrowser(context, site.domain, today, 'rankdown')
+        rankdownEntries = await fetchRankChangesViaHttp(session, site.domain, today, 'rankdown')
         await delay(2000)
       }
 
@@ -482,9 +482,6 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
       if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: 'fail', detail: e instanceof Error ? e.message : String(e) })
     }
     await delay(45000) // 站点间 45s，避免触发爱站限流
-  }
-  } finally {
-    await browser.close()
   }
 
   const durationMs = Date.now() - stepStart
@@ -1098,15 +1095,19 @@ async function main() {
   const group = parseInt(args.find((a) => a.startsWith('--group='))?.split('=')[1] ?? '0', 10)
   const totalGroups = parseInt(args.find((a) => a.startsWith('--total-groups='))?.split('=')[1] ?? '1', 10)
   const retryFailed = args.includes('--retry-failed')
+  // 补抓用：只对 rank 步骤生效，覆盖"今天"为指定的历史 MYT 日期（爱站的排名页
+  // 本身支持按日期查历史数据，见 buildRankUrl 的 isToday 分支）。不传就是正常
+  // 当天抓取，其它步骤不读这个参数。
+  const dateOverride = args.find((a) => a.startsWith('--date='))?.split('=')[1] ?? null
 
   const totalStart = Date.now()
   const ip = await getPublicIp()
   console.log(`\n${'▶'.repeat(60)}`)
-  console.log(`  SEO Monitor Crawl${retryFailed ? ' [重试模式]' : ''}`)
+  console.log(`  SEO Monitor Crawl${retryFailed ? ' [重试模式]' : ''}${dateOverride ? ` [补抓 ${dateOverride}]` : ''}`)
   console.log(`  step=${step}  site=${siteFilter ?? 'all'}  group=${group}/${totalGroups}  ip=${ip}  启动时间=${ts()} MYT`)
   console.log(`${'▶'.repeat(60)}`)
 
-  const today = getMalaysiaDate()
+  const today = dateOverride ?? getMalaysiaDate()
   const yesterday = getMalaysiaDate(-1)
 
   let query = supabase.from('sites').select('*')

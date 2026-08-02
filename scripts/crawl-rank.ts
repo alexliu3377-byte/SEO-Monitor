@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { createAizhanBrowserSession, fetchRankupWithTitleViaBrowser, fetchRankdownWithTitleViaBrowser } from '../lib/crawler-browser'
+import { createAizhanHttpSession, fetchRankupWithTitleViaHttp, fetchRankdownWithTitleViaHttp } from '../lib/crawler-aizhan-http'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
@@ -12,6 +12,7 @@ const cliArgs = process.argv.slice(2)
 const group = parseInt(cliArgs.find(a => a.startsWith('--group='))?.split('=')[1] ?? '0', 10)
 const totalGroups = parseInt(cliArgs.find(a => a.startsWith('--total-groups='))?.split('=')[1] ?? '1', 10)
 const retryFailed = cliArgs.includes('--retry-failed')
+const dateOverride = cliArgs.find(a => a.startsWith('--date='))?.split('=')[1] ?? null
 
 function getMalaysiaDate(offsetDays = 0): string {
   const ms = Date.now() + 8 * 60 * 60 * 1000 + offsetDays * 86400000
@@ -39,11 +40,11 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 async function main() {
-  const today = getMalaysiaDate()
+  const today = dateOverride ?? getMalaysiaDate()
   const totalStart = Date.now()
 
   console.log(`\n${'▶'.repeat(60)}`)
-  console.log(`  RANK CRAWL (All Sites)   日期=${today}   ${ts()} MYT`)
+  console.log(`  RANK CRAWL (All Sites)${dateOverride ? ' [补抓]' : ''}   日期=${today}   ${ts()} MYT`)
   console.log(`${'▶'.repeat(60)}`)
 
   // Get runner IP
@@ -122,15 +123,13 @@ async function main() {
   let emptySites = 0
   let failSites = 0
 
-  // 爱站 2026-07 起给排名页加了浏览器指纹验证（约需等待2分钟自动通过，详见
-  // lib/crawl-rules.ts "rank-title" 小节）。这个验证是浏览器会话级、跨站点/
-  // 跨页面通用的，所以只需要在本次抓取开始时过一次，下面整个站点循环复用
-  // 同一个已通过验证的 context。
-  console.log(`  ⏳ 正在通过爱站浏览器验证（约需2分钟）… (${ts()})`)
-  const { browser, context } = await createAizhanBrowserSession()
-  console.log(`  ✓ 浏览器验证通过 (${ts()})`)
+  // 爱站的验证机制到 2026-08 已经简化回轻量的 cookie 挑战（详见
+  // lib/crawl-rules.ts "rank-title" 小节的历史记录），一次 HTTP 请求即可拿到
+  // 会话 cookie，下面整个站点循环复用同一个 session。
+  console.log(`  ⏳ 正在获取爱站会话 cookie… (${ts()})`)
+  const session = await createAizhanHttpSession()
+  console.log(`  ✓ 会话就绪 (${ts()})`)
 
-  try {
   for (let i = 0; i < sites.length; i++) {
     const { id: siteId, domain } = sites[i]
     console.log(`\n${'─'.repeat(50)}`)
@@ -153,8 +152,8 @@ async function main() {
         const label = `${platform}/${type}`
         try {
           const entries = type === 'rankup'
-            ? await fetchRankupWithTitleViaBrowser(context, domain, today, platform)
-            : await fetchRankdownWithTitleViaBrowser(context, domain, today, platform)
+            ? await fetchRankupWithTitleViaHttp(session, domain, today, platform)
+            : await fetchRankdownWithTitleViaHttp(session, domain, today, platform)
 
           if (entries.length === 0) {
             console.log(`    ${label.padEnd(16)} ⚠  无数据（疑似限流或无词）`)
@@ -258,9 +257,6 @@ async function main() {
       console.log(`    等待 60s 再抓下一个站点…`)
       await delay(60000)
     }
-  }
-  } finally {
-    await browser.close()
   }
 
   const dur = Date.now() - totalStart
