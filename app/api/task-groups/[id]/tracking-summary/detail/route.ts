@@ -25,6 +25,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const bucketLabel = searchParams.get('bucket') || ''
   const requestedScope = searchParams.get('scope') || 'own'
   const requestedMemberId = searchParams.get('memberId') || ''
+  const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
+  const pageSize = 50
 
   if (kind === 'rank' && !RANK_BUCKETS.some(b => b.label === bucketLabel)) {
     return NextResponse.json({ error: 'Invalid bucket' }, { status: 400 })
@@ -52,13 +54,24 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     else scopeUserId = requestedMemberId
   }
 
+  // Exact-count first, then size the fetch limit off that count — same
+  // truncation-safe pattern as outcomes/route.ts, so a busy group/month can
+  // never silently lose rows off the end of a fixed cap.
+  let countQuery = service
+    .from('site_tracking_records').select('id', { count: 'exact', head: true })
+    .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
+    .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
+  if (scope === 'own') countQuery = countQuery.eq('user_id', user.id)
+  else if (scope === 'member') countQuery = countQuery.eq('user_id', scopeUserId)
+  const { count: exactCount } = await countQuery
+
   let query = service
     .from('site_tracking_records')
     .select('claim_id, user_id, submit_date, record_date, keyword, final_keyword, search_volume, rank_position, rank_volume, rank_keyword, effectiveness')
     .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
     .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
     .order('record_date', { ascending: false })
-    .limit(5000)
+    .limit(Math.max(exactCount ?? 0, 1))
   if (scope === 'own') query = query.eq('user_id', user.id)
   else if (scope === 'member') query = query.eq('user_id', scopeUserId)
 
@@ -78,7 +91,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         username: showUsername ? (usernameOf.get(r.user_id) ?? r.user_id.slice(0, 8)) : undefined,
       }))
       .sort((a, b) => b.search_volume - a.search_volume)
-    return NextResponse.json({ kind, rows: out })
+    return NextResponse.json({ kind, rows: out.slice(page * pageSize, (page + 1) * pageSize), total: out.length, page, pageSize })
   }
 
   const bucketDef = RANK_BUCKETS.find(b => b.label === bucketLabel)!
@@ -97,5 +110,5 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
   out.sort((a, b) => b.rank_volume - a.rank_volume)
-  return NextResponse.json({ kind, bucket: bucketLabel, rows: out })
+  return NextResponse.json({ kind, bucket: bucketLabel, rows: out.slice(page * pageSize, (page + 1) * pageSize), total: out.length, page, pageSize })
 }

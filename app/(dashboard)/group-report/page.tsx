@@ -208,7 +208,10 @@ export default function GroupReportPage() {
   const [trackingScope, setTrackingScope] = useState<string>(() => (canSeeAll ? 'total' : 'own'))
   const [sourceDetailModal, setSourceDetailModal] = useState<SourceDetailTarget | null>(null)
   const [sourceDetailRows, setSourceDetailRows] = useState<SourceDetailRow[]>([])
+  const [sourceDetailTotal, setSourceDetailTotal] = useState(0)
+  const [sourceDetailPage, setSourceDetailPage] = useState(0)
   const [sourceDetailLoading, setSourceDetailLoading] = useState(false)
+  const sourceDetailTotalPages = Math.max(1, Math.ceil(sourceDetailTotal / DETAIL_PAGE_SIZE))
 
   const today = useMemo(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), [])
 
@@ -310,7 +313,7 @@ export default function GroupReportPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportTab, activeTabId, trackingMonth, trackingScope])
 
-  // Load source-detail drill-down (获取收录/排名区间"查看")
+  // Load source-detail drill-down (获取收录/排名区间"查看")，50条/页
   useEffect(() => {
     if (!sourceDetailModal || !activeTabId) return
     setSourceDetailLoading(true)
@@ -318,11 +321,12 @@ export default function GroupReportPage() {
     const p = scopeParams(trackingMonth, trackingScope)
     p.set('kind', sourceDetailModal.kind)
     if (sourceDetailModal.bucket) p.set('bucket', sourceDetailModal.bucket)
+    p.set('page', String(sourceDetailPage))
     fetch(`/api/task-groups/${activeTabId}/tracking-summary/detail?${p}`)
       .then(r => r.json())
-      .then(d => setSourceDetailRows(d.rows || []))
+      .then(d => { setSourceDetailRows(d.rows || []); setSourceDetailTotal(d.total || 0) })
       .finally(() => setSourceDetailLoading(false))
-  }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope])
+  }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope, sourceDetailPage])
 
   // Load detail keywords on demand
   useEffect(() => {
@@ -809,7 +813,7 @@ export default function GroupReportPage() {
                               </td>
                               <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{view.indexed.volume > 0 ? fmtVol(view.indexed.volume) : '—'}</td>
                               <td className="px-2 py-2 text-center">
-                                <button onClick={() => setSourceDetailModal({ kind: 'indexed' })} disabled={view.indexed.count === 0}
+                                <button onClick={() => { setSourceDetailModal({ kind: 'indexed' }); setSourceDetailPage(0) }} disabled={view.indexed.count === 0}
                                   className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                               </td>
                             </tr>
@@ -843,7 +847,7 @@ export default function GroupReportPage() {
                                 </td>
                                 <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
                                 <td className="px-2 py-2 text-center">
-                                  <button onClick={() => setSourceDetailModal({ kind: 'rank', bucket: b.label })} disabled={b.count === 0}
+                                  <button onClick={() => { setSourceDetailModal({ kind: 'rank', bucket: b.label }); setSourceDetailPage(0) }} disabled={b.count === 0}
                                     className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                                 </td>
                               </tr>
@@ -984,7 +988,7 @@ export default function GroupReportPage() {
                 <h3 className="text-base font-semibold text-gray-900">
                   {sourceDetailModal.kind === 'indexed' ? '获取收录' : `排名 ${sourceDetailModal.bucket}`}
                 </h3>
-                <p className="text-xs text-gray-400 mt-0.5">共 {sourceDetailRows.length} 词</p>
+                <p className="text-xs text-gray-400 mt-0.5">共 {sourceDetailTotal} 词</p>
               </div>
               <button onClick={() => setSourceDetailModal(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -1043,6 +1047,18 @@ export default function GroupReportPage() {
                 </>
               )}
             </div>
+            {sourceDetailTotalPages > 1 && (
+              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/40 flex-shrink-0">
+                <span className="text-xs text-gray-400">{sourceDetailPage * DETAIL_PAGE_SIZE + 1}–{Math.min((sourceDetailPage + 1) * DETAIL_PAGE_SIZE, sourceDetailTotal)} 条，共 {sourceDetailTotal} 条</span>
+                <div className="flex items-center gap-1">
+                  <button disabled={sourceDetailPage === 0} onClick={() => setSourceDetailPage(p => p - 1)}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">上一页</button>
+                  <span className="text-xs text-gray-400 px-2">{sourceDetailPage + 1} / {sourceDetailTotalPages}</span>
+                  <button disabled={sourceDetailPage >= sourceDetailTotalPages - 1} onClick={() => setSourceDetailPage(p => p + 1)}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">下一页</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
