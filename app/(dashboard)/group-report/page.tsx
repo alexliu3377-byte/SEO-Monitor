@@ -802,7 +802,7 @@ export default function GroupReportPage() {
                           </tr></thead>
                           <tbody>
                             <tr className="border-b border-gray-50 last:border-0">
-                              <td className="px-2 py-2 text-sm text-gray-700">获取收录</td>
+                              <td className="px-2 py-2 text-sm text-gray-700">排除排名</td>
                               <td className="px-2 pr-6 py-2 text-sm text-gray-700 text-center tabular-nums">{view.indexed.count}</td>
                               <td className="pl-4 pr-2 py-2">
                                 <div className="flex flex-wrap gap-1">
