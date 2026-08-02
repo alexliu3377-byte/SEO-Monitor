@@ -128,6 +128,28 @@ export async function createAizhanHttpSession(bootstrapDomain = 'baidu.com'): Pr
   return session
 }
 
+// The 5 rank positions used to run fully in parallel (mirroring the old
+// Playwright version, which opened 5 separate pages). Under plain fetch that
+// makes 5 sockets to baidurank.aizhan.com in the same tick, which the server
+// answers with `UND_ERR_SOCKET other side closed` on most of them (verified
+// 2026-08-02) — so effectively every fetch needed its full 3-attempt retry
+// just to get past this self-inflicted collision. Capping concurrency at 2
+// (plus a small per-task jitter) avoids that and is also gentler on aizhan,
+// which matters more now that a single request round-trip is enough — there's
+// no reason to hammer it just because we technically can.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
 async function fetchHtmlWithRetry(session: AizhanHttpSession, url: string, referer?: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -161,8 +183,8 @@ export async function fetchRankChangesViaHttp(
   type: RankType
 ): Promise<{ keyword: string; volume: number }[]> {
   const isToday = isTodayMY(date)
-  const allResults = await Promise.all(
-    [1, 2, 3, 4, 5].map(async (rankPos) => {
+  const allResults = await mapWithConcurrency([1, 2, 3, 4, 5], 2, async (rankPos) => {
+      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 400)))
       const entries: { keyword: string; volume: number }[] = []
       let referer = 'https://baidurank.aizhan.com/'
       for (let p = 1; p <= 15; p++) {
@@ -179,7 +201,6 @@ export async function fetchRankChangesViaHttp(
       }
       return entries
     })
-  )
 
   const seen = new Map<string, number>()
   for (const e of allResults.flat()) {
@@ -198,8 +219,8 @@ async function fetchWithTitleViaHttp(
   platform: Platform
 ): Promise<{ keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[]> {
   const isToday = isTodayMY(date)
-  const allResults = await Promise.all(
-    [1, 2, 3, 4, 5].map(async (rankPos) => {
+  const allResults = await mapWithConcurrency([1, 2, 3, 4, 5], 2, async (rankPos) => {
+      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 400)))
       const entries: { keyword: string; volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }[] = []
       let referer = 'https://baidurank.aizhan.com/'
       for (let p = 1; p <= 15; p++) {
@@ -216,7 +237,6 @@ async function fetchWithTitleViaHttp(
       }
       return entries
     })
-  )
 
   const seen = new Map<string, { volume: number; title: string; url: string; rank_position: number | null; prev_rank: number | null }>()
   for (const e of allResults.flat()) {
