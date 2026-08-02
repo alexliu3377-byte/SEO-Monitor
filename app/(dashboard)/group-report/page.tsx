@@ -56,7 +56,7 @@ type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_pos
 const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品涨排', '连续上涨词': '连续上涨', '共新增词': '共新增词', '搜索量查询': '搜索查询', '交叉词': '交叉词', '更新词库': '更新词库', '手动添加': '手动添加', '跌词更新': '跌词更新', '跌排更新': '跌排更新', '涨排更新': '涨排更新', '搜索上涨': '搜索上涨' }
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
-type ReportTab = 'submissions' | 'outcomes'
+type ReportTab = 'submissions' | 'outcomes' | 'trackingSummary'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -180,6 +180,25 @@ export default function GroupReportPage() {
   const [oPage, setOPage] = useState(0)
   const [oPageSize, setOPageSize] = useState(20)
 
+  // 追踪汇总 tab state
+  interface TrackingBucket { label: string; count: number; volume: number }
+  interface TrackingMemberSummary {
+    userId: string; username: string
+    submitted: { total: number; bySource: { source: string; count: number }[] }
+    indexed: { count: number; volume: number }
+    ranked: { total: number; buckets: TrackingBucket[] }
+  }
+  interface TrackingSummaryData {
+    month: string; canSeeAll: boolean
+    own: TrackingMemberSummary
+    members?: TrackingMemberSummary[]
+    groupTotal?: TrackingMemberSummary
+  }
+  const [trackingMonth, setTrackingMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
+  const [trackingSummary, setTrackingSummary] = useState<TrackingSummaryData | null>(null)
+  const [trackingSummaryLoading, setTrackingSummaryLoading] = useState(false)
+  const [trackingScope, setTrackingScope] = useState<'total' | 'own' | string>('total')
+
   const today = useMemo(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), [])
 
   // Load groups
@@ -260,6 +279,20 @@ export default function GroupReportPage() {
   }
   useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
 
+  // Load tracking summary
+  useEffect(() => {
+    if (reportTab !== 'trackingSummary' || !activeTabId) return
+    setTrackingSummaryLoading(true)
+    fetch(`/api/task-groups/${activeTabId}/tracking-summary?month=${trackingMonth}`)
+      .then(r => r.json())
+      .then(d => {
+        setTrackingSummary(d)
+        setTrackingScope(prev => (d.canSeeAll ? (prev === 'own' || d.members?.some((m: TrackingMemberSummary) => m.userId === prev) ? prev : 'total') : 'own'))
+      })
+      .finally(() => setTrackingSummaryLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportTab, activeTabId, trackingMonth])
+
   // Load detail keywords on demand
   useEffect(() => {
     if (!detailModal || !activeTabId) return
@@ -319,7 +352,7 @@ export default function GroupReportPage() {
 
           {/* Sub-tabs */}
           <div className="flex items-center gap-0 border-b border-gray-100">
-            {([['submissions', '提交记录'], ['outcomes', '成效追踪']] as [ReportTab, string][]).map(([tab, label]) => (
+            {([['submissions', '提交记录'], ['outcomes', '成效追踪'], ['trackingSummary', '追踪汇总']] as [ReportTab, string][]).map(([tab, label]) => (
               <button key={tab} onClick={() => setReportTab(tab)}
                 className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${reportTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                 {label}
@@ -620,6 +653,97 @@ export default function GroupReportPage() {
                     </>
                   )}
                 </div>
+              </div>
+            )
+          })()}
+
+          {/* ── 追踪汇总 ── */}
+          {reportTab === 'trackingSummary' && (() => {
+            if (trackingSummaryLoading || !trackingSummary) return <Spinner />
+            const shiftMonth = (delta: number) => {
+              const [y, m] = trackingMonth.split('-').map(Number)
+              const d = new Date(Date.UTC(y, m - 1 + delta, 1))
+              setTrackingMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
+            }
+            const isCurrentMonth = trackingMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
+            const view: TrackingMemberSummary | undefined =
+              trackingScope === 'total' ? trackingSummary.groupTotal :
+              trackingScope === 'own'   ? trackingSummary.own :
+              trackingSummary.members?.find(m => m.userId === trackingScope)
+            return (
+              <div>
+                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => shiftMonth(-1)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">‹</button>
+                    <span className="text-sm font-medium text-gray-700 tabular-nums w-20 text-center">{trackingMonth}</span>
+                    <button onClick={() => shiftMonth(1)} disabled={isCurrentMonth}
+                      className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
+                  </div>
+                  {trackingSummary.canSeeAll && (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <button onClick={() => setTrackingScope('total')}
+                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'total' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>全组汇总</button>
+                      <button onClick={() => setTrackingScope('own')}
+                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>我自己</button>
+                      {(trackingSummary.members ?? []).filter(m => m.userId !== currentUserId).map(m => (
+                        <button key={m.userId} onClick={() => setTrackingScope(m.userId)}
+                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === m.userId ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{m.username}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!view || view.submitted.total === 0 ? (
+                  <div className="text-center py-10 text-gray-400 text-sm">这个月还没有数据</div>
+                ) : (
+                  <div className="space-y-5 max-w-2xl">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-gray-50 rounded-xl p-3">
+                        <div className="text-xs text-gray-400 mb-1">提交条数</div>
+                        <div className="text-xl font-bold text-gray-800 tabular-nums">{view.submitted.total}</div>
+                      </div>
+                      <div className="bg-blue-50 rounded-xl p-3">
+                        <div className="text-xs text-blue-400 mb-1">获取收录</div>
+                        <div className="text-xl font-bold text-blue-600 tabular-nums">{view.indexed.count}</div>
+                        <div className="text-[11px] text-blue-400 mt-0.5">搜索量 {fmtVol(view.indexed.volume)}</div>
+                      </div>
+                      <div className="bg-green-50 rounded-xl p-3">
+                        <div className="text-xs text-green-500 mb-1">获取排名</div>
+                        <div className="text-xl font-bold text-green-600 tabular-nums">{view.ranked.total}</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-gray-400 mb-2">提交来源</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {view.submitted.bySource.map(s => (
+                          <span key={s.source} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2.5 py-1">
+                            {SOURCE_LABEL[s.source] ?? s.source} <span className="font-semibold">{s.count}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs text-gray-400 mb-2">排名分布</div>
+                      <table className="w-full">
+                        <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                          <th className="px-2 py-1.5 text-left font-medium">排名区间</th>
+                          <th className="px-2 py-1.5 text-right font-medium">词数</th>
+                          <th className="px-2 py-1.5 text-right font-medium">总搜索量</th>
+                        </tr></thead>
+                        <tbody>
+                          {view.ranked.buckets.map(b => (
+                            <tr key={b.label} className="border-b border-gray-50 last:border-0">
+                              <td className="px-2 py-1.5 text-sm text-gray-700">{b.label}</td>
+                              <td className="px-2 py-1.5 text-sm text-gray-700 text-right tabular-nums">{b.count}</td>
+                              <td className="px-2 py-1.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}

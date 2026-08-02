@@ -26,7 +26,7 @@ interface ClaimedKeyword {
   operation_type: string | null; final_keyword: string | null; page_url: string | null
 }
 
-type RightTab = 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown' | 'trackingSummary'
+type RightTab = 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
 interface DetailRow { date: string; domain: string }
@@ -465,7 +465,7 @@ export default function TaskGroupsPage() {
   const [claimErrorMsg, setClaimErrorMsg] = useState<string | null>(null)
 
   const [rightTab, setRightTab] = useState<RightTab>('recommend')
-  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0, trackingSummary: 0 })
+  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
   const [recSubTab, setRecSubTab] = useState<RecSubTab>('rankdown')
   // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
   // 就重新出现的临时前端状态，2026-07-29 加入。
@@ -484,24 +484,6 @@ export default function TaskGroupsPage() {
   const [submissionHistoryKey, setSubmissionHistoryKey] = useState<string | null>(null)
   const [rdPage, setRdPage] = useState(0)
   const [rankdownDate, setRankdownDate] = useState('')
-
-  interface TrackingBucket { label: string; count: number; volume: number }
-  interface TrackingMemberSummary {
-    userId: string; username: string
-    submitted: { total: number; bySource: { source: string; count: number }[] }
-    indexed: { count: number; volume: number }
-    ranked: { total: number; buckets: TrackingBucket[] }
-  }
-  interface TrackingSummaryData {
-    month: string; canSeeAll: boolean
-    own: TrackingMemberSummary
-    members?: TrackingMemberSummary[]
-    groupTotal?: TrackingMemberSummary
-  }
-  const [trackingMonth, setTrackingMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
-  const [trackingSummary, setTrackingSummary] = useState<TrackingSummaryData | null>(null)
-  const [trackingSummaryLoading, setTrackingSummaryLoading] = useState(false)
-  const [trackingScope, setTrackingScope] = useState<'total' | 'own' | string>('total') // 'total' | 'own' | userId
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
   const [radarLoaded, setRadarLoaded] = useState(false)
@@ -1127,17 +1109,6 @@ export default function TaskGroupsPage() {
   useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadSiteRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadDismissedRec() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (rightTab !== 'trackingSummary' || !activeGroupId) return
-    setTrackingSummaryLoading(true)
-    fetch(`/api/task-groups/${activeGroupId}/tracking-summary?month=${trackingMonth}`)
-      .then(r => r.json())
-      .then(d => {
-        setTrackingSummary(d)
-        setTrackingScope(prev => (d.canSeeAll ? (prev === 'own' || d.members?.some((m: TrackingMemberSummary) => m.userId === prev) ? prev : 'total') : 'own'))
-      })
-      .finally(() => setTrackingSummaryLoading(false))
-  }, [rightTab, activeGroupId, trackingMonth]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
@@ -1855,96 +1826,6 @@ export default function TaskGroupsPage() {
       )
     }
 
-    if (rightTab === 'trackingSummary') {
-      if (trackingSummaryLoading || !trackingSummary) return <Spinner />
-      const shiftMonth = (delta: number) => {
-        const [y, m] = trackingMonth.split('-').map(Number)
-        const d = new Date(Date.UTC(y, m - 1 + delta, 1))
-        setTrackingMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
-      }
-      const isCurrentMonth = trackingMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
-      const view: TrackingMemberSummary | undefined =
-        trackingScope === 'total' ? trackingSummary.groupTotal :
-        trackingScope === 'own'   ? trackingSummary.own :
-        trackingSummary.members?.find(m => m.userId === trackingScope)
-      return (
-        <div>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex items-center gap-1">
-              <button onClick={() => shiftMonth(-1)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">‹</button>
-              <span className="text-sm font-medium text-gray-700 tabular-nums w-20 text-center">{trackingMonth}</span>
-              <button onClick={() => shiftMonth(1)} disabled={isCurrentMonth}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
-            </div>
-            {trackingSummary.canSeeAll && (
-              <div className="flex items-center gap-1 flex-wrap">
-                <button onClick={() => setTrackingScope('total')}
-                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'total' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>全组汇总</button>
-                <button onClick={() => setTrackingScope('own')}
-                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>我自己</button>
-                {(trackingSummary.members ?? []).filter(m => m.userId !== currentUserId).map(m => (
-                  <button key={m.userId} onClick={() => setTrackingScope(m.userId)}
-                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === m.userId ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{m.username}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          {!view || view.submitted.total === 0 ? (
-            <div className="text-center py-10 text-gray-400 text-sm">这个月还没有数据</div>
-          ) : (
-            <div className="space-y-5">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-gray-50 rounded-xl p-3">
-                  <div className="text-xs text-gray-400 mb-1">提交条数</div>
-                  <div className="text-xl font-bold text-gray-800 tabular-nums">{view.submitted.total}</div>
-                </div>
-                <div className="bg-blue-50 rounded-xl p-3">
-                  <div className="text-xs text-blue-400 mb-1">获取收录</div>
-                  <div className="text-xl font-bold text-blue-600 tabular-nums">{view.indexed.count}</div>
-                  <div className="text-[11px] text-blue-400 mt-0.5">搜索量 {fmtVol(view.indexed.volume)}</div>
-                </div>
-                <div className="bg-green-50 rounded-xl p-3">
-                  <div className="text-xs text-green-500 mb-1">获取排名</div>
-                  <div className="text-xl font-bold text-green-600 tabular-nums">{view.ranked.total}</div>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-400 mb-2">提交来源</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {view.submitted.bySource.map(s => (
-                    <span key={s.source} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
-                      <SourceTag s={s.source} /> <span className="font-semibold">{s.count}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-400 mb-2">排名分布</div>
-                <table className="w-full">
-                  <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-                    <th className="px-2 py-1.5 text-left font-medium">排名区间</th>
-                    <th className="px-2 py-1.5 text-right font-medium">词数</th>
-                    <th className="px-2 py-1.5 text-right font-medium">总搜索量</th>
-                  </tr></thead>
-                  <tbody>
-                    {view.ranked.buckets.map(b => (
-                      <tr key={b.label} className="border-b border-gray-50 last:border-0">
-                        <td className="px-2 py-1.5 text-sm text-gray-700">{b.label}</td>
-                        <td className="px-2 py-1.5 text-sm text-gray-700 text-right tabular-nums">{b.count}</td>
-                        <td className="px-2 py-1.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )
-    }
-
     return null
   }
 
@@ -1956,7 +1837,6 @@ export default function TaskGroupsPage() {
     ['recommend', '今日推荐'],
     ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
-    ['trackingSummary', '追踪汇总'],
   ]
 
   function SourceTag({ s }: { s: string }) {
@@ -2106,7 +1986,7 @@ export default function TaskGroupsPage() {
         <div className="card overflow-hidden">
           <div className="flex items-center gap-1.5 px-4 pt-3 pb-0 border-b border-gray-100 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
             {groups.map(g => (
-              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0, trackingSummary: 0 }) }}
+              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
                 className={`px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap border-b-2 transition-colors ${activeGroupId === g.id ? 'border-green-500 text-green-700 bg-green-50/60' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
                 {g.name}
               </button>
