@@ -626,7 +626,7 @@ export default function TaskGroupsPage() {
   // 站点域名过滤，全组共享同一份全局列表。
   const volumeRisingWordsSorted = useMemo(() => {
     if (!radarData) return []
-    return [...radarData.volumeRisingWords].sort((a, b) => b.change - a.change)
+    return [...radarData.volumeRisingWords].sort((a, b) => b.last_date.localeCompare(a.last_date) || b.change - a.change)
   }, [radarData])
 
   const allNewWords = useMemo(() => {

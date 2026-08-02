@@ -445,7 +445,7 @@ export default function HotRadarPage() {
       streakWords: data.streakWords || [],
       // keyword_volume 没有站点归属，跟其他几类不一样不受 minSites 门槛过滤，
       // 直接按涨幅排序。
-      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => b.change - a.change),
+      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => b.last_date.localeCompare(a.last_date) || b.change - a.change),
     }
   }, [data, minSites, yesterday])
 
