@@ -795,16 +795,16 @@ export default function GroupReportPage() {
                         <table className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                             <th className="px-2 py-1.5 text-left font-medium w-28">类目</th>
-                            <th className="px-2 py-1.5 text-right font-medium w-20">条数</th>
-                            <th className="px-2 py-1.5 text-left font-medium">来源</th>
+                            <th className="px-2 pr-6 py-1.5 text-center font-medium w-20">条数</th>
+                            <th className="pl-4 pr-2 py-1.5 text-left font-medium">来源</th>
                             <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
                             <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
                           </tr></thead>
                           <tbody>
                             <tr className="border-b border-gray-50 last:border-0">
                               <td className="px-2 py-2 text-sm text-gray-700">获取收录</td>
-                              <td className="px-2 py-2 text-sm text-gray-700 text-right tabular-nums">{view.indexed.count}</td>
-                              <td className="px-2 py-2">
+                              <td className="px-2 pr-6 py-2 text-sm text-gray-700 text-center tabular-nums">{view.indexed.count}</td>
+                              <td className="pl-4 pr-2 py-2">
                                 <div className="flex flex-wrap gap-1">
                                   {view.indexed.bySource.map(s => (
                                     <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
@@ -828,8 +828,8 @@ export default function GroupReportPage() {
                         <table className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                             <th className="px-2 py-1.5 text-left font-medium w-28">排名区间</th>
-                            <th className="px-2 py-1.5 text-right font-medium w-20">词数</th>
-                            <th className="px-2 py-1.5 text-left font-medium">来源</th>
+                            <th className="px-2 pr-6 py-1.5 text-center font-medium w-20">词数</th>
+                            <th className="pl-4 pr-2 py-1.5 text-left font-medium">来源</th>
                             <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
                             <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
                           </tr></thead>
@@ -837,8 +837,8 @@ export default function GroupReportPage() {
                             {view.ranked.buckets.map(b => (
                               <tr key={b.label} className="border-b border-gray-50 last:border-0">
                                 <td className="px-2 py-2 text-sm text-gray-700">{b.label}</td>
-                                <td className="px-2 py-2 text-sm text-gray-700 text-right tabular-nums">{b.count}</td>
-                                <td className="px-2 py-2">
+                                <td className="px-2 pr-6 py-2 text-sm text-gray-700 text-center tabular-nums">{b.count}</td>
+                                <td className="pl-4 pr-2 py-2">
                                   <div className="flex flex-wrap gap-1">
                                     {b.bySource.map(s => (
                                       <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
