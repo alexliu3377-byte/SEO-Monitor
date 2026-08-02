@@ -18,13 +18,15 @@ function monthRange(month: string): { start: string; end: string } {
   return { start, end }
 }
 
+// Keywords ranked beyond 50 aren't tracked in a bucket (dropped from the
+// breakdown entirely, per user request) — they still count toward
+// ranked.total via effectiveness, just not toward any bucket/bySource here.
 const RANK_BUCKETS: { label: string; min: number; max: number }[] = [
   { label: '1-10',   min: 1,  max: 10 },
   { label: '11-20',  min: 11, max: 20 },
   { label: '21-30',  min: 21, max: 30 },
   { label: '31-40',  min: 31, max: 40 },
   { label: '41-50',  min: 41, max: 50 },
-  { label: '50+',    min: 51, max: Infinity },
 ]
 
 interface MemberSummary {
@@ -32,7 +34,11 @@ interface MemberSummary {
   username: string
   submitted: { total: number; bySource: { source: string; count: number }[] }
   indexed: { count: number; volume: number }
-  ranked: { total: number; buckets: { label: string; count: number; volume: number }[] }
+  ranked: {
+    total: number
+    buckets: { label: string; count: number; volume: number }[]
+    bySource: { source: string; count: number }[]
+  }
 }
 
 function emptySummary(userId: string, username: string): MemberSummary {
@@ -40,7 +46,7 @@ function emptySummary(userId: string, username: string): MemberSummary {
     userId, username,
     submitted: { total: 0, bySource: [] },
     indexed: { count: 0, volume: 0 },
-    ranked: { total: 0, buckets: RANK_BUCKETS.map(b => ({ label: b.label, count: 0, volume: 0 })) },
+    ranked: { total: 0, buckets: RANK_BUCKETS.map(b => ({ label: b.label, count: 0, volume: 0 })), bySource: [] },
   }
 }
 
@@ -159,16 +165,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         const target = s.ranked.buckets.find(b => b.label === bucket.label)!
         target.count++
         target.volume += m.volume || 0
+        const bySrc = s.ranked.bySource.find(b => b.source === src)
+        if (bySrc) bySrc.count++
+        else s.ranked.bySource.push({ source: src, count: 1 })
       }
     }
   }
 
-  for (const s of Array.from(summaries.values())) s.submitted.bySource.sort((a, b) => b.count - a.count)
+  for (const s of Array.from(summaries.values())) {
+    s.submitted.bySource.sort((a, b) => b.count - a.count)
+    s.ranked.bySource.sort((a, b) => b.count - a.count)
+  }
 
   const own = summaries.get(user.id) ?? emptySummary(user.id, usernameOf.get(user.id) ?? user.id.slice(0, 8))
+  // Super/admin accounts often aren't members of the group at all (they view
+  // as overseers, not as claiming members) — the UI uses this to decide
+  // whether an "own" view even makes sense to offer them.
+  const isMember = memberList.some(m => m.user_id === user.id)
 
   if (!canSeeAll) {
-    return NextResponse.json({ month, canSeeAll: false, own, truncated: (rawRows?.length ?? 0) < (exactCount ?? 0) })
+    return NextResponse.json({ month, canSeeAll: false, own, isMember, truncated: (rawRows?.length ?? 0) < (exactCount ?? 0) })
   }
 
   const members = memberList
@@ -190,11 +206,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       groupTotal.ranked.buckets[i].count += b.count
       groupTotal.ranked.buckets[i].volume += b.volume
     })
+    for (const b of s.ranked.bySource) {
+      const existing = groupTotal.ranked.bySource.find(x => x.source === b.source)
+      if (existing) existing.count += b.count
+      else groupTotal.ranked.bySource.push({ source: b.source, count: b.count })
+    }
   }
   groupTotal.submitted.bySource.sort((a, b) => b.count - a.count)
+  groupTotal.ranked.bySource.sort((a, b) => b.count - a.count)
 
   return NextResponse.json({
-    month, canSeeAll: true, own, members, groupTotal,
+    month, canSeeAll: true, own, members, groupTotal, isMember,
     truncated: (rawRows?.length ?? 0) < (exactCount ?? 0),
   })
 }

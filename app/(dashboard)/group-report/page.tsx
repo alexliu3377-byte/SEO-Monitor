@@ -186,11 +186,12 @@ export default function GroupReportPage() {
     userId: string; username: string
     submitted: { total: number; bySource: { source: string; count: number }[] }
     indexed: { count: number; volume: number }
-    ranked: { total: number; buckets: TrackingBucket[] }
+    ranked: { total: number; buckets: TrackingBucket[]; bySource: { source: string; count: number }[] }
   }
   interface TrackingSummaryData {
     month: string; canSeeAll: boolean
     own: TrackingMemberSummary
+    isMember: boolean
     members?: TrackingMemberSummary[]
     groupTotal?: TrackingMemberSummary
   }
@@ -683,8 +684,12 @@ export default function GroupReportPage() {
                     <div className="flex items-center gap-1 flex-wrap">
                       <button onClick={() => setTrackingScope('total')}
                         className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'total' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>全组汇总</button>
-                      <button onClick={() => setTrackingScope('own')}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>我自己</button>
+                      {/* super/admin 常常不是这个组的成员（只是以管理者身份查看），
+                          这种情况下"我自己"没有意义（永远是空的），直接不显示。 */}
+                      {trackingSummary.isMember && (
+                        <button onClick={() => setTrackingScope('own')}
+                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{trackingSummary.own.username}</button>
+                      )}
                       {(trackingSummary.members ?? []).filter(m => m.userId !== currentUserId).map(m => (
                         <button key={m.userId} onClick={() => setTrackingScope(m.userId)}
                           className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === m.userId ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{m.username}</button>
@@ -739,9 +744,31 @@ export default function GroupReportPage() {
                               <td className="px-2 py-1.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
                             </tr>
                           ))}
+                          <tr className="border-t border-gray-200">
+                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800">总计</td>
+                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800 text-right tabular-nums">
+                              {view.ranked.buckets.reduce((s, b) => s + b.count, 0)}
+                            </td>
+                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800 text-right tabular-nums">
+                              {fmtVol(view.ranked.buckets.reduce((s, b) => s + b.volume, 0))}
+                            </td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
+
+                    {view.ranked.bySource.length > 0 && (
+                      <div>
+                        <div className="text-xs text-gray-400 mb-2">排名词来源</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {view.ranked.bySource.map(s => (
+                            <span key={s.source} className="text-xs bg-green-50 text-green-700 rounded-full px-2.5 py-1">
+                              {SOURCE_LABEL[s.source] ?? s.source} <span className="font-semibold">{s.count}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
