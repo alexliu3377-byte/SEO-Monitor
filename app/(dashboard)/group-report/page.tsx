@@ -181,24 +181,34 @@ export default function GroupReportPage() {
   const [oPageSize, setOPageSize] = useState(20)
 
   // 追踪汇总 tab state
-  interface TrackingBucket { label: string; count: number; volume: number }
-  interface TrackingMemberSummary {
+  interface SourceEff { source: string; total: number; ranked: number; effective: number; avgScore: number | null }
+  interface TrackingBucket { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }
+  interface TrackingSummary {
     userId: string; username: string
-    submitted: { total: number; bySource: { source: string; count: number }[] }
-    indexed: { count: number; volume: number }
-    ranked: { total: number; buckets: TrackingBucket[]; bySource: { source: string; count: number }[] }
+    submitted: { total: number }
+    indexed: { count: number; volume: number; bySource: { source: string; count: number }[] }
+    ranked: { total: number; totalVolume: number; buckets: TrackingBucket[] }
   }
-  interface TrackingSummaryData {
-    month: string; canSeeAll: boolean
-    own: TrackingMemberSummary
-    isMember: boolean
-    members?: TrackingMemberSummary[]
-    groupTotal?: TrackingMemberSummary
+  interface TrackingSummaryResponse {
+    month: string; canSeeAll: boolean; isMember: boolean; scope: string
+    memberList?: { userId: string; username: string }[]
+    summary: TrackingSummary
+    groupSourceEffectiveness: SourceEff[]
+    scopeSourceEffectiveness: SourceEff[]
+  }
+  interface SourceDetailTarget { kind: 'indexed' | 'rank'; bucket?: string }
+  interface SourceDetailRow {
+    keyword: string; final_keyword: string | null
+    search_volume?: number; rank_position?: number; rank_keyword?: string; rank_volume?: number
+    source: string; username?: string
   }
   const [trackingMonth, setTrackingMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
-  const [trackingSummary, setTrackingSummary] = useState<TrackingSummaryData | null>(null)
-  const [trackingSummaryLoading, setTrackingSummaryLoading] = useState(false)
-  const [trackingScope, setTrackingScope] = useState<'total' | 'own' | string>('total')
+  const [trackingData, setTrackingData] = useState<TrackingSummaryResponse | null>(null)
+  const [trackingLoading, setTrackingLoading] = useState(false)
+  const [trackingScope, setTrackingScope] = useState<string>(() => (canSeeAll ? 'total' : 'own'))
+  const [sourceDetailModal, setSourceDetailModal] = useState<SourceDetailTarget | null>(null)
+  const [sourceDetailRows, setSourceDetailRows] = useState<SourceDetailRow[]>([])
+  const [sourceDetailLoading, setSourceDetailLoading] = useState(false)
 
   const today = useMemo(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), [])
 
@@ -281,18 +291,38 @@ export default function GroupReportPage() {
   useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
 
   // Load tracking summary
+  function scopeParams(month: string, scope: string): URLSearchParams {
+    const p = new URLSearchParams({ month })
+    if (scope === 'total' || scope === 'own') p.set('scope', scope)
+    else { p.set('scope', 'member'); p.set('memberId', scope) }
+    return p
+  }
   useEffect(() => {
     if (reportTab !== 'trackingSummary' || !activeTabId) return
-    setTrackingSummaryLoading(true)
-    fetch(`/api/task-groups/${activeTabId}/tracking-summary?month=${trackingMonth}`)
+    setTrackingLoading(true)
+    fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`)
       .then(r => r.json())
       .then(d => {
-        setTrackingSummary(d)
-        setTrackingScope(prev => (d.canSeeAll ? (prev === 'own' || d.members?.some((m: TrackingMemberSummary) => m.userId === prev) ? prev : 'total') : 'own'))
+        setTrackingData(d)
+        if (!d.canSeeAll && trackingScope !== 'own') setTrackingScope('own')
       })
-      .finally(() => setTrackingSummaryLoading(false))
+      .finally(() => setTrackingLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportTab, activeTabId, trackingMonth])
+  }, [reportTab, activeTabId, trackingMonth, trackingScope])
+
+  // Load source-detail drill-down (获取收录/排名区间"查看")
+  useEffect(() => {
+    if (!sourceDetailModal || !activeTabId) return
+    setSourceDetailLoading(true)
+    setSourceDetailRows([])
+    const p = scopeParams(trackingMonth, trackingScope)
+    p.set('kind', sourceDetailModal.kind)
+    if (sourceDetailModal.bucket) p.set('bucket', sourceDetailModal.bucket)
+    fetch(`/api/task-groups/${activeTabId}/tracking-summary/detail?${p}`)
+      .then(r => r.json())
+      .then(d => setSourceDetailRows(d.rows || []))
+      .finally(() => setSourceDetailLoading(false))
+  }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope])
 
   // Load detail keywords on demand
   useEffect(() => {
@@ -660,48 +690,78 @@ export default function GroupReportPage() {
 
           {/* ── 追踪汇总 ── */}
           {reportTab === 'trackingSummary' && (() => {
-            if (trackingSummaryLoading || !trackingSummary) return <Spinner />
+            if (trackingLoading || !trackingData) return <Spinner />
             const shiftMonth = (delta: number) => {
               const [y, m] = trackingMonth.split('-').map(Number)
               const d = new Date(Date.UTC(y, m - 1 + delta, 1))
               setTrackingMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
             }
             const isCurrentMonth = trackingMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
-            const view: TrackingMemberSummary | undefined =
-              trackingScope === 'total' ? trackingSummary.groupTotal :
-              trackingScope === 'own'   ? trackingSummary.own :
-              trackingSummary.members?.find(m => m.userId === trackingScope)
+            const { summary: view, groupSourceEffectiveness, scopeSourceEffectiveness } = trackingData
+
+            const SourceEffCards = ({ title, stats }: { title: string; stats: SourceEff[] }) => (
+              <div>
+                <p className="text-xs font-medium text-gray-400 mb-2">{title}</p>
+                {stats.length === 0 ? (
+                  <p className="text-sm text-gray-300 py-2">暂无数据</p>
+                ) : (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {stats.map(s => {
+                      const skl = SOURCE_COLORS[s.source]
+                      const effectiveRate = s.total > 0 ? Math.round(s.effective / s.total * 100) : null
+                      return (
+                        <div key={s.source} className={`flex-shrink-0 rounded-xl border px-4 py-3 min-w-[130px] ${skl ? `border-transparent ${skl.bg}` : 'bg-white border-gray-100'}`}>
+                          <p className={`text-xs font-semibold truncate ${skl ? skl.text : 'text-gray-700'}`}>{SOURCE_LABEL[s.source] ?? s.source}</p>
+                          <p className="text-xl font-bold text-gray-800 mt-1">{s.total.toLocaleString()}</p>
+                          <div className="mt-1 space-y-0.5">
+                            {effectiveRate !== null && (
+                              <p className="text-[10px] text-gray-500">有效率 <span className={`font-semibold ${effectiveRate >= 30 ? 'text-green-600' : 'text-amber-500'}`}>{effectiveRate}%</span></p>
+                            )}
+                            {s.avgScore !== null && (
+                              <p className="text-[10px] text-gray-500">均分 <span className={`font-semibold ${s.avgScore >= 60 ? 'text-green-600' : s.avgScore >= 35 ? 'text-amber-500' : 'text-red-400'}`}>{s.avgScore}pt</span></p>
+                            )}
+                            <p className="text-[10px] text-gray-400">{s.ranked} 已排名</p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+
             return (
               <div>
-                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <div className="flex items-center gap-3 mb-5 flex-wrap">
                   <div className="flex items-center gap-1">
                     <button onClick={() => shiftMonth(-1)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">‹</button>
                     <span className="text-sm font-medium text-gray-700 tabular-nums w-20 text-center">{trackingMonth}</span>
                     <button onClick={() => shiftMonth(1)} disabled={isCurrentMonth}
                       className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
                   </div>
-                  {trackingSummary.canSeeAll && (
+                  {trackingData.canSeeAll && (
                     <div className="flex items-center gap-1 flex-wrap">
                       <button onClick={() => setTrackingScope('total')}
                         className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'total' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>全组汇总</button>
                       {/* super/admin 常常不是这个组的成员（只是以管理者身份查看），
                           这种情况下"我自己"没有意义（永远是空的），直接不显示。 */}
-                      {trackingSummary.isMember && (
+                      {trackingData.isMember && (
                         <button onClick={() => setTrackingScope('own')}
-                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{trackingSummary.own.username}</button>
+                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === 'own' ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{trackingScope === 'own' ? view.username : '我自己'}</button>
                       )}
-                      {(trackingSummary.members ?? []).filter(m => m.userId !== currentUserId).map(m => (
+                      {(trackingData.memberList ?? []).filter(m => m.userId !== currentUserId).map(m => (
                         <button key={m.userId} onClick={() => setTrackingScope(m.userId)}
                           className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${trackingScope === m.userId ? 'bg-green-500 text-white border-green-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>{m.username}</button>
                       ))}
                     </div>
                   )}
                 </div>
-                {!view || view.submitted.total === 0 ? (
+
+                {view.submitted.total === 0 ? (
                   <div className="text-center py-10 text-gray-400 text-sm">这个月还没有数据</div>
                 ) : (
-                  <div className="space-y-5 max-w-2xl">
-                    <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-3 gap-3 max-w-2xl">
                       <div className="bg-gray-50 rounded-xl p-3">
                         <div className="text-xs text-gray-400 mb-1">提交条数</div>
                         <div className="text-xl font-bold text-gray-800 tabular-nums">{view.submitted.total}</div>
@@ -714,61 +774,84 @@ export default function GroupReportPage() {
                       <div className="bg-green-50 rounded-xl p-3">
                         <div className="text-xs text-green-500 mb-1">获取排名</div>
                         <div className="text-xl font-bold text-green-600 tabular-nums">{view.ranked.total}</div>
+                        <div className="text-[11px] text-green-500 mt-0.5">搜索量 {fmtVol(view.ranked.totalVolume)}</div>
                       </div>
                     </div>
 
+                    <div className="space-y-4">
+                      <SourceEffCards title="全组来源成效" stats={groupSourceEffectiveness} />
+                      {trackingScope !== 'total' && (
+                        <SourceEffCards title={`${view.username}来源成效`} stats={scopeSourceEffectiveness} />
+                      )}
+                    </div>
+
                     <div>
-                      <div className="text-xs text-gray-400 mb-2">提交来源</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {view.submitted.bySource.map(s => (
-                          <span key={s.source} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2.5 py-1">
-                            {SOURCE_LABEL[s.source] ?? s.source} <span className="font-semibold">{s.count}</span>
-                          </span>
-                        ))}
+                      <div className="text-xs text-gray-400 mb-2">获取收录</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px]">
+                          <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                            <th className="px-2 py-1.5 text-left font-medium w-28">类目</th>
+                            <th className="px-2 py-1.5 text-right font-medium w-20">条数</th>
+                            <th className="px-2 py-1.5 text-left font-medium">来源</th>
+                            <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
+                            <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
+                          </tr></thead>
+                          <tbody>
+                            <tr className="border-b border-gray-50 last:border-0">
+                              <td className="px-2 py-2 text-sm text-gray-700">获取收录</td>
+                              <td className="px-2 py-2 text-sm text-gray-700 text-right tabular-nums">{view.indexed.count}</td>
+                              <td className="px-2 py-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {view.indexed.bySource.map(s => (
+                                    <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{view.indexed.volume > 0 ? fmtVol(view.indexed.volume) : '—'}</td>
+                              <td className="px-2 py-2 text-center">
+                                <button onClick={() => setSourceDetailModal({ kind: 'indexed' })} disabled={view.indexed.count === 0}
+                                  className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
 
                     <div>
                       <div className="text-xs text-gray-400 mb-2">排名分布</div>
-                      <table className="w-full">
-                        <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-                          <th className="px-2 py-1.5 text-left font-medium">排名区间</th>
-                          <th className="px-2 py-1.5 text-right font-medium">词数</th>
-                          <th className="px-2 py-1.5 text-right font-medium">总搜索量</th>
-                        </tr></thead>
-                        <tbody>
-                          {view.ranked.buckets.map(b => (
-                            <tr key={b.label} className="border-b border-gray-50 last:border-0">
-                              <td className="px-2 py-1.5 text-sm text-gray-700">{b.label}</td>
-                              <td className="px-2 py-1.5 text-sm text-gray-700 text-right tabular-nums">{b.count}</td>
-                              <td className="px-2 py-1.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
-                            </tr>
-                          ))}
-                          <tr className="border-t border-gray-200">
-                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800">总计</td>
-                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800 text-right tabular-nums">
-                              {view.ranked.buckets.reduce((s, b) => s + b.count, 0)}
-                            </td>
-                            <td className="px-2 py-1.5 text-sm font-semibold text-gray-800 text-right tabular-nums">
-                              {fmtVol(view.ranked.buckets.reduce((s, b) => s + b.volume, 0))}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {view.ranked.bySource.length > 0 && (
-                      <div>
-                        <div className="text-xs text-gray-400 mb-2">排名词来源</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {view.ranked.bySource.map(s => (
-                            <span key={s.source} className="text-xs bg-green-50 text-green-700 rounded-full px-2.5 py-1">
-                              {SOURCE_LABEL[s.source] ?? s.source} <span className="font-semibold">{s.count}</span>
-                            </span>
-                          ))}
-                        </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px]">
+                          <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                            <th className="px-2 py-1.5 text-left font-medium w-28">排名区间</th>
+                            <th className="px-2 py-1.5 text-right font-medium w-20">词数</th>
+                            <th className="px-2 py-1.5 text-left font-medium">来源</th>
+                            <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
+                            <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
+                          </tr></thead>
+                          <tbody>
+                            {view.ranked.buckets.map(b => (
+                              <tr key={b.label} className="border-b border-gray-50 last:border-0">
+                                <td className="px-2 py-2 text-sm text-gray-700">{b.label}</td>
+                                <td className="px-2 py-2 text-sm text-gray-700 text-right tabular-nums">{b.count}</td>
+                                <td className="px-2 py-2">
+                                  <div className="flex flex-wrap gap-1">
+                                    {b.bySource.map(s => (
+                                      <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
+                                <td className="px-2 py-2 text-center">
+                                  <button onClick={() => setSourceDetailModal({ kind: 'rank', bucket: b.label })} disabled={b.count === 0}
+                                    className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -889,6 +972,78 @@ export default function GroupReportPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* 追踪汇总"查看"详情 Modal */}
+      {sourceDetailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceDetailModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">
+                  {sourceDetailModal.kind === 'indexed' ? '获取收录' : `排名 ${sourceDetailModal.bucket}`}
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">共 {sourceDetailRows.length} 词</p>
+              </div>
+              <button onClick={() => setSourceDetailModal(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {sourceDetailLoading ? <Spinner /> : sourceDetailRows.length === 0 ? (
+                <div className="flex items-center justify-center py-14 text-sm text-gray-300">暂无数据</div>
+              ) : sourceDetailModal.kind === 'indexed' ? (
+                <>
+                  <div className="grid grid-cols-[1fr_90px_90px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
+                    <span>最终词 → 关键词</span>
+                    <span className="text-right">搜索量</span>
+                    <span className="text-center">来源</span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {sourceDetailRows.map((r, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_90px_90px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-800 truncate" title={r.final_keyword || r.keyword}>{r.final_keyword || r.keyword}</div>
+                          {r.final_keyword
+                            ? <div className="text-xs text-green-600 truncate" title={r.keyword}>→ {r.keyword}</div>
+                            : r.username ? <div className="text-xs text-gray-300">{r.username}</div> : null}
+                        </div>
+                        <span className="text-sm text-gray-600 text-right tabular-nums">{fmtVol(r.search_volume ?? 0)}</span>
+                        <div className="flex justify-center"><SourceTag source={r.source} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-[1fr_60px_1fr_90px_90px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
+                    <span>最终词 → 关键词</span>
+                    <span className="text-center">排名</span>
+                    <span>排名词</span>
+                    <span className="text-right">排名量</span>
+                    <span className="text-center">来源</span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {sourceDetailRows.map((r, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_60px_1fr_90px_90px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-800 truncate" title={r.final_keyword || r.keyword}>{r.final_keyword || r.keyword}</div>
+                          {r.final_keyword
+                            ? <div className="text-xs text-green-600 truncate" title={r.keyword}>→ {r.keyword}</div>
+                            : r.username ? <div className="text-xs text-gray-300">{r.username}</div> : null}
+                        </div>
+                        <span className="text-sm text-gray-700 text-center tabular-nums">{r.rank_position}</span>
+                        <span className="text-sm text-gray-700 truncate" title={r.rank_keyword}>{r.rank_keyword || '—'}</span>
+                        <span className="text-sm text-gray-600 text-right tabular-nums">{fmtVol(r.rank_volume ?? 0)}</span>
+                        <div className="flex justify-center"><SourceTag source={r.source} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
