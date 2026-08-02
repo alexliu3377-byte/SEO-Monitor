@@ -12,6 +12,10 @@ on:
         description: '单站域名（留空=全部站点，例如 y8l.com）'
         required: false
         default: ''
+      date:
+        description: '补抓日期 YYYY-MM-DD（留空=今天，仅 rank/rank-title 步骤支持）'
+        required: false
+        default: ''
   schedule:
     - cron: '30 15 * * *'  # 23:30 MYT (target ~00:30 MYT after ~1h queue) — keywords
     - cron: '30 16 * * *'  # 00:30 MYT (target ~01:30 MYT after ~1h queue) — weight
@@ -151,6 +155,7 @@ jobs:
       - name: Run crawl
         env:
           SITE_INPUT: ${{ github.event.inputs.site }}
+          DATE_INPUT: ${{ github.event.inputs.date }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
@@ -158,8 +163,12 @@ jobs:
           if [ -n "$SITE_INPUT" ]; then
             SITE_ARG="--site=$SITE_INPUT"
           fi
+          DATE_ARG=""
+          if [ -n "$DATE_INPUT" ]; then
+            DATE_ARG="--date=$DATE_INPUT"
+          fi
           if [ "${{ steps.vars.outputs.step }}" = "rank-title" ]; then
-            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }}
+            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $DATE_ARG
           else
-            npx tsx scripts/crawl.ts --step=${{ steps.vars.outputs.step }} --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $SITE_ARG
+            npx tsx scripts/crawl.ts --step=${{ steps.vars.outputs.step }} --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $SITE_ARG $DATE_ARG
           fi
