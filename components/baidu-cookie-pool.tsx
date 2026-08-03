@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-interface CookieEntry { name: string; value: string }
+interface CookieEntry { name: string; value: string; addedAt?: string }
+
+function todayMY(): string {
+  return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
+}
 
 function parseBlockToCookieString(raw: string): string {
   const pairs: string[] = []
@@ -111,6 +115,9 @@ export function BaiduCookiePoolManager() {
                 <div className="space-y-2">
                   {cookiePool.map((entry, idx) => (
                     <div key={idx} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                      <span className="text-[10px] text-gray-400 font-mono w-10 flex-shrink-0" title={entry.addedAt ? `添加于 ${entry.addedAt}` : '添加日期未知（早期记录）'}>
+                        {entry.addedAt ? entry.addedAt.slice(5) : '—'}
+                      </span>
                       <span className="text-xs font-medium text-gray-700 w-28 flex-shrink-0 truncate">{entry.name}</span>
                       <span className="text-xs text-gray-400 font-mono flex-1 truncate">{entry.value.slice(0, 60)}…</span>
                       <button
@@ -153,7 +160,7 @@ export function BaiduCookiePoolManager() {
                     if (!value) { setSaveMsg('未识别到有效 Cookie，请检查格式'); return }
                     if (cookiePool.some(e => e.value === value)) { setSaveMsg('该 Cookie 已存在，请勿重复添加'); return }
                     const name = newCookieName.trim() || nextCookieName()
-                    setCookiePool(prev => [...prev, { name, value }])
+                    setCookiePool(prev => [...prev, { name, value, addedAt: todayMY() }])
                     setNewCookieName(''); setNewCookieInput(''); setSaveMsg('')
                   }}
                   disabled={!newCookieInput.trim()}
