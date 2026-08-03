@@ -200,7 +200,7 @@ export default function GroupReportPage() {
   interface SourceDetailRow {
     keyword: string; final_keyword: string | null
     search_volume?: number; rank_position?: number; rank_keyword?: string; rank_volume?: number
-    source: string; username?: string
+    source: string; operation_type: string | null; username?: string
   }
   const [trackingMonth, setTrackingMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
   const [trackingData, setTrackingData] = useState<TrackingSummaryResponse | null>(null)
@@ -999,14 +999,15 @@ export default function GroupReportPage() {
                 <div className="flex items-center justify-center py-14 text-sm text-gray-300">暂无数据</div>
               ) : sourceDetailModal.kind === 'indexed' ? (
                 <>
-                  <div className="grid grid-cols-[1fr_90px_90px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
+                  <div className="grid grid-cols-[1fr_90px_90px_70px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
                     <span>最终词 → 关键词</span>
                     <span className="text-right">搜索量</span>
                     <span className="text-center">来源</span>
+                    <span className="text-center">操作</span>
                   </div>
                   <div className="divide-y divide-gray-50">
                     {sourceDetailRows.map((r, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_90px_90px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
+                      <div key={i} className="grid grid-cols-[1fr_90px_90px_70px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
                         <div className="min-w-0">
                           <div className="text-sm font-medium text-gray-800 truncate" title={r.final_keyword || r.keyword}>{r.final_keyword || r.keyword}</div>
                           {r.final_keyword
@@ -1015,22 +1016,28 @@ export default function GroupReportPage() {
                         </div>
                         <span className="text-sm text-gray-600 text-right tabular-nums">{fmtVol(r.search_volume ?? 0)}</span>
                         <div className="flex justify-center"><SourceTag source={r.source} /></div>
+                        <div className="flex justify-center">
+                          {r.operation_type
+                            ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${r.operation_type === '新增' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>{r.operation_type}</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </div>
                       </div>
                     ))}
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-[1fr_60px_1fr_90px_90px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
+                  <div className="grid grid-cols-[1fr_60px_1fr_90px_90px_70px] gap-x-3 px-5 py-2 bg-gray-50/50 border-b border-gray-100 text-[11px] font-medium text-gray-400 sticky top-0">
                     <span>最终词 → 关键词</span>
                     <span className="text-center">排名</span>
                     <span>排名词</span>
                     <span className="text-right">排名量</span>
                     <span className="text-center">来源</span>
+                    <span className="text-center">操作</span>
                   </div>
                   <div className="divide-y divide-gray-50">
                     {sourceDetailRows.map((r, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_60px_1fr_90px_90px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
+                      <div key={i} className="grid grid-cols-[1fr_60px_1fr_90px_90px_70px] gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/60 transition-colors">
                         <div className="min-w-0">
                           <div className="text-sm font-medium text-gray-800 truncate" title={r.final_keyword || r.keyword}>{r.final_keyword || r.keyword}</div>
                           {r.final_keyword
@@ -1041,6 +1048,11 @@ export default function GroupReportPage() {
                         <span className="text-sm text-gray-700 truncate" title={r.rank_keyword}>{r.rank_keyword || '—'}</span>
                         <span className="text-sm text-gray-600 text-right tabular-nums">{fmtVol(r.rank_volume ?? 0)}</span>
                         <div className="flex justify-center"><SourceTag source={r.source} /></div>
+                        <div className="flex justify-center">
+                          {r.operation_type
+                            ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${r.operation_type === '新增' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>{r.operation_type}</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </div>
                       </div>
                     ))}
                   </div>
