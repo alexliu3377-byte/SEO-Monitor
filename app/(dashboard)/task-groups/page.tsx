@@ -26,7 +26,7 @@ interface ClaimedKeyword {
   operation_type: string | null; final_keyword: string | null; page_url: string | null
 }
 
-type RightTab = 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
+type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
 interface DetailRow { date: string; domain: string }
@@ -465,7 +465,7 @@ export default function TaskGroupsPage() {
   const [claimErrorMsg, setClaimErrorMsg] = useState<string | null>(null)
 
   const [rightTab, setRightTab] = useState<RightTab>('recommend')
-  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
+  const [tabPage, setTabPage] = useState<Record<RightTab, number>>({ distribute: 0, recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 })
   const [recSubTab, setRecSubTab] = useState<RecSubTab>('rankdown')
   // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
   // 就重新出现的临时前端状态，2026-07-29 加入。
@@ -484,6 +484,15 @@ export default function TaskGroupsPage() {
   const [submissionHistoryKey, setSubmissionHistoryKey] = useState<string | null>(null)
   const [rdPage, setRdPage] = useState(0)
   const [rankdownDate, setRankdownDate] = useState('')
+
+  // 分发词 tab: 管理员手动指定一批词让组员认领，2026-08 加入
+  interface DistributedWord { id: string; keyword: string; volume: number; volume_source: 'exact' | 'base_match' | 'unknown'; matched_keyword: string | null; claimedBy: string | null }
+  const [distributedWords, setDistributedWords] = useState<DistributedWord[]>([])
+  const [distributedLoading, setDistributedLoading] = useState(false)
+  const [showDistributeModal, setShowDistributeModal] = useState(false)
+  const [distributeText, setDistributeText] = useState('')
+  const [distributeSaving, setDistributeSaving] = useState(false)
+  const [distributeMsg, setDistributeMsg] = useState('')
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
   const [radarLoaded, setRadarLoaded] = useState(false)
@@ -851,6 +860,36 @@ export default function TaskGroupsPage() {
     } finally { setRadarLoading(false) }
   }
 
+  async function loadDistributed() {
+    if (!activeGroupId) return
+    setDistributedLoading(true)
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`)
+      const d = await res.json()
+      setDistributedWords(d.keywords || [])
+    } finally { setDistributedLoading(false) }
+  }
+
+  async function submitDistributeWords() {
+    if (!activeGroupId || !distributeText.trim() || distributeSaving) return
+    setDistributeSaving(true); setDistributeMsg('')
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: distributeText }),
+      })
+      if (res.ok) {
+        setDistributeText(''); setShowDistributeModal(false)
+        loadDistributed()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setDistributeMsg(data.error || '添加失败')
+      }
+    } catch {
+      setDistributeMsg('添加失败（网络异常）')
+    } finally { setDistributeSaving(false) }
+  }
+
   async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string) {
     // claimedSet covers "already in state"; claimingRef covers "in-flight request"
     if (!activeGroupId || claimedSet.has(keyword) || claimingRef.current.has(keyword)) return
@@ -873,6 +912,7 @@ export default function TaskGroupsPage() {
         const data = await res.json()
         setClaimedKeywords(prev => [...prev, data.keyword])
         setExpandedClaimIds(new Set<string>([data.keyword.id]))
+        if (rightTab === 'distribute') loadDistributed()
       }
     } catch {
       setClaimErrorMsg('认领失败（网络异常），请重试')
@@ -1133,7 +1173,8 @@ export default function TaskGroupsPage() {
   }, [claimErrorMsg])
   useEffect(() => { if (activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate) }, [activeGroupId, effectiveViewingId, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (currentUserId && !viewingMemberId) setViewingMemberId(currentUserId) }, [currentUserId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab !== 'search') loadRadar() }, [rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (rightTab === 'distribute') loadDistributed() }, [rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown')) loadSiteRankdown() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadSiteRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1308,6 +1349,58 @@ export default function TaskGroupsPage() {
 
   function renderRightContent() {
     const pg = tabPage[rightTab]
+
+    if (rightTab === 'distribute') {
+      if (distributedLoading) return <Spinner />
+      return (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-gray-400">管理员手动指定的词，任何组员都可以双击认领去做"新增"</span>
+            {canManage && (
+              <button onClick={() => { setShowDistributeModal(true); setDistributeMsg('') }}
+                className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600 transition-colors flex-shrink-0">
+                + 添加分发词
+              </button>
+            )}
+          </div>
+          {distributedWords.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 text-sm">暂无分发词{canManage ? '，点右上角添加' : ''}</div>
+          ) : (
+            <table className="w-full table-fixed">
+              <colgroup><col /><col className="w-24" /><col className="w-28" /></colgroup>
+              <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                <th className="px-3 py-2 text-left font-medium">关键词</th>
+                <th className="px-2 py-2 text-center font-medium">搜索量</th>
+                <th className="px-2 py-2 text-center font-medium">状态</th>
+              </tr></thead>
+              <tbody>
+                {distributedWords.map(w => {
+                  const claimed = !!w.claimedBy
+                  return (
+                    <tr key={w.id} onDoubleClick={() => !claimed && claimKeyword(w.keyword, '分发词', w.volume)}
+                      className={`border-b border-gray-50 last:border-0 transition-colors ${claimed ? 'opacity-50' : 'cursor-pointer select-none hover:bg-gray-50'}`}
+                      title={claimed ? `已被 ${w.claimedBy} 认领` : '双击认领'}>
+                      <td className="px-3 py-2">
+                        <span className="text-sm text-gray-800">{w.keyword}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs text-gray-500">
+                        {w.volume > 0 ? w.volume.toLocaleString() : '—'}
+                        {w.volume_source === 'base_match' && w.matched_keyword && (
+                          <div className="text-[10px] text-gray-300">按"{w.matched_keyword}"估</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs">
+                        {claimed ? <span className="text-gray-400">{w.claimedBy} 已认领</span> : <span className="text-green-600">可认领</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )
+    }
 
     if (rightTab === 'recommend') {
       const pg_rec = tabPage['recommend']
@@ -1863,13 +1956,14 @@ export default function TaskGroupsPage() {
   if (loading) return <div className="p-6"><Spinner /></div>
 
   const RIGHT_TABS: [RightTab, string][] = [
+    ['distribute', '分发词'],
     ['recommend', '今日推荐'],
     ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
   ]
 
   function SourceTag({ s }: { s: string }) {
-    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨' }
+    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨', '分发词': '分发' }
     return <span className="text-[10px] text-gray-300 flex-shrink-0">{map[s] ?? s}</span>
   }
 
@@ -2015,7 +2109,7 @@ export default function TaskGroupsPage() {
         <div className="card overflow-hidden">
           <div className="flex items-center gap-1.5 px-4 pt-3 pb-0 border-b border-gray-100 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
             {groups.map(g => (
-              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
+              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ distribute: 0, recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
                 className={`px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap border-b-2 transition-colors ${activeGroupId === g.id ? 'border-green-500 text-green-700 bg-green-50/60' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
                 {g.name}
               </button>
@@ -2208,6 +2302,44 @@ export default function TaskGroupsPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showDistributeModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDistributeModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900">添加分发词</h3>
+                <p className="text-xs text-gray-400 mt-0.5">一行一个词，添加后会自动查搜索量（查不到精确值时会尝试按原词估一个）</p>
+              </div>
+              <button onClick={() => setShowDistributeModal(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+              <textarea
+                value={distributeText}
+                onChange={e => { setDistributeText(e.target.value); setDistributeMsg('') }}
+                placeholder={'Lo研社官方正版\nTokimeki ai\n超自然卡头插件免费版\nreWASD安卓汉化版\n小呆阅读安卓版\n小书阁纯净版'}
+                rows={10}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-400 font-mono resize-none"
+              />
+              {distributeMsg && <p className="text-xs text-red-500">{distributeMsg}</p>}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+              <button onClick={() => setShowDistributeModal(false)}
+                className="flex-1 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50">
+                取消
+              </button>
+              <button onClick={submitDistributeWords} disabled={distributeSaving || !distributeText.trim()}
+                className="flex-1 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-40">
+                {distributeSaving ? '添加中…' : '添加'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

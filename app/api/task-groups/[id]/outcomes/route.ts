@@ -136,7 +136,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 实际是从下面这些"信号驱动"标签页认领词的——只有搜索量查询、手动添加词是组
   // 员凭自己判断挑的，没有数据信号支持，所以只把这两类算对照组，其余（含隐藏中
   // 的今日推荐三个来源，一旦重新开放也自动归实验组）都算实验组。
-  const CONTROL_SOURCES = new Set(['搜索量查询', '手动添加'])
+  const CONTROL_SOURCES = new Set(['搜索量查询', '手动添加', '分发词'])
 
   // Fetch every matched rank keyword for the full filtered set (not just the
   // page being returned) — "排名"/"排名量" now sort by the best position and
