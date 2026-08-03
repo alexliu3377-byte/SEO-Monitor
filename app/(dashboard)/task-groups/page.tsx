@@ -875,7 +875,7 @@ export default function TaskGroupsPage() {
         setExpandedClaimIds(new Set<string>([data.keyword.id]))
       }
     } catch {
-      // network error — user can retry
+      setClaimErrorMsg('认领失败（网络异常），请重试')
     } finally { claimingRef.current.delete(keyword) }
   }
 
@@ -892,20 +892,46 @@ export default function TaskGroupsPage() {
 
   async function dismissClaimed(claimId: string) {
     if (!activeGroupId) return
+    const removed = claimedKeywords.find(k => k.id === claimId)
     setClaimedKeywords(prev => prev.filter(k => k.id !== claimId))
-    await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ claimId, status: 'dismissed' }),
-    })
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claimId, status: 'dismissed' }),
+      })
+      if (!res.ok && removed) {
+        setClaimedKeywords(prev => [...prev, removed])
+        setClaimErrorMsg('移除失败，请重试')
+      }
+    } catch {
+      if (removed) setClaimedKeywords(prev => [...prev, removed])
+      setClaimErrorMsg('移除失败（网络异常），请重试')
+    }
   }
 
   async function saveClaim(claimId: string, field: 'final_keyword' | 'page_url' | 'operation_type', value: string) {
     if (!activeGroupId) return
+    // Snapshot the pre-edit value so a failed save can be reverted instead of
+    // silently sticking around as a local-only change that looks saved but
+    // isn't (2026-08-03: found operation_type='更新' had never once persisted
+    // across the whole app's history — this function had zero error handling,
+    // so a failed PATCH just left the optimistic update in place with nothing
+    // telling the user it never reached the server).
+    const prevValue = claimedKeywords.find(k => k.id === claimId)?.[field] ?? null
     setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, [field]: value || null } : k))
-    await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ claimId, [field]: value }),
-    })
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claimId, [field]: value }),
+      })
+      if (!res.ok) {
+        setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, [field]: prevValue } : k))
+        setClaimErrorMsg('保存失败，请重试')
+      }
+    } catch {
+      setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, [field]: prevValue } : k))
+      setClaimErrorMsg('保存失败（网络异常），请重试')
+    }
   }
 
   // 单条提交——不用等攒够一批再一起点"提交"，填完这一条就能立刻单独提交，
@@ -927,6 +953,9 @@ export default function TaskGroupsPage() {
         body: JSON.stringify({ claimId, status: 'submitted' }),
       })
       if (res.ok) setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, status: 'submitted' } : k))
+      else setClaimErrorMsg('提交失败，请重试')
+    } catch {
+      setClaimErrorMsg('提交失败（网络异常），请重试')
     } finally { setSubmittingOneId(null) }
   }
 
