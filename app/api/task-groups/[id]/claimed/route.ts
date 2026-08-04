@@ -40,9 +40,10 @@ export async function GET(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const SELECT_COLS = 'id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, claimed_date, created_at'
   const { data, error } = await service
     .from('member_claimed_keywords')
-    .select('id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, created_at')
+    .select(SELECT_COLS)
     .eq('group_id', groupId)
     .eq('user_id', userId)
     .eq('claimed_date', date)
@@ -50,7 +51,29 @@ export async function GET(
     .order('created_at', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ keywords: data || [] })
+  let keywords = data || []
+
+  // 待提交（pending）的认领不该因为翻到"今天"就从列表里消失——之前严格按
+  // claimed_date=date 匹配，隔天再打开就看不到昨天还没提交的词了，而爬虫只
+  // 追踪 status='submitted' 的认领（scripts/crawl.ts），组员往往没意识到还
+  // 留着旧的待提交，直接重新认领一遍，造成重复认领+原来那条永远卡在pending。
+  // （2026-08-04 用户反馈"更新提交还是有问题"排查出的根因：Joanne 08-03 认领
+  // 的三个词一直卡在pending，08-04 她又重新认领了一遍才提交成功。）
+  // 只在查看"今天"时才往前找——翻到某个历史日期就应该精确显示那一天，不然
+  // 回看历史记录也会被塞进不属于那天的东西。
+  if (date === getMY()) {
+    const { data: stray, error: strayErr } = await service
+      .from('member_claimed_keywords')
+      .select(SELECT_COLS)
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .lt('claimed_date', date)
+      .order('created_at', { ascending: true })
+    if (!strayErr && stray && stray.length > 0) keywords = [...stray, ...keywords]
+  }
+
+  return NextResponse.json({ keywords })
 }
 
 export async function POST(
@@ -204,14 +227,20 @@ export async function PUT(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  const { error } = await service
+  // GET above pulls forward any older still-pending claims when viewing
+  // "today" (see the comment there) — the "提交" button has to actually
+  // submit those too, or they'd show up but clicking submit would silently
+  // leave them untouched. Only widen this when date is today; submitting a
+  // past date (browsing history) stays exact-match.
+  let query = service
     .from('member_claimed_keywords')
     .update({ status: 'submitted', submitted_at: new Date().toISOString() })
     .eq('group_id', groupId)
     .eq('user_id', callerId)
-    .eq('claimed_date', date)
     .eq('status', 'pending')
+  query = date === getMY() ? query.lte('claimed_date', date) : query.eq('claimed_date', date)
 
+  const { error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }

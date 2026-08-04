@@ -27,6 +27,7 @@ interface ClaimedKeyword {
   id: string; keyword: string; source: string
   search_volume: number; status: string; created_at: string
   operation_type: string | null; final_keyword: string | null; page_url: string | null
+  claimed_date?: string
 }
 
 type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
@@ -2292,6 +2293,11 @@ export default function TaskGroupsPage() {
                                 <span className={`flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs ${k.status !== 'pending' ? 'text-green-400' : ''}`}>{k.status !== 'pending' ? '✓' : ''}</span>
                               )}
                               <span className="flex-1 text-sm text-gray-800 truncate" title={k.keyword}>{k.keyword}</span>
+                              {k.claimed_date && k.claimed_date !== selectedDate && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 bg-amber-50 text-amber-600 border border-amber-200" title={`${k.claimed_date} 认领，还没提交`}>
+                                  {k.claimed_date.slice(5).replace('-', '/')} 待提交
+                                </span>
+                              )}
                               {hasDetail && !isExpanded && k.operation_type && (
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${k.operation_type === '新增' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>{k.operation_type}</span>
                               )}
