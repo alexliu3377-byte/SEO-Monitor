@@ -74,10 +74,13 @@ export async function GET() {
   }))
 
   // Cross-reference against our own rank_changes: does any tracked site
-  // already rank for this rising-volume keyword, and is that rank recently
-  // trending up, down, or both (different sites/days within the window)?
+  // already rank for this rising-volume keyword? "出现站点" looks across the
+  // whole 14-day window, but "排名波动" only cares about the MOST RECENT date
+  // that has any data — 'both' only fires when that single latest date has
+  // both a rankup and a rankdown (e.g. two different sites moving opposite
+  // ways the same day), not "up sometime this window, down some other day".
   const vrKeywords = ((volumeRisingRaw || []) as VolumeRisingRow[]).map((r) => r.keyword)
-  const siteTrendMap = new Map<string, { sites: Set<string>; hasUp: boolean; hasDown: boolean }>()
+  const siteTrendMap = new Map<string, { sites: Set<string>; latestDate: string; hasUpLatest: boolean; hasDownLatest: boolean }>()
   if (vrKeywords.length > 0) {
     const { data: sitesRaw } = await db.from('sites').select('id, domain')
     const siteIdToDomain = new Map<string, string>((sitesRaw || []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
@@ -87,17 +90,26 @@ export async function GET() {
     // project_supabase_in_query_header_overflow memory).
     for (let i = 0; i < vrKeywords.length; i += 150) {
       const { data: rcRows } = await db.from('rank_changes')
-        .select('keyword, site_id, type')
+        .select('keyword, site_id, type, stat_date')
         .in('keyword', vrKeywords.slice(i, i + 150))
         .gte('stat_date', rcSince)
-      for (const row of (rcRows || []) as { keyword: string; site_id: string; type: string }[]) {
+      for (const row of (rcRows || []) as { keyword: string; site_id: string; type: string; stat_date: string }[]) {
         const domain = siteIdToDomain.get(row.site_id)
         if (!domain) continue
         let entry = siteTrendMap.get(row.keyword)
-        if (!entry) { entry = { sites: new Set(), hasUp: false, hasDown: false }; siteTrendMap.set(row.keyword, entry) }
+        if (!entry) { entry = { sites: new Set(), latestDate: '', hasUpLatest: false, hasDownLatest: false }; siteTrendMap.set(row.keyword, entry) }
         entry.sites.add(domain)
-        if (row.type === 'rankup') entry.hasUp = true
-        else if (row.type === 'rankdown') entry.hasDown = true
+        const rowDate = String(row.stat_date).slice(0, 10)
+        if (rowDate > entry.latestDate) {
+          // Newer date found — this row's direction is all we know so far for it.
+          entry.latestDate = rowDate
+          entry.hasUpLatest = row.type === 'rankup'
+          entry.hasDownLatest = row.type === 'rankdown'
+        } else if (rowDate === entry.latestDate) {
+          if (row.type === 'rankup') entry.hasUpLatest = true
+          else if (row.type === 'rankdown') entry.hasDownLatest = true
+        }
+        // rowDate < entry.latestDate: older than the current latest, ignored for trend.
       }
     }
   }
@@ -111,7 +123,7 @@ export async function GET() {
       change:      Number(r.volume_change),
       last_date:   toDate(r.stat_date),
       sites:       t ? Array.from(t.sites) : [],
-      rankTrend:   (!t ? null : t.hasUp && t.hasDown ? 'both' : t.hasUp ? 'up' : t.hasDown ? 'down' : null) as 'up' | 'down' | 'both' | null,
+      rankTrend:   (!t ? null : t.hasUpLatest && t.hasDownLatest ? 'both' : t.hasUpLatest ? 'up' : t.hasDownLatest ? 'down' : null) as 'up' | 'down' | 'both' | null,
     }
   })
 

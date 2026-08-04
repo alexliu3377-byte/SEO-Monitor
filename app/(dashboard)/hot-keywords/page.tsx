@@ -886,8 +886,8 @@ export default function HotRadarPage() {
                               ? <SiteBadges sites={w.sites} weightMap={weightMap} idMap={groupIdMap} colorMap={groupColorMap} />
                               : <span className="text-gray-300 text-xs">—</span>}
                           </td>
-                          <td className="table-td text-center">
-                            {w.rankTrend === 'both' ? <span><span className="text-green-500 font-semibold">↑</span><span className="text-red-500 font-semibold">↓</span></span>
+                          <td className="table-td text-center whitespace-nowrap">
+                            {w.rankTrend === 'both' ? <span className="inline-flex items-center font-semibold"><span className="text-green-500">↑</span><span className="text-red-500">↓</span></span>
                               : w.rankTrend === 'up' ? <span className="text-green-500 font-semibold">↑</span>
                               : w.rankTrend === 'down' ? <span className="text-red-500 font-semibold">↓</span>
                               : <span className="text-gray-300 text-xs">—</span>}

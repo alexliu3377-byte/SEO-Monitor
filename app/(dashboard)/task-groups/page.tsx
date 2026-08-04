@@ -1726,8 +1726,8 @@ export default function TaskGroupsPage() {
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
                   <td className="px-2 py-2 text-center text-xs font-medium text-green-600">+{w.change.toLocaleString()}</td>
                   <td className="px-2 py-2 text-center text-xs text-gray-500">{w.volume > 0 ? w.volume.toLocaleString() : '—'}</td>
-                  <td className="px-2 py-2 text-center text-xs">
-                    {w.rankTrend === 'both' ? <span><span className="text-green-500 font-semibold">↑</span><span className="text-red-500 font-semibold">↓</span></span>
+                  <td className="px-2 py-2 text-center text-xs whitespace-nowrap">
+                    {w.rankTrend === 'both' ? <span className="inline-flex items-center font-semibold"><span className="text-green-500">↑</span><span className="text-red-500">↓</span></span>
                       : w.rankTrend === 'up' ? <span className="text-green-500 font-semibold">↑</span>
                       : w.rankTrend === 'down' ? <span className="text-red-500 font-semibold">↓</span>
                       : <span className="text-gray-300">—</span>}
