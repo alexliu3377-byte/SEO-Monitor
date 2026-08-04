@@ -6,12 +6,28 @@
 // 排名变化不对称：上涨代表优化生效值得奖励，下跌很多时候只是自然波动
 // （搜索引擎刷新/竞品更新/地域差异），惩罚力度明显小于同等幅度的上涨奖励。
 // 不再封顶 100 分——四块纯累加，分数越高代表这个词创造的流量价值越大。
-export function computeOutcomeScore(
+
+export interface OutcomeScoreBreakdown {
+  rankPos: number | null
+  rankVolume: number | null
+  isIndexed: boolean
+  rankChange: number | null
+  rankScore: number
+  volumeWeight: number
+  baseValue: number
+  indexScore: number
+  changeScore: number
+  total: number
+}
+
+// 前端"得分"点开的解释弹窗、以及 computeOutcomeScore 本身都基于这一个函数，
+// 保证展示出来的每一步数字跟实际用于统计的总分是同一套计算，不会对不上。
+export function explainOutcomeScore(
   rankPos: number | null,
   isIndexed: boolean,
   rankChange: number | null,
   rankVolume: number | null
-): number {
+): OutcomeScoreBreakdown {
   let rankScore = 0
   if (rankPos != null) {
     if (rankPos <= 3) rankScore = 100
@@ -37,5 +53,15 @@ export function computeOutcomeScore(
     else changeScore = -15
   }
 
-  return Math.round(baseValue + indexScore + changeScore)
+  const total = Math.round(baseValue + indexScore + changeScore)
+  return { rankPos, rankVolume, isIndexed, rankChange, rankScore, volumeWeight, baseValue, indexScore, changeScore, total }
+}
+
+export function computeOutcomeScore(
+  rankPos: number | null,
+  isIndexed: boolean,
+  rankChange: number | null,
+  rankVolume: number | null
+): number {
+  return explainOutcomeScore(rankPos, isIndexed, rankChange, rankVolume).total
 }

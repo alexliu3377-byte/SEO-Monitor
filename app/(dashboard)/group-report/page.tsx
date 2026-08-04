@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { useUser } from '@/lib/user-context'
-import { computeOutcomeScore } from '@/lib/outcome-score'
+import { explainOutcomeScore } from '@/lib/outcome-score'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
@@ -48,7 +48,7 @@ interface OutcomeRow {
   rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
-type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume'
+type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume' | 'score'
 // 认领来源短标签，跟 task-groups 页面的 SourceTag 保持同一套映射，
 // 2026-07-29 加入替代原来的"试点"C/T列。
 const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品涨排', '连续上涨词': '连续上涨', '共新增词': '共新增词', '搜索量查询': '搜索查询', '交叉词': '交叉词', '更新词库': '更新词库', '手动添加': '手动添加', '跌词更新': '跌词更新', '跌排更新': '跌排更新', '涨排更新': '涨排更新', '搜索上涨': '搜索上涨', '分发词': '分发词' }
@@ -160,6 +160,7 @@ export default function GroupReportPage() {
   const [detailPage, setDetailPage] = useState(0)
 
   // Outcomes tab state
+  const [scoreDetailRow, setScoreDetailRow] = useState<OutcomeRow | null>(null)
   const [outcomes, setOutcomes] = useState<OutcomeRow[]>([])
   const [outcomeSummary, setOutcomeSummary] = useState<OutcomeSummary | null>(null)
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
@@ -509,7 +510,7 @@ export default function GroupReportPage() {
                           <span className="text-[11px] font-medium text-gray-400">排名词</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">排名量{oSortIcons('rank_volume')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成效</span>
-                          <span className="text-[11px] font-medium text-gray-400 text-center">得分</span>
+                          <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">得分{oSortIcons('score')}</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">提交日期{oSortIcons('submit_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 inline-flex items-center justify-center">记录日期{oSortIcons('record_date')}</span>
                           <span className="text-[11px] font-medium text-gray-400 text-center">成员</span>
@@ -596,21 +597,23 @@ export default function GroupReportPage() {
                                   {row.effectiveness === '无效'     && <span className="text-xs whitespace-nowrap bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
                                 </div>
                                 {(() => {
-                                  const score = computeOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume)
-                                  if (row.effectiveness === '追踪中' && score === 0) return <div className="text-center text-xs text-gray-300">—</div>
+                                  const score = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume).total
+                                  if (row.effectiveness === '追踪中' && score === 0) return (
+                                    <button onClick={() => setScoreDetailRow(row)} className="w-full text-center text-xs text-gray-300 hover:text-gray-500 transition-colors">—</button>
+                                  )
                                   if (row.env_excluded) return (
-                                    <div className="text-center" title="记录日期环境异常（全站大跌或抓取失败），未计入规则平均分">
+                                    <button onClick={() => setScoreDetailRow(row)} className="w-full text-center hover:opacity-70 transition-opacity" title="记录日期环境异常（全站大跌或抓取失败），未计入规则平均分">
                                       <span className="text-sm font-bold tabular-nums text-gray-300">{score}</span>
                                       <span className="text-[9px] text-gray-300 block leading-none">环境</span>
-                                    </div>
+                                    </button>
                                   )
                                   // 分数不再封顶100（排名量用log10加权后常见几百分），旧的70/40分档阈值
                                   // 已经没有意义——改成按正负号三色：创造了价值/暂无价值/被扣分
                                   const color = score > 0 ? 'text-green-600' : score < 0 ? 'text-red-400' : 'text-gray-400'
                                   return (
-                                    <div className="text-center">
-                                      <span className={`text-sm font-bold tabular-nums ${color}`}>{score}</span>
-                                    </div>
+                                    <button onClick={() => setScoreDetailRow(row)} className="w-full text-center hover:opacity-70 transition-opacity">
+                                      <span className={`text-sm font-bold tabular-nums underline decoration-dotted decoration-gray-300 underline-offset-2 ${color}`}>{score}</span>
+                                    </button>
                                   )
                                 })()}
                                 <span className="text-sm text-gray-500 text-center">{(row.submit_date ?? '').slice(5).replace('-', '/')}</span>
@@ -939,6 +942,70 @@ export default function GroupReportPage() {
           )}
         </div>
       )}
+
+      {/* 得分计算说明 Modal */}
+      {scoreDetailRow && (() => {
+        const row = scoreDetailRow
+        const b = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume)
+        const changeDesc = row.rank_change == null ? '无排名变化数据'
+          : row.rank_change > 0 ? `排名上涨 ${row.rank_change} 位`
+          : row.rank_change < 0 ? `排名下跌 ${-row.rank_change} 位`
+          : '排名无变化'
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-gray-900 truncate" title={row.final_keyword || row.keyword}>{row.final_keyword || row.keyword}</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">得分是怎么算出来的</p>
+                </div>
+                <button onClick={() => setScoreDetailRow(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 px-6 py-4 space-y-2.5 text-sm">
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-gray-500">排名分{row.rank_position != null ? `（第${row.rank_position}名）` : '（未排名）'}</span>
+                  <span className="font-medium text-gray-800 tabular-nums">{b.rankScore}</span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-gray-100 pb-3">
+                  <span className="text-gray-500">搜索量权重{row.rank_position != null ? `（排名量 ${row.rank_volume?.toLocaleString() ?? 0}）` : ''}</span>
+                  <span className="font-medium text-gray-800 tabular-nums">×{b.volumeWeight.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-gray-600 font-medium">= 排名价值</span>
+                  <span className="font-semibold text-gray-900 tabular-nums">{b.baseValue.toFixed(1)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-gray-500">收录分{row.is_indexed ? '（已收录）' : '（未收录）'}</span>
+                  <span className="font-medium text-gray-800 tabular-nums">+{b.indexScore}</span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-gray-100 pb-3">
+                  <span className="text-gray-500">涨跌分（{changeDesc}）</span>
+                  <span className={`font-medium tabular-nums ${b.changeScore > 0 ? 'text-green-600' : b.changeScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.changeScore >= 0 ? `+${b.changeScore}` : b.changeScore}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-gray-700 font-semibold">总分</span>
+                  <span className={`text-lg font-bold tabular-nums ${b.total > 0 ? 'text-green-600' : b.total < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.total}</span>
+                </div>
+                {row.env_excluded && (
+                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">这条记录日期环境异常（全站大跌或抓取失败），不计入"得分"平均分。</p>
+                )}
+                <details className="pt-2">
+                  <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">公式说明</summary>
+                  <div className="mt-2 text-[11px] text-gray-500 leading-relaxed space-y-1">
+                    <p>总分 = 排名分 × 搜索量权重 + 收录分 + 涨跌分</p>
+                    <p>排名分：前3名100 / 4-10名80 / 11-20名60 / 21-30名40 / 30名以后20</p>
+                    <p>搜索量权重：1 + log10(排名量+1)，只在有排名时生效</p>
+                    <p>收录分：收录固定 +10</p>
+                    <p>涨跌分：涨20+位+20 / 涨10-20位+15 / 涨1-9位+10 / 不变0 / 跌1-5位-2 / 跌6-10位-5 / 跌11-20位-10 / 跌20+位-15</p>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 追踪汇总"查看"详情 Modal */}
       {sourceDetailModal && (

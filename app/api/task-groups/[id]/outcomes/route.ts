@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { computeOutcomeScore } from '@/lib/outcome-score'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
@@ -170,21 +171,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const bestRankPosition = matchedPositions.length > 0 ? Math.min(...matchedPositions) : r.rank_position
     // Sum of volume across every matched keyword, not just the one "best pick".
     const totalRankVolume = matches.length > 0 ? matches.reduce((s, m) => s + (m.volume || 0), 0) : (r.rank_volume ?? 0)
+    // A page can't rank in search without being indexed — if site_keyword_ranks
+    // found a rank_position, it's indexed even when our own site_indexed_pages
+    // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
+    // overridden here at read time (2026-07-29), not at write time, so this
+    // self-heals for historical rows too without a backfill.
+    const isIndexed = r.is_indexed || r.rank_position != null
+    const rankChange = (r.rank_position != null && r.prev_rank_position != null)
+      ? r.prev_rank_position - r.rank_position
+      : null
     return {
       ...r,
-      // A page can't rank in search without being indexed — if site_keyword_ranks
-      // found a rank_position, it's indexed even when our own site_indexed_pages
-      // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
-      // overridden here at read time (2026-07-29), not at write time, so this
-      // self-heals for historical rows too without a backfill.
-      is_indexed: r.is_indexed || r.rank_position != null,
+      is_indexed: isIndexed,
       username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
-      rank_change: (r.rank_position != null && r.prev_rank_position != null)
-        ? r.prev_rank_position - r.rank_position
-        : null,
+      rank_change: rankChange,
       env_excluded: badDates.has(r.record_date),
       source: claimSourceMap.get(r.claim_id) ?? null,
       bestRankPosition, totalRankVolume,
+      // Same inputs the frontend's per-row "得分" cell uses (raw scalar
+      // rank_position/rank_volume, not bestRankPosition/totalRankVolume) —
+      // sorting has to match what's actually displayed.
+      score: computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume),
     }
   })
 
@@ -210,6 +217,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         return dir * (ra - rb)
       }
       case 'rank_volume': return dir * (a.totalRankVolume - b.totalRankVolume)
+      case 'score': return dir * (a.score - b.score)
       case 'record_date': return dir * a.record_date.localeCompare(b.record_date)
       default: return dir * (a.submit_date ?? '').localeCompare(b.submit_date ?? '')
     }
