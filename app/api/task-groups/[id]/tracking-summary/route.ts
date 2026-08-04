@@ -59,7 +59,7 @@ function buildSummary(
     if (!badDates.has(r.record_date)) {
       const rankChange = (r.rank_position != null && r.prev_rank_position != null)
         ? r.prev_rank_position - r.rank_position : null
-      scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange)
+      scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange, r.rank_volume)
       scoredCount++
     }
   }

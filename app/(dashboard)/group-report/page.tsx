@@ -596,7 +596,7 @@ export default function GroupReportPage() {
                                   {row.effectiveness === '无效'     && <span className="text-xs whitespace-nowrap bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
                                 </div>
                                 {(() => {
-                                  const score = computeOutcomeScore(row.rank_position, row.is_indexed, row.rank_change)
+                                  const score = computeOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume)
                                   if (row.effectiveness === '追踪中' && score === 0) return <div className="text-center text-xs text-gray-300">—</div>
                                   if (row.env_excluded) return (
                                     <div className="text-center" title="记录日期环境异常（全站大跌或抓取失败），未计入规则平均分">
@@ -604,7 +604,9 @@ export default function GroupReportPage() {
                                       <span className="text-[9px] text-gray-300 block leading-none">环境</span>
                                     </div>
                                   )
-                                  const color = score >= 70 ? 'text-green-600' : score >= 40 ? 'text-amber-500' : 'text-red-400'
+                                  // 分数不再封顶100（排名量用log10加权后常见几百分），旧的70/40分档阈值
+                                  // 已经没有意义——改成按正负号三色：创造了价值/暂无价值/被扣分
+                                  const color = score > 0 ? 'text-green-600' : score < 0 ? 'text-red-400' : 'text-gray-400'
                                   return (
                                     <div className="text-center">
                                       <span className={`text-sm font-bold tabular-nums ${color}`}>{score}</span>
@@ -726,7 +728,7 @@ export default function GroupReportPage() {
                         {
                           label: '得分', value: view.avgScore ?? '—',
                           sub: '平均分（同成效追踪口径）',
-                          color: view.avgScore == null ? 'text-gray-800' : view.avgScore >= 70 ? 'text-green-600' : view.avgScore >= 40 ? 'text-amber-500' : 'text-red-400',
+                          color: view.avgScore == null ? 'text-gray-800' : view.avgScore > 0 ? 'text-green-600' : view.avgScore < 0 ? 'text-red-400' : 'text-gray-800',
                         },
                       ].map(s => (
                         <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-4 py-3">
