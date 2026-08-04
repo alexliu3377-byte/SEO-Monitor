@@ -486,13 +486,18 @@ export default function TaskGroupsPage() {
   const [rankdownDate, setRankdownDate] = useState('')
 
   // 分发词 tab: 管理员手动指定一批词让组员认领，2026-08 加入
-  interface DistributedWord { id: string; keyword: string; volume: number; volume_source: 'exact' | 'base_match' | 'unknown'; matched_keyword: string | null; claimedBy: string | null }
+  interface DistributedWord {
+    id: string; keyword: string; volume: number; volume_source: 'exact' | 'base_match' | 'unknown'
+    matched_keyword: string | null; repeatable: boolean; claimedBy: string | null; cooldownDaysLeft: number | null
+  }
   const [distributedWords, setDistributedWords] = useState<DistributedWord[]>([])
   const [distributedLoading, setDistributedLoading] = useState(false)
   const [showDistributeModal, setShowDistributeModal] = useState(false)
   const [distributeText, setDistributeText] = useState('')
+  const [distributeRepeatable, setDistributeRepeatable] = useState(false)
   const [distributeSaving, setDistributeSaving] = useState(false)
   const [distributeMsg, setDistributeMsg] = useState('')
+  const [distributeClearing, setDistributeClearing] = useState(false)
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
   const [radarLoaded, setRadarLoaded] = useState(false)
@@ -876,10 +881,10 @@ export default function TaskGroupsPage() {
     try {
       const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: distributeText }),
+        body: JSON.stringify({ keywords: distributeText, repeatable: distributeRepeatable }),
       })
       if (res.ok) {
-        setDistributeText(''); setShowDistributeModal(false)
+        setDistributeText(''); setDistributeRepeatable(false); setShowDistributeModal(false)
         loadDistributed()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -888,6 +893,41 @@ export default function TaskGroupsPage() {
     } catch {
       setDistributeMsg('添加失败（网络异常）')
     } finally { setDistributeSaving(false) }
+  }
+
+  async function deleteDistributed(id: string) {
+    if (!activeGroupId) return
+    const removed = distributedWords.find(w => w.id === id)
+    setDistributedWords(prev => prev.filter(w => w.id !== id))
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok && removed) {
+        setDistributedWords(prev => [...prev, removed].sort((a, b) => a.keyword.localeCompare(b.keyword)))
+        setClaimErrorMsg('删除失败，请重试')
+      }
+    } catch {
+      if (removed) setDistributedWords(prev => [...prev, removed])
+      setClaimErrorMsg('删除失败（网络异常），请重试')
+    }
+  }
+
+  async function clearAllDistributed() {
+    if (!activeGroupId || distributeClearing || distributedWords.length === 0) return
+    if (!window.confirm(`确定要清空全部 ${distributedWords.length} 个分发词吗？此操作不可撤销。`)) return
+    setDistributeClearing(true)
+    try {
+      const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+      if (res.ok) setDistributedWords([])
+      else setClaimErrorMsg('清空失败，请重试')
+    } catch {
+      setClaimErrorMsg('清空失败（网络异常），请重试')
+    } finally { setDistributeClearing(false) }
   }
 
   async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string) {
@@ -1357,18 +1397,25 @@ export default function TaskGroupsPage() {
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs text-gray-400">管理员手动指定的词，任何组员都可以双击认领去做"新增"</span>
             {canManage && (
-              <button onClick={() => { setShowDistributeModal(true); setDistributeMsg('') }}
-                className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600 transition-colors flex-shrink-0">
-                + 添加分发词
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button onClick={clearAllDistributed} disabled={distributeClearing || distributedWords.length === 0}
+                  className="text-xs text-red-400 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  {distributeClearing ? '清空中…' : '清空全部'}
+                </button>
+                <button onClick={() => { setShowDistributeModal(true); setDistributeMsg('') }}
+                  className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600 transition-colors">
+                  + 添加分发词
+                </button>
+              </div>
             )}
           </div>
           {distributedWords.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">暂无分发词{canManage ? '，点右上角添加' : ''}</div>
           ) : (
             <table className="w-full table-fixed">
-              <colgroup><col /><col className="w-24" /><col className="w-28" /></colgroup>
+              <colgroup>{canManage && <col className="w-6" />}<col /><col className="w-24" /><col className="w-32" /></colgroup>
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                {canManage && <th className="w-6" />}
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
                 <th className="px-2 py-2 text-center font-medium">搜索量</th>
                 <th className="px-2 py-2 text-center font-medium">状态</th>
@@ -1376,12 +1423,20 @@ export default function TaskGroupsPage() {
               <tbody>
                 {distributedWords.map(w => {
                   const claimed = !!w.claimedBy
+                  const inCooldown = claimed && w.cooldownDaysLeft != null
                   return (
                     <tr key={w.id} onDoubleClick={() => !claimed && claimKeyword(w.keyword, '分发词', w.volume)}
                       className={`border-b border-gray-50 last:border-0 transition-colors ${claimed ? 'opacity-50' : 'cursor-pointer select-none hover:bg-gray-50'}`}
-                      title={claimed ? `已被 ${w.claimedBy} 认领` : '双击认领'}>
+                      title={claimed ? (inCooldown ? `${w.claimedBy} 认领过，还剩${w.cooldownDaysLeft}天冷却` : `已被 ${w.claimedBy} 认领`) : '双击认领'}>
+                      {canManage && (
+                        <td className="px-1 py-2">
+                          <button onClick={e => { e.stopPropagation(); deleteDistributed(w.id) }}
+                            className="text-gray-300 hover:text-red-400 transition-colors leading-none" title="删除这个词">×</button>
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800">{w.keyword}</span>
+                        {w.repeatable && <span className="ml-1.5 text-[10px] text-blue-400 align-middle">可重复</span>}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">
                         {w.volume > 0 ? w.volume.toLocaleString() : '—'}
@@ -1390,7 +1445,9 @@ export default function TaskGroupsPage() {
                         )}
                       </td>
                       <td className="px-2 py-2 text-center text-xs">
-                        {claimed ? <span className="text-gray-400">{w.claimedBy} 已认领</span> : <span className="text-green-600">可认领</span>}
+                        {inCooldown
+                          ? <span className="text-amber-500">冷却中 · {w.cooldownDaysLeft}天后可认领</span>
+                          : claimed ? <span className="text-gray-400">{w.claimedBy} 已认领</span> : <span className="text-green-600">可认领</span>}
                       </td>
                     </tr>
                   )
@@ -2327,6 +2384,16 @@ export default function TaskGroupsPage() {
                 rows={10}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-400 font-mono resize-none"
               />
+              <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={distributeRepeatable} onChange={e => setDistributeRepeatable(e.target.checked)}
+                  className="mt-0.5" />
+                <span>
+                  可重复认领（7天冷却）
+                  <span className="block text-[10px] text-gray-400 mt-0.5">
+                    不勾选＝一次性：谁认领了就永久锁定；勾选后认领满7天会自动重新开放给别人认领
+                  </span>
+                </span>
+              </label>
               {distributeMsg && <p className="text-xs text-red-500">{distributeMsg}</p>}
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">

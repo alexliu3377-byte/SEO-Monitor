@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { lookupVolumeWithFallback } from '@/lib/keyword-base-match'
 
+const COOLDOWN_DAYS = 7
+
+function getMY(offsetDays = 0) {
+  return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
   const { data: { user } } = await authClient.auth.getUser()
@@ -24,37 +30,48 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const { data: rows, error } = await service
     .from('distributed_keywords')
-    .select('id, keyword, volume, volume_source, matched_keyword, created_at')
+    .select('id, keyword, volume, volume_source, matched_keyword, repeatable, created_at')
     .eq('group_id', groupId)
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const keywords = (rows || []).map((r: { keyword: string }) => r.keyword)
-  const claimedByKeyword = new Map<string, string>()
+  // Latest non-dismissed claim per keyword — repeatable words cycle back to
+  // available once COOLDOWN_DAYS have passed since this date; non-repeatable
+  // words are locked forever by any claim here, regardless of date.
+  const latestClaimByKeyword = new Map<string, { user_id: string; claimed_date: string }>()
+  const usernames = new Map<string, string>()
   if (keywords.length > 0) {
-    // Not date-scoped — a 分发词 is meant to be worked on once, not
-    // re-offered daily like the signal-driven discovery tabs.
     const { data: claims } = await service
       .from('member_claimed_keywords')
-      .select('keyword, user_id')
+      .select('keyword, user_id, claimed_date')
       .eq('group_id', groupId)
       .in('keyword', keywords)
       .neq('status', 'dismissed')
-    if (claims && claims.length > 0) {
-      const userIds = Array.from(new Set(claims.map((c: { user_id: string }) => c.user_id)))
+      .order('claimed_date', { ascending: false })
+    for (const c of (claims ?? []) as { keyword: string; user_id: string; claimed_date: string }[]) {
+      if (!latestClaimByKeyword.has(c.keyword)) latestClaimByKeyword.set(c.keyword, c)
+    }
+    if (latestClaimByKeyword.size > 0) {
+      const userIds = Array.from(new Set(Array.from(latestClaimByKeyword.values()).map(c => c.user_id)))
       const { data: members } = await service
         .from('task_group_members').select('user_id, username').eq('group_id', groupId).in('user_id', userIds)
-      const usernameOf = new Map<string, string>((members || []).map((m: { user_id: string; username: string | null }) => [m.user_id, m.username || m.user_id.slice(0, 8)]))
-      for (const c of claims as { keyword: string; user_id: string }[]) {
-        if (!claimedByKeyword.has(c.keyword)) claimedByKeyword.set(c.keyword, usernameOf.get(c.user_id) ?? c.user_id.slice(0, 8))
+      for (const m of (members ?? []) as { user_id: string; username: string | null }[]) {
+        usernames.set(m.user_id, m.username || m.user_id.slice(0, 8))
       }
     }
   }
 
-  const out = (rows || []).map((r: { id: string; keyword: string; volume: number; volume_source: string; matched_keyword: string | null; created_at: string }) => ({
-    ...r,
-    claimedBy: claimedByKeyword.get(r.keyword) ?? null,
-  }))
+  const today = getMY()
+  const out = (rows || []).map((r: { id: string; keyword: string; volume: number; volume_source: string; matched_keyword: string | null; repeatable: boolean; created_at: string }) => {
+    const latest = latestClaimByKeyword.get(r.keyword)
+    if (!latest) return { ...r, claimedBy: null, cooldownDaysLeft: null }
+    const claimerName = usernames.get(latest.user_id) ?? latest.user_id.slice(0, 8)
+    if (!r.repeatable) return { ...r, claimedBy: claimerName, cooldownDaysLeft: null }
+    const daysSince = Math.floor((new Date(today).getTime() - new Date(latest.claimed_date).getTime()) / 86400000)
+    if (daysSince < COOLDOWN_DAYS) return { ...r, claimedBy: claimerName, cooldownDaysLeft: COOLDOWN_DAYS - daysSince }
+    return { ...r, claimedBy: null, cooldownDaysLeft: null } // cooldown 已过，重新可认领
+  })
 
   return NextResponse.json({ keywords: out })
 }
@@ -65,7 +82,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: groupId } = await params
-  const { keywords } = await req.json() as { keywords?: string }
+  const { keywords, repeatable } = await req.json() as { keywords?: string; repeatable?: boolean }
   if (!keywords || !keywords.trim()) return NextResponse.json({ error: '没有输入关键词' }, { status: 400 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,15 +106,39 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const { volume, source, matchedKeyword } = await lookupVolumeWithFallback(service, keyword)
     rows.push({
       group_id: groupId, keyword, volume, volume_source: source, matched_keyword: matchedKeyword,
-      added_by: user.id,
+      repeatable: !!repeatable, added_by: user.id,
     })
   }
 
   const { data: inserted, error } = await service
     .from('distributed_keywords')
     .upsert(rows, { onConflict: 'group_id,keyword' })
-    .select('id, keyword, volume, volume_source, matched_keyword')
+    .select('id, keyword, volume, volume_source, matched_keyword, repeatable')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })
+}
+
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const authClient = createClient()
+  const { data: { user } } = await authClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { id: groupId } = await params
+  const { id, all } = await req.json().catch(() => ({})) as { id?: string; all?: boolean }
+  if (!id && !all) return NextResponse.json({ error: '缺少参数' }, { status: 400 })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = createServiceClient() as any
+
+  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
+  const role: string = profile?.role ?? 'normal'
+  if (role !== 'super' && role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  let query = service.from('distributed_keywords').delete().eq('group_id', groupId)
+  if (!all) query = query.eq('id', id)
+  const { error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ success: true })
 }
