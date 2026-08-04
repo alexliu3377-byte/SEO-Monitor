@@ -18,7 +18,10 @@ interface WordLibEntry extends NewWord { longTailCount: number }
 interface RankWord { keyword: string; siteCount: number; volume: number; sites: string[]; last_date: string; first_date: string; rankDays: number }
 interface StreakWord { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }
 interface CrossWord { keyword: string; volume: number; last_date: string; first_date: string; newSites: string[]; rankSites: string[] }
-interface VolumeRisingWord { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string }
+interface VolumeRisingWord {
+  keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string
+  sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
+}
 
 interface ClaimedKeyword {
   id: string; keyword: string; source: string
@@ -30,6 +33,7 @@ type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
 interface DetailRow { date: string; domain: string }
+interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
 
 const PAGE_SIZE = 20
 
@@ -516,6 +520,7 @@ export default function TaskGroupsPage() {
   const [detailSource, setDetailSource] = useState<string>('')
   const [detailNewRows, setDetailNewRows] = useState<DetailRow[]>([])
   const [detailRankRows, setDetailRankRows] = useState<DetailRow[]>([])
+  const [detailVolumeRisingRows, setDetailVolumeRisingRows] = useState<VolumeRisingDetailRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibData, setWordLibData] = useState<WordLibEntry[]>([])
@@ -560,7 +565,7 @@ export default function TaskGroupsPage() {
   const claimingRef = useRef<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const claimedListRef = useRef<HTMLDivElement>(null)
-  const detailCacheRef = useRef<Map<string, { newRows: DetailRow[]; rankRows: DetailRow[]; wordLibSiteKws: { domain: string; keywords: string[] }[] }>>(new Map())
+  const detailCacheRef = useRef<Map<string, { newRows: DetailRow[]; rankRows: DetailRow[]; wordLibSiteKws: { domain: string; keywords: string[] }[]; volumeRisingRows: VolumeRisingDetailRow[] }>>(new Map())
 
   const activeGroup = groups.find(g => g.id === activeGroupId) ?? null
   const effectiveViewingId = viewingMemberId || currentUserId || ''
@@ -1102,6 +1107,7 @@ export default function TaskGroupsPage() {
       setDetailNewRows(cached.newRows)
       setDetailRankRows(cached.rankRows)
       setWordLibSiteKws(cached.wordLibSiteKws)
+      setDetailVolumeRisingRows(cached.volumeRisingRows)
       setDetailLoading(false)
       return
     }
@@ -1110,6 +1116,7 @@ export default function TaskGroupsPage() {
     setDetailNewRows([])
     setDetailRankRows([])
     setWordLibSiteKws([])
+    setDetailVolumeRisingRows([])
 
     const supabase = getBrowserClient()
     let idMap = siteIdMap
@@ -1118,6 +1125,35 @@ export default function TaskGroupsPage() {
       const { data: siteData } = await (supabase.from('sites') as any).select('id, domain')
       idMap = new Map((siteData || []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
       setSiteIdMap(idMap)
+    }
+
+    if (source === '搜索上涨') {
+      // 跟"竞品涨排名"不同，这里两个方向都要——目的就是看这个搜索量在
+      // 涨的词，我们自己站点的排名是在涨还是在跌。
+      const since = getMYDate(-30)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: raw } = await (supabase.from('rank_changes') as any)
+          .select('site_id, stat_date, type')
+          .eq('keyword', keyword).gte('stat_date', since)
+          .order('stat_date', { ascending: false })
+        const vRows: VolumeRisingDetailRow[] = []
+        for (const r of (raw || [])) {
+          const domain = idMap.get(r.site_id)
+          if (domain && (r.type === 'rankup' || r.type === 'rankdown')) {
+            vRows.push({ date: String(r.stat_date).slice(0, 10), domain, type: r.type })
+          }
+        }
+        const seen = new Set<string>()
+        const deduped = vRows
+          .filter(r => { const k = `${r.date}|${r.domain}|${r.type}`; if (seen.has(k)) return false; seen.add(k); return true })
+          .sort((a, b) => b.date.localeCompare(a.date) || a.domain.localeCompare(b.domain))
+        setDetailVolumeRisingRows(deduped)
+        detailCacheRef.current.set(cacheKey, { newRows: [], rankRows: [], wordLibSiteKws: [], volumeRisingRows: deduped })
+      } finally {
+        setDetailLoading(false)
+      }
+      return
     }
 
     if (source === '更新词库') {
@@ -1145,7 +1181,7 @@ export default function TaskGroupsPage() {
             .map(([domain, kws]) => ({ domain, keywords: Array.from(kws).sort() }))
             .sort((a, b) => b.keywords.length - a.keywords.length)
           setWordLibSiteKws(wlRows)
-          detailCacheRef.current.set(cacheKey, { newRows: [], rankRows: [], wordLibSiteKws: wlRows })
+          detailCacheRef.current.set(cacheKey, { newRows: [], rankRows: [], wordLibSiteKws: wlRows, volumeRisingRows: [] })
         }
       } finally {
         setDetailLoading(false)
@@ -1186,7 +1222,7 @@ export default function TaskGroupsPage() {
       const dedupedRank = dedupDetailRows(rRows)
       setDetailNewRows(dedupedNew)
       setDetailRankRows(dedupedRank)
-      detailCacheRef.current.set(cacheKey, { newRows: dedupedNew, rankRows: dedupedRank, wordLibSiteKws: [] })
+      detailCacheRef.current.set(cacheKey, { newRows: dedupedNew, rankRows: dedupedRank, wordLibSiteKws: [], volumeRisingRows: [] })
     } finally {
       setDetailLoading(false)
     }
@@ -1675,11 +1711,12 @@ export default function TaskGroupsPage() {
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">涨幅{sortIcons('change')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
+              <th className="px-2 py-2 text-center font-medium w-16">排名波动</th>
               <th className="w-14" />
             </tr></thead>
             <tbody>
               {slice.length === 0 ? (
-                <tr><td colSpan={5} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+                <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
               ) : slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={null}
@@ -1689,6 +1726,12 @@ export default function TaskGroupsPage() {
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
                   <td className="px-2 py-2 text-center text-xs font-medium text-green-600">+{w.change.toLocaleString()}</td>
                   <td className="px-2 py-2 text-center text-xs text-gray-500">{w.volume > 0 ? w.volume.toLocaleString() : '—'}</td>
+                  <td className="px-2 py-2 text-center text-xs">
+                    {w.rankTrend === 'both' ? <span><span className="text-green-500 font-semibold">↑</span><span className="text-red-500 font-semibold">↓</span></span>
+                      : w.rankTrend === 'up' ? <span className="text-green-500 font-semibold">↑</span>
+                      : w.rankTrend === 'down' ? <span className="text-red-500 font-semibold">↓</span>
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                 </KwRow>
               ))}
             </tbody>
@@ -2027,6 +2070,34 @@ export default function TaskGroupsPage() {
   // Detail modal inner content
   function DetailBody() {
     if (detailLoading) return <Spinner />
+    if (detailSource === '搜索上涨') {
+      const byDate = new Map<string, { domain: string; type: 'rankup' | 'rankdown' }[]>()
+      for (const r of detailVolumeRisingRows) {
+        if (!byDate.has(r.date)) byDate.set(r.date, [])
+        byDate.get(r.date)!.push({ domain: r.domain, type: r.type })
+      }
+      const sorted = Array.from(byDate.entries()).sort((a, b) => b[0].localeCompare(a[0]))
+      if (sorted.length === 0) return <p className="text-sm text-gray-400 text-center py-10">近30天暂无排名记录</p>
+      return (
+        <div className="space-y-2">
+          {sorted.map(([date, entries]) => (
+            <div key={date} className="flex items-start gap-2">
+              <span className="text-xs text-gray-400 w-10 flex-shrink-0 pt-1">{date.slice(5)}</span>
+              <div className="flex flex-wrap gap-1">
+                {entries.map(({ domain, type }) => (
+                  <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-0.5 text-gray-700">
+                    <span>{domain}</span>
+                    <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
+                      {type === 'rankup' ? '↑' : '↓'}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
     if (detailSource === '更新词库') {
       if (wordLibSiteKws.length === 0) return <p className="text-sm text-gray-400 text-center py-10">暂无记录</p>
       return (

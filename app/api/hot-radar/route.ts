@@ -73,13 +73,47 @@ export async function GET() {
     last_date:  toDate(r.last_seen),
   }))
 
-  const volumeRisingWords = ((volumeRisingRaw || []) as VolumeRisingRow[]).map((r) => ({
-    keyword:     r.keyword,
-    volume:      Number(r.volume),
-    prevVolume:  r.prev_volume != null ? Number(r.prev_volume) : null,
-    change:      Number(r.volume_change),
-    last_date:   toDate(r.stat_date),
-  }))
+  // Cross-reference against our own rank_changes: does any tracked site
+  // already rank for this rising-volume keyword, and is that rank recently
+  // trending up, down, or both (different sites/days within the window)?
+  const vrKeywords = ((volumeRisingRaw || []) as VolumeRisingRow[]).map((r) => r.keyword)
+  const siteTrendMap = new Map<string, { sites: Set<string>; hasUp: boolean; hasDown: boolean }>()
+  if (vrKeywords.length > 0) {
+    const { data: sitesRaw } = await db.from('sites').select('id, domain')
+    const siteIdToDomain = new Map<string, string>((sitesRaw || []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
+    const rcSince = getMY(-14)
+    // 150/batch — CJK keywords in a large .in() list can exceed the ~16KB
+    // HTTP header limit and fail silently above that (see
+    // project_supabase_in_query_header_overflow memory).
+    for (let i = 0; i < vrKeywords.length; i += 150) {
+      const { data: rcRows } = await db.from('rank_changes')
+        .select('keyword, site_id, type')
+        .in('keyword', vrKeywords.slice(i, i + 150))
+        .gte('stat_date', rcSince)
+      for (const row of (rcRows || []) as { keyword: string; site_id: string; type: string }[]) {
+        const domain = siteIdToDomain.get(row.site_id)
+        if (!domain) continue
+        let entry = siteTrendMap.get(row.keyword)
+        if (!entry) { entry = { sites: new Set(), hasUp: false, hasDown: false }; siteTrendMap.set(row.keyword, entry) }
+        entry.sites.add(domain)
+        if (row.type === 'rankup') entry.hasUp = true
+        else if (row.type === 'rankdown') entry.hasDown = true
+      }
+    }
+  }
+
+  const volumeRisingWords = ((volumeRisingRaw || []) as VolumeRisingRow[]).map((r) => {
+    const t = siteTrendMap.get(r.keyword)
+    return {
+      keyword:     r.keyword,
+      volume:      Number(r.volume),
+      prevVolume:  r.prev_volume != null ? Number(r.prev_volume) : null,
+      change:      Number(r.volume_change),
+      last_date:   toDate(r.stat_date),
+      sites:       t ? Array.from(t.sites) : [],
+      rankTrend:   (!t ? null : t.hasUp && t.hasDown ? 'both' : t.hasUp ? 'up' : t.hasDown ? 'down' : null) as 'up' | 'down' | 'both' | null,
+    }
+  })
 
   return NextResponse.json({ newWords, rankWords, streakWords, volumeRisingWords })
 }

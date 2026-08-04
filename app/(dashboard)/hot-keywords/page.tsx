@@ -27,10 +27,14 @@ interface StreakGrouped {
   keyword: string; streak: number; domains: string[]; volume: number
   last_date: string; first_date: string
 }
-interface VolumeRisingEntry { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string }
+interface VolumeRisingEntry {
+  keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string
+  sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
+}
 interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[] }
 interface WeightInfo { pc: number; mobile: number; pcChg: number; mobileChg: number }
 interface DetailRow  { date: string; domain: string }
+interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
 
 type Tab      = 'cross' | 'volumeRising' | 'new' | 'rank' | 'streak' | 'wordLib'
 type PageSize = 50 | 100 | 500
@@ -239,6 +243,7 @@ export default function HotRadarPage() {
   const [detailKw, setDetailKw]       = useState<string | null>(null)
   const [detailNewRows, setDetailNewRows]   = useState<DetailRow[]>([])
   const [detailRankRows, setDetailRankRows] = useState<DetailRow[]>([])
+  const [detailVolumeRisingRows, setDetailVolumeRisingRows] = useState<VolumeRisingDetailRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibData, setWordLibData] = useState<(WordEntry & { longTailCount: number })[]>([])
@@ -301,8 +306,38 @@ export default function HotRadarPage() {
     setDetailLoading(true)
     setDetailNewRows([])
     setDetailRankRows([])
+    setDetailVolumeRisingRows([])
     setWordLibSiteKws([])
     const db = getBrowserClient()
+
+    if (activeTab === 'volumeRising') {
+      // Unlike the rank tab (only ever cares about rankup), here we want both
+      // directions — the whole point is showing whether our own rank for this
+      // rising-volume keyword is climbing or falling.
+      const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: raw } = await (db.from('rank_changes') as any)
+          .select('site_id, stat_date, type')
+          .eq('keyword', keyword).gte('stat_date', since)
+          .order('stat_date', { ascending: false })
+        const rows: VolumeRisingDetailRow[] = []
+        for (const r of (raw || [])) {
+          const domain = siteIdMap.get(r.site_id)
+          if (domain && (r.type === 'rankup' || r.type === 'rankdown')) {
+            rows.push({ date: String(r.stat_date).slice(0, 10), domain, type: r.type })
+          }
+        }
+        const seen = new Set<string>()
+        const deduped = rows
+          .filter(r => { const k = `${r.date}|${r.domain}|${r.type}`; if (seen.has(k)) return false; seen.add(k); return true })
+          .sort((a, b) => b.date.localeCompare(a.date) || a.domain.localeCompare(b.domain))
+        setDetailVolumeRisingRows(deduped)
+      } finally {
+        setDetailLoading(false)
+      }
+      return
+    }
 
     if (activeTab === 'wordLib') {
       const wordEntry = wordLibData.find(w => w.keyword === keyword)
@@ -567,6 +602,16 @@ export default function HotRadarPage() {
   const detailNewByDate  = useMemo(() => groupByDate(detailNewRows),  [detailNewRows])  // eslint-disable-line react-hooks/exhaustive-deps
   const detailRankByDate = useMemo(() => groupByDate(detailRankRows), [detailRankRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  function groupByDateWithType(rows: VolumeRisingDetailRow[]) {
+    const map = new Map<string, { domain: string; type: 'rankup' | 'rankdown' }[]>()
+    for (const r of rows) {
+      if (!map.has(r.date)) map.set(r.date, [])
+      map.get(r.date)!.push({ domain: r.domain, type: r.type })
+    }
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]))
+  }
+  const detailVolumeRisingByDate = useMemo(() => groupByDateWithType(detailVolumeRisingRows), [detailVolumeRisingRows]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -802,10 +847,12 @@ export default function HotRadarPage() {
                 <table className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
-                    <col className="w-64" />
-                    <col className="w-28" />
-                    <col className="w-28" />
+                    <col className="w-48" />
+                    <col className="w-24" />
+                    <col className="w-24" />
                     <col />
+                    <col className="w-20" />
+                    <col className="w-16" />
                   </colgroup>
                   <thead className="bg-gray-50">
                     <tr>
@@ -813,12 +860,14 @@ export default function HotRadarPage() {
                       <th className="table-th">关键词</th>
                       <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">涨幅{sortIcons('change')}</span></th>
                       <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">当前搜索量{sortIcons('volume')}</span></th>
-                      <th className="table-th">变化</th>
+                      <th className="table-th">出现站点</th>
+                      <th className="table-th text-center">排名波动</th>
+                      <th className="table-th text-center">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {pagedList.length === 0 ? (
-                      <tr><td colSpan={5} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+                      <tr><td colSpan={7} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
@@ -832,8 +881,19 @@ export default function HotRadarPage() {
                           <td className="table-td text-center">
                             <span className="font-semibold text-gray-900">{fmtVolume(w.volume)}</span>
                           </td>
-                          <td className="table-td text-xs text-gray-400">
-                            {w.prevVolume != null ? `${w.prevVolume.toLocaleString()} → ${w.volume.toLocaleString()}` : '—'}
+                          <td className="table-td">
+                            {w.sites.length > 0
+                              ? <SiteBadges sites={w.sites} weightMap={weightMap} idMap={groupIdMap} colorMap={groupColorMap} />
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="table-td text-center">
+                            {w.rankTrend === 'both' ? <span><span className="text-green-500 font-semibold">↑</span><span className="text-red-500 font-semibold">↓</span></span>
+                              : w.rankTrend === 'up' ? <span className="text-green-500 font-semibold">↑</span>
+                              : w.rankTrend === 'down' ? <span className="text-red-500 font-semibold">↓</span>
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="table-td text-center">
+                            <button onClick={() => openDetail(w.keyword)} className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors">查看</button>
                           </td>
                         </tr>
                       ))
@@ -1033,6 +1093,29 @@ export default function HotRadarPage() {
                   </svg>
                   加载中...
                 </div>
+              ) : activeTab === 'volumeRising' ? (
+                /* 搜索量上涨：按日期分组，每个站点chip旁标出当天是涨排还是跌排 */
+                detailVolumeRisingByDate.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-10">近30天暂无排名记录</p>
+                ) : (
+                  <div className="space-y-2">
+                    {detailVolumeRisingByDate.map(([date, entries]) => (
+                      <div key={date} className="flex items-start gap-2">
+                        <span className="text-xs text-gray-400 w-16 flex-shrink-0 pt-1.5">{date.slice(5)}</span>
+                        <div className="flex flex-wrap gap-1">
+                          {entries.map(({ domain, type }) => (
+                            <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-1 text-gray-700">
+                              <span className="truncate max-w-[130px]">{domain}</span>
+                              <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
+                                {type === 'rankup' ? '↑' : '↓'}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : activeTab === 'wordLib' ? (
                 /* 更新词库：按站点分组显示长尾词 */
                 wordLibSiteKws.length === 0 ? (
