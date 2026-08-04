@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeOutcomeScore } from '@/lib/outcome-score'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
@@ -115,28 +114,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return true
   })
 
-  // Fetch experiment_group + source for deduped claim_ids (batched to avoid
-  // URL length limits — UUIDs are fixed-width so 200/batch is safe here,
-  // unlike the CJK-keyword case elsewhere in this codebase).
+  // Fetch source for deduped claim_ids (batched to avoid URL length limits —
+  // UUIDs are fixed-width so 200/batch is safe here, unlike the CJK-keyword
+  // case elsewhere in this codebase).
   const claimIds = dedupedRows.map(r => r.claim_id)
-  const expGroupMap = new Map<string, 'control' | 'treatment' | null>()
   const claimSourceMap = new Map<string, string | null>()
   const BATCH = 200
   for (let i = 0; i < claimIds.length; i += BATCH) {
     const { data: claimMeta } = await service
       .from('member_claimed_keywords')
-      .select('id, experiment_group, source')
+      .select('id, source')
       .in('id', claimIds.slice(i, i + BATCH))
-    for (const c of (claimMeta ?? []) as { id: string; experiment_group: 'control' | 'treatment' | null; source: string | null }[]) {
-      expGroupMap.set(c.id, c.experiment_group)
+    for (const c of (claimMeta ?? []) as { id: string; source: string | null }[]) {
       claimSourceMap.set(c.id, c.source)
     }
   }
-  // 2026-07-29: 今日推荐（规则推荐/竞品规则推荐/更新推荐）暂时对组员隐藏，组员
-  // 实际是从下面这些"信号驱动"标签页认领词的——只有搜索量查询、手动添加词是组
-  // 员凭自己判断挑的，没有数据信号支持，所以只把这两类算对照组，其余（含隐藏中
-  // 的今日推荐三个来源，一旦重新开放也自动归实验组）都算实验组。
-  const CONTROL_SOURCES = new Set(['搜索量查询', '手动添加', '分发词'])
 
   // Fetch every matched rank keyword for the full filtered set (not just the
   // page being returned) — "排名"/"排名量" now sort by the best position and
@@ -182,14 +174,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         : null,
       env_excluded: badDates.has(r.record_date),
       source: claimSourceMap.get(r.claim_id) ?? null,
-      experiment_group: expGroupMap.get(r.claim_id) ?? null,
-      // Pilot 对比用的分组：手动标的 experiment_group 优先；组员没手动标过的，
-      // 按认领来源自动分组（CONTROL_SOURCES 之外都算实验组）——2026-07-29 加
-      // 入，此前从不手动打C的记录永远不计入对照组，导致对照组样本量长期为0。
-      // 只影响 Pilot 汇总统计，不改 row.experiment_group 本身，所以成效追踪表
-      // 格里的 C/T 按钮高亮状态不受影响，仍然只反映组员真正手动点过的选择。
-      effective_experiment_group: expGroupMap.get(r.claim_id)
-        ?? (CONTROL_SOURCES.has(claimSourceMap.get(r.claim_id) ?? '') ? 'control' : 'treatment'),
       bestRankPosition, totalRankVolume,
     }
   })
@@ -232,22 +216,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     invalidCount:  rows.filter(r => r.effectiveness === '无效').length,
   }
 
-  function pilotAvgScore(group: typeof rows) {
-    const valid = group.filter(r => !r.env_excluded)
-    if (valid.length === 0) return null
-    const total = valid.reduce((s, r) => s + computeOutcomeScore(r.rank_position, r.is_indexed, r.rank_change), 0)
-    return Math.round(total / valid.length)
-  }
-  const ctrlRows = rows.filter(r => r.effective_experiment_group === 'control')
-  const trtRows  = rows.filter(r => r.effective_experiment_group === 'treatment')
-  const ctrlScore = pilotAvgScore(ctrlRows)
-  const trtScore  = pilotAvgScore(trtRows)
-  const pilotStats = (ctrlRows.length === 0 && trtRows.length === 0) ? null : {
-    ctrlCount: ctrlRows.length, trtCount: trtRows.length,
-    ctrlScore, trtScore,
-    diff: (ctrlScore != null && trtScore != null) ? trtScore - ctrlScore : null,
-  }
-
   const totalRows = rows.length
   const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
 
@@ -262,7 +230,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // should only trip if rows were deleted between the count and the fetch (rare
   // race), not as a real cap — real truncation is no longer possible.
   return NextResponse.json({
-    rows: pagedRowsWithMatches, summary, pilotStats, totalRows, page, pageSize,
+    rows: pagedRowsWithMatches, summary, totalRows, page, pageSize,
     truncated: (trackRows?.length ?? 0) < (exactCount ?? 0),
   })
 }

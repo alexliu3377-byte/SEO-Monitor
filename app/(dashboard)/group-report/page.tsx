@@ -45,11 +45,9 @@ interface OutcomeRow {
   effectiveness: string
   env_excluded?: boolean
   source?: string | null
-  experiment_group?: 'control' | 'treatment' | null
   rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
-interface PilotStats { ctrlCount: number; trtCount: number; ctrlScore: number | null; trtScore: number | null; diff: number | null }
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume'
 // 认领来源短标签，跟 task-groups 页面的 SourceTag 保持同一套映射，
 // 2026-07-29 加入替代原来的"试点"C/T列。
@@ -164,7 +162,6 @@ export default function GroupReportPage() {
   // Outcomes tab state
   const [outcomes, setOutcomes] = useState<OutcomeRow[]>([])
   const [outcomeSummary, setOutcomeSummary] = useState<OutcomeSummary | null>(null)
-  const [outcomePilotStats, setOutcomePilotStats] = useState<PilotStats | null>(null)
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
@@ -182,13 +179,14 @@ export default function GroupReportPage() {
   const [oPageSize, setOPageSize] = useState(20)
 
   // 追踪汇总 tab state
-  interface SourceEff { source: string; total: number; ranked: number; effective: number; avgScore: number | null }
+  interface SourceEff { source: string; total: number; ranked: number; indexed: number; effective: number }
   interface TrackingBucket { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }
   interface TrackingSummary {
     userId: string; username: string
     submitted: { total: number }
     indexed: { count: number; volume: number; bySource: { source: string; count: number }[] }
     ranked: { total: number; totalVolume: number; buckets: TrackingBucket[] }
+    avgScore: number | null
   }
   interface TrackingSummaryResponse {
     month: string; canSeeAll: boolean; isMember: boolean; scope: string
@@ -261,10 +259,6 @@ export default function GroupReportPage() {
   // computed over the full filtered set. Changing a filter or sort resets
   // oPage to 0 at the call site (see the various onChange handlers below);
   // oPage itself is a dependency here so Prev/Next re-fetches the new page.
-  // Exposed as a plain function (not just inside the effect) so actions that
-  // mutate a row — e.g. assigning a pilot experiment_group below — can
-  // re-fetch afterward and keep the server-computed pilot stats in sync,
-  // since they're no longer derived from the full client-side dataset.
   function loadOutcomes() {
     if (!activeTabId || reportTab !== 'outcomes') return
     setOutcomesLoading(true)
@@ -286,7 +280,6 @@ export default function GroupReportPage() {
       .then(d => {
         setOutcomes(d.rows || [])
         setOutcomeSummary(d.summary || null)
-        setOutcomePilotStats(d.pilotStats || null)
         setOutcomeTotalRows(d.totalRows ?? 0)
         setOutcomesTruncated(!!d.truncated)
       })
@@ -505,45 +498,6 @@ export default function GroupReportPage() {
                     </div>
                   ) : (
                     <>
-                      {/* ── Pilot 对比面板（后端按完整筛选结果算好，不受当前页影响） ── */}
-                      {outcomePilotStats && (
-                        <div className="mx-4 mb-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3">
-                          <div className="flex items-center gap-2 mb-2.5">
-                            <span className="text-xs font-bold text-violet-700">Pilot 试点对比</span>
-                            {outcomePilotStats.diff != null && (
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${outcomePilotStats.diff > 0 ? 'bg-green-100 text-green-700' : outcomePilotStats.diff < 0 ? 'bg-red-100 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
-                                实验组 {outcomePilotStats.diff > 0 ? `+${outcomePilotStats.diff}` : outcomePilotStats.diff} 分
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white rounded-lg px-3 py-2 border border-blue-100">
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
-                                <span className="text-xs font-medium text-blue-700">对照组 Control</span>
-                                <span className="text-xs text-gray-400 ml-auto">{outcomePilotStats.ctrlCount} 条</span>
-                              </div>
-                              <div className="text-xl font-bold tabular-nums text-blue-600">
-                                {outcomePilotStats.ctrlScore != null ? outcomePilotStats.ctrlScore : <span className="text-sm text-gray-300">数据不足</span>}
-                                {outcomePilotStats.ctrlScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
-                              </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">不执行规则，自然追踪（含未手动标记、认领时也非规则推荐的记录）</div>
-                            </div>
-                            <div className="bg-white rounded-lg px-3 py-2 border border-amber-100">
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                                <span className="text-xs font-medium text-amber-700">实验组 Treatment</span>
-                                <span className="text-xs text-gray-400 ml-auto">{outcomePilotStats.trtCount} 条</span>
-                              </div>
-                              <div className="text-xl font-bold tabular-nums text-amber-600">
-                                {outcomePilotStats.trtScore != null ? outcomePilotStats.trtScore : <span className="text-sm text-gray-300">数据不足</span>}
-                                {outcomePilotStats.trtScore != null && <span className="text-xs font-normal text-gray-400 ml-1">分</span>}
-                              </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">执行规则，验证效果（含未手动标记、但认领时来自"规则推荐"的记录）</div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                       <div className="overflow-x-auto">
                         <div className={`grid ${OCOLS} gap-x-2 px-4 py-2 bg-gray-50/40 border-b border-gray-100 min-w-[980px]`}>
                           <span className="text-[11px] font-medium text-gray-400 text-center">操作</span>
@@ -722,9 +676,7 @@ export default function GroupReportPage() {
                             {effectiveRate !== null && (
                               <p className="text-[10px] text-gray-500">有效率 <span className={`font-semibold ${effectiveRate >= 30 ? 'text-green-600' : 'text-amber-500'}`}>{effectiveRate}%</span></p>
                             )}
-                            {s.avgScore !== null && (
-                              <p className="text-[10px] text-gray-500">均分 <span className={`font-semibold ${s.avgScore >= 60 ? 'text-green-600' : s.avgScore >= 35 ? 'text-amber-500' : 'text-red-400'}`}>{s.avgScore}pt</span></p>
-                            )}
+                            <p className="text-[10px] text-gray-400">{s.indexed} 已收录</p>
                             <p className="text-[10px] text-gray-400">{s.ranked} 已排名</p>
                           </div>
                         </div>
@@ -765,55 +717,59 @@ export default function GroupReportPage() {
                 {view.submitted.total === 0 ? (
                   <div className="text-center py-10 text-gray-400 text-sm">这个月还没有数据</div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-3 gap-3 max-w-2xl">
-                      <div className="bg-gray-50 rounded-xl p-3">
-                        <div className="text-xs text-gray-400 mb-1">提交条数</div>
-                        <div className="text-xl font-bold text-gray-800 tabular-nums">{view.submitted.total}</div>
-                      </div>
-                      <div className="bg-blue-50 rounded-xl p-3">
-                        <div className="text-xs text-blue-400 mb-1">获取收录</div>
-                        <div className="text-xl font-bold text-blue-600 tabular-nums">{view.indexed.count}</div>
-                        <div className="text-[11px] text-blue-400 mt-0.5">搜索量 {fmtVol(view.indexed.volume)}</div>
-                      </div>
-                      <div className="bg-green-50 rounded-xl p-3">
-                        <div className="text-xs text-green-500 mb-1">获取排名</div>
-                        <div className="text-xl font-bold text-green-600 tabular-nums">{view.ranked.total}</div>
-                        <div className="text-[11px] text-green-500 mt-0.5">搜索量 {fmtVol(view.ranked.totalVolume)}</div>
-                      </div>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-3">
+                      {[
+                        { label: '提交条数', value: view.submitted.total, sub: '全部提交' },
+                        { label: '获取排名', value: view.ranked.total, sub: `搜索量 ${fmtVol(view.ranked.totalVolume)}`, color: 'text-green-600' },
+                        { label: '获取收录', value: view.indexed.count, sub: `搜索量 ${fmtVol(view.indexed.volume)}`, color: 'text-blue-600' },
+                        {
+                          label: '得分', value: view.avgScore ?? '—',
+                          sub: '平均分（同成效追踪口径）',
+                          color: view.avgScore == null ? 'text-gray-800' : view.avgScore >= 70 ? 'text-green-600' : view.avgScore >= 40 ? 'text-amber-500' : 'text-red-400',
+                        },
+                      ].map(s => (
+                        <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-4 py-3">
+                          <div className={`text-2xl font-bold ${(s as { color?: string }).color ?? 'text-gray-800'}`}>{s.value}</div>
+                          <div className="text-xs font-medium text-gray-600 mt-0.5">{s.label}</div>
+                          <div className="text-[11px] text-gray-400">{s.sub}</div>
+                        </div>
+                      ))}
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 space-y-4">
                       <SourceEffCards title="全组来源成效" stats={groupSourceEffectiveness} />
                       {trackingScope !== 'total' && (
                         <SourceEffCards title={`${view.username}来源成效`} stats={scopeSourceEffectiveness} />
                       )}
                     </div>
 
-                    <div>
-                      <div className="text-xs text-gray-400 mb-2">获取收录</div>
+                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                        <span className="text-sm font-semibold text-gray-700">获取收录</span>
+                      </div>
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-                            <th className="px-2 py-1.5 text-left font-medium w-28">类目</th>
-                            <th className="px-2 pr-6 py-1.5 text-center font-medium w-20">条数</th>
-                            <th className="pl-4 pr-2 py-1.5 text-left font-medium">来源</th>
-                            <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
-                            <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
+                            <th className="px-4 py-2 text-left font-medium w-28">类目</th>
+                            <th className="px-2 pr-6 py-2 text-center font-medium w-20">条数</th>
+                            <th className="pl-4 pr-2 py-2 text-left font-medium">来源</th>
+                            <th className="px-2 py-2 text-right font-medium w-24">总搜索量</th>
+                            <th className="px-4 py-2 text-center font-medium w-16">操作</th>
                           </tr></thead>
                           <tbody>
                             <tr className="border-b border-gray-50 last:border-0">
-                              <td className="px-2 py-2 text-sm text-gray-700">排除排名</td>
-                              <td className="px-2 pr-6 py-2 text-sm text-gray-700 text-center tabular-nums">{view.indexed.count}</td>
-                              <td className="pl-4 pr-2 py-2">
+                              <td className="px-4 py-2.5 text-sm text-gray-700">排除排名</td>
+                              <td className="px-2 pr-6 py-2.5 text-sm text-gray-700 text-center tabular-nums">{view.indexed.count}</td>
+                              <td className="pl-4 pr-2 py-2.5">
                                 <div className="flex flex-wrap gap-1">
                                   {view.indexed.bySource.map(s => (
                                     <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
                                   ))}
                                 </div>
                               </td>
-                              <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{view.indexed.volume > 0 ? fmtVol(view.indexed.volume) : '—'}</td>
-                              <td className="px-2 py-2 text-center">
+                              <td className="px-2 py-2.5 text-sm text-gray-500 text-right tabular-nums">{view.indexed.volume > 0 ? fmtVol(view.indexed.volume) : '—'}</td>
+                              <td className="px-4 py-2.5 text-center">
                                 <button onClick={() => { setSourceDetailModal({ kind: 'indexed' }); setSourceDetailPage(0) }} disabled={view.indexed.count === 0}
                                   className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                               </td>
@@ -823,31 +779,33 @@ export default function GroupReportPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="text-xs text-gray-400 mb-2">排名分布</div>
+                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                        <span className="text-sm font-semibold text-gray-700">排名分布</span>
+                      </div>
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-                            <th className="px-2 py-1.5 text-left font-medium w-28">排名区间</th>
-                            <th className="px-2 pr-6 py-1.5 text-center font-medium w-20">词数</th>
-                            <th className="pl-4 pr-2 py-1.5 text-left font-medium">来源</th>
-                            <th className="px-2 py-1.5 text-right font-medium w-24">总搜索量</th>
-                            <th className="px-2 py-1.5 text-center font-medium w-16">操作</th>
+                            <th className="px-4 py-2 text-left font-medium w-28">排名区间</th>
+                            <th className="px-2 pr-6 py-2 text-center font-medium w-20">词数</th>
+                            <th className="pl-4 pr-2 py-2 text-left font-medium">来源</th>
+                            <th className="px-2 py-2 text-right font-medium w-24">总搜索量</th>
+                            <th className="px-4 py-2 text-center font-medium w-16">操作</th>
                           </tr></thead>
                           <tbody>
                             {view.ranked.buckets.map(b => (
                               <tr key={b.label} className="border-b border-gray-50 last:border-0">
-                                <td className="px-2 py-2 text-sm text-gray-700">{b.label}</td>
-                                <td className="px-2 pr-6 py-2 text-sm text-gray-700 text-center tabular-nums">{b.count}</td>
-                                <td className="pl-4 pr-2 py-2">
+                                <td className="px-4 py-2.5 text-sm text-gray-700">{b.label}</td>
+                                <td className="px-2 pr-6 py-2.5 text-sm text-gray-700 text-center tabular-nums">{b.count}</td>
+                                <td className="pl-4 pr-2 py-2.5">
                                   <div className="flex flex-wrap gap-1">
                                     {b.bySource.map(s => (
                                       <span key={s.source} className="inline-flex items-center gap-0.5"><SourceTag source={s.source} /><span className="text-[10px] text-gray-400">{s.count}</span></span>
                                     ))}
                                   </div>
                                 </td>
-                                <td className="px-2 py-2 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
-                                <td className="px-2 py-2 text-center">
+                                <td className="px-2 py-2.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
+                                <td className="px-4 py-2.5 text-center">
                                   <button onClick={() => { setSourceDetailModal({ kind: 'rank', bucket: b.label }); setSourceDetailPage(0) }} disabled={b.count === 0}
                                     className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                                 </td>

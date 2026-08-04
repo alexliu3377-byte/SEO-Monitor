@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { computeOutcomeScore } from '@/lib/outcome-score'
 import {
   currentMonth, monthRange, dedupeByClaim, fetchClaimSourceMap, fetchRankMatches,
   fetchBadDates, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
@@ -16,12 +17,14 @@ interface MemberSummary {
     totalVolume: number
     buckets: { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }[]
   }
+  avgScore: number | null
 }
 
 function buildSummary(
   rows: TrackRow[],
   claimSourceMap: Map<string, string | null>,
   matchesByClaim: Map<string, RankMatch[]>,
+  badDates: Set<string>,
   userId: string,
   username: string
 ): MemberSummary {
@@ -30,6 +33,9 @@ function buildSummary(
   const indexedBySource = new Map<string, number>()
   let rankedTotal = 0
   const buckets = RANK_BUCKETS.map(b => ({ label: b.label, count: 0, volume: 0, bySource: new Map<string, number>() }))
+  // 得分口径要跟成效追踪表格里逐条的"得分"列完全一致（同一个 computeOutcomeScore,
+  // 同样排除环境异常日），这里只是把它汇总成一个平均值。
+  let scoreTotal = 0, scoredCount = 0
 
   for (const r of rows) {
     submittedTotal++
@@ -50,6 +56,12 @@ function buildSummary(
         target.bySource.set(src, (target.bySource.get(src) ?? 0) + 1)
       }
     }
+    if (!badDates.has(r.record_date)) {
+      const rankChange = (r.rank_position != null && r.prev_rank_position != null)
+        ? r.prev_rank_position - r.rank_position : null
+      scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange)
+      scoredCount++
+    }
   }
 
   const bucketsOut = buckets.map(b => ({
@@ -65,6 +77,7 @@ function buildSummary(
       bySource: Array.from(indexedBySource.entries()).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
     },
     ranked: { total: rankedTotal, totalVolume: bucketsOut.reduce((s, b) => s + b.volume, 0), buckets: bucketsOut },
+    avgScore: scoredCount > 0 ? Math.round(scoreTotal / scoredCount * 10) / 10 : null,
   }
 }
 
@@ -141,11 +154,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : scope === 'total' ? '全组汇总'
     : (usernameOf.get(scopeUserId) ?? scopeUserId.slice(0, 8))
 
-  const summary = buildSummary(scopeRows, claimSourceMap, matchesByClaim, scopeUserIdOut, scopeUsername)
-  const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, claimSourceMap, badDates)
+  const summary = buildSummary(scopeRows, claimSourceMap, matchesByClaim, badDates, scopeUserIdOut, scopeUsername)
+  const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, claimSourceMap)
   const scopeSourceEffectiveness: SourceEffectivenessEntry[] = scope === 'total'
     ? groupSourceEffectiveness
-    : computeSourceEffectiveness(scopeRows, claimSourceMap, badDates)
+    : computeSourceEffectiveness(scopeRows, claimSourceMap)
 
   return NextResponse.json({
     month, canSeeAll, isMember, scope: scope === 'member' ? scopeUserId : scope,

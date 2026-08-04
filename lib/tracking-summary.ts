@@ -3,7 +3,6 @@
 // .../tracking-summary/detail/route.ts (drill-down keyword lists), so the
 // dedup/source-lookup/rank-match-lookup/scoring logic stays in exactly one
 // place instead of drifting between the two routes.
-import { computeOutcomeScore } from './outcome-score'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -125,39 +124,32 @@ export interface SourceEffectivenessEntry {
   source: string
   total: number
   ranked: number
+  indexed: number
   effective: number
-  avgScore: number | null
 }
 
-// Mirrors app/api/rules/source-stats/route.ts's definitions (effective =
-// 获取排名/获取收录; ranked = has a rank_position; avg score via the same
-// computeOutcomeScore used by the 成效追踪 tab), scoped to whatever row set
-// is passed in (a single member's rows, or the whole group's).
+// effective = 获取排名/获取收录（二选一即算），ranked = 有 rank_position，
+// indexed = effectiveness 恰好是"获取收录"（不含已经排名、因而也已收录的—
+// 那些算进 ranked，不重复计进 indexed，避免"已收录"卡片的数字比"获取排名"
+// 卡片还大导致误解）。跟 app/api/rules/source-stats/route.ts 的 effective/
+// ranked 定义保持一致（那边是给"规则中心"用的独立实现，这边服务追踪汇总，
+// 两处口径故意对齐但不共享代码）。
 export function computeSourceEffectiveness(
   rows: TrackRow[],
-  claimSourceMap: Map<string, string | null>,
-  badDates: Set<string>
+  claimSourceMap: Map<string, string | null>
 ): SourceEffectivenessEntry[] {
-  interface Acc { total: number; ranked: number; effective: number; scoreTotal: number; scoredCount: number }
+  interface Acc { total: number; ranked: number; indexed: number; effective: number }
   const map = new Map<string, Acc>()
   for (const r of rows) {
     const source = claimSourceMap.get(r.claim_id) ?? '未知'
     let s = map.get(source)
-    if (!s) { s = { total: 0, ranked: 0, effective: 0, scoreTotal: 0, scoredCount: 0 }; map.set(source, s) }
+    if (!s) { s = { total: 0, ranked: 0, indexed: 0, effective: 0 }; map.set(source, s) }
     s.total++
     if (r.rank_position != null) s.ranked++
+    if (r.effectiveness === '获取收录') s.indexed++
     if (r.effectiveness === '获取排名' || r.effectiveness === '获取收录') s.effective++
-    if (!badDates.has(r.record_date)) {
-      const rankChange = (r.rank_position != null && r.prev_rank_position != null)
-        ? r.prev_rank_position - r.rank_position : null
-      s.scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange)
-      s.scoredCount++
-    }
   }
   return Array.from(map.entries())
-    .map(([source, s]) => ({
-      source, total: s.total, ranked: s.ranked, effective: s.effective,
-      avgScore: s.scoredCount > 0 ? Math.round(s.scoreTotal / s.scoredCount * 10) / 10 : null,
-    }))
+    .map(([source, s]) => ({ source, total: s.total, ranked: s.ranked, indexed: s.indexed, effective: s.effective }))
     .sort((a, b) => b.total - a.total)
 }
