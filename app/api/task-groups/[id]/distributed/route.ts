@@ -12,9 +12,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  const { data: membership } = await service
-    .from('task_group_members').select('user_id').eq('group_id', groupId).eq('user_id', user.id).maybeSingle()
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
+  const role: string = profile?.role ?? 'normal'
+  const canSeeAll = role === 'super' || role === 'admin'
+
+  if (!canSeeAll) {
+    const { data: membership } = await service
+      .from('task_group_members').select('user_id').eq('group_id', groupId).eq('user_id', user.id).maybeSingle()
+    if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { data: rows, error } = await service
     .from('distributed_keywords')
@@ -67,11 +73,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
   const role: string = profile?.role ?? 'normal'
+  // 添加分发词只对 super/admin 开放——不额外要求"也是这个组的成员"，因为
+  // 管理员大多数时候本来就不是自己管理的每个组的正式成员（2026-08-03 实测
+  // 就是被这条多余的成员校验挡住了，报 Forbidden）。
   if (role !== 'super' && role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-  const { data: membership } = await service
-    .from('task_group_members').select('user_id').eq('group_id', groupId).eq('user_id', user.id).maybeSingle()
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const list = Array.from(new Set(
     keywords.split('\n').map(k => k.trim()).filter(Boolean)
