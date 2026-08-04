@@ -74,10 +74,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // (found via user report: filtering to 获取排名 showed 76 vs 56 unfiltered).
   // It's applied as a post-fetch filter on the deduped rows instead, same as
   // filterIndex/filterKw/filterRankKw below.
+  //
+  // filterMember is ALSO deliberately left out (only for canSeeAll — normal
+  // users still get the unconditional .eq('user_id', userId) below, they can
+  // never see other members' rows at all). Fetching the whole group's rows
+  // regardless of the member filter lets us compute a "group total" alongside
+  // the member-scoped one (2026-08-04 request: cards show "该组员 / 全组" so
+  // admin/super can compare a selected member against the group at a glance)
+  // without a second round-trip — the member filter is applied in-memory
+  // after groupSummary is computed, further down.
   function applyTrackFilters<T extends { eq: any; gte: any; lte: any }>(q: T): T {
     let query = q
     if (!canSeeAll) query = query.eq('user_id', userId)
-    if (filterMember && canSeeAll) query = query.eq('user_id', filterMember)
     if (filterOp) query = query.eq('operation_type', filterOp)
     if (filterSubmitStart) query = query.gte('submit_date', filterSubmitStart)
     if (filterSubmitEnd)   query = query.lte('submit_date', filterSubmitEnd)
@@ -195,12 +203,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   })
 
-  // Post-fetch filters
+  // Post-fetch filters (everything except the member filter — see the comment
+  // on applyTrackFilters above for why member narrowing happens after this).
   if (filterEffectiveness)   rows = rows.filter(r => r.effectiveness === filterEffectiveness)
   if (filterKw)              rows = rows.filter(r => r.keyword.toLowerCase().includes(filterKw) || (r.final_keyword ?? '').toLowerCase().includes(filterKw))
   if (filterIndex === 'has') rows = rows.filter(r => r.is_indexed)
   if (filterIndex === 'none')rows = rows.filter(r => !r.is_indexed)
   if (filterRankKw)          rows = rows.filter(r => (r.rank_keyword ?? '').toLowerCase().includes(filterRankKw))
+
+  // Group-wide aggregate under the same non-member filters — always computed,
+  // only meaningfully different from `summary` below when canSeeAll picked a
+  // specific member (for normal users this set is already their own rows only).
+  const groupSummary = {
+    total:         rows.length,
+    rankedCount:   rows.filter(r => r.effectiveness === '获取排名').length,
+    indexedCount:  rows.filter(r => r.effectiveness === '获取收录').length,
+    trackingCount: rows.filter(r => r.effectiveness === '追踪中').length,
+    invalidCount:  rows.filter(r => r.effectiveness === '无效').length,
+  }
+
+  if (filterMember && canSeeAll) rows = rows.filter(r => r.user_id === filterMember)
 
   // Sort
   const dir = sortDir === 'asc' ? 1 : -1
@@ -249,7 +271,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // should only trip if rows were deleted between the count and the fetch (rare
   // race), not as a real cap — real truncation is no longer possible.
   return NextResponse.json({
-    rows: pagedRowsWithMatches, summary, totalRows, page, pageSize,
+    rows: pagedRowsWithMatches, summary, groupSummary, totalRows, page, pageSize,
     truncated: (trackRows?.length ?? 0) < (exactCount ?? 0),
   })
 }

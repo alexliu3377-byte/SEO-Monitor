@@ -163,6 +163,7 @@ export default function GroupReportPage() {
   const [scoreDetailRow, setScoreDetailRow] = useState<OutcomeRow | null>(null)
   const [outcomes, setOutcomes] = useState<OutcomeRow[]>([])
   const [outcomeSummary, setOutcomeSummary] = useState<OutcomeSummary | null>(null)
+  const [outcomeGroupSummary, setOutcomeGroupSummary] = useState<OutcomeSummary | null>(null)
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
@@ -187,12 +188,13 @@ export default function GroupReportPage() {
     submitted: { total: number }
     indexed: { count: number; volume: number; bySource: { source: string; count: number }[] }
     ranked: { total: number; totalVolume: number; buckets: TrackingBucket[] }
-    avgScore: number | null
+    totalScore: number
   }
   interface TrackingSummaryResponse {
     month: string; canSeeAll: boolean; isMember: boolean; scope: string
     memberList?: { userId: string; username: string }[]
     summary: TrackingSummary
+    groupSummary: TrackingSummary
     groupSourceEffectiveness: SourceEff[]
     scopeSourceEffectiveness: SourceEff[]
   }
@@ -281,6 +283,7 @@ export default function GroupReportPage() {
       .then(d => {
         setOutcomes(d.rows || [])
         setOutcomeSummary(d.summary || null)
+        setOutcomeGroupSummary(d.groupSummary || null)
         setOutcomeTotalRows(d.totalRows ?? 0)
         setOutcomesTruncated(!!d.truncated)
       })
@@ -421,22 +424,29 @@ export default function GroupReportPage() {
                     数据获取时发生变化（可能有记录被同时修改），请刷新页面重试。
                   </div>
                 )}
-                {outcomeSummary && (
+                {outcomeSummary && (() => {
+                  // 管理员/超管从"全部成员"切到某个具体组员时，卡片主数字改成
+                  // "该组员 / 全组同筛选条件下的总数"，方便对比（2026-08-04 请求）。
+                  const showRatio = !!(oFilterMember && canSeeAll && outcomeGroupSummary)
+                  const ratioStr = (mine: number, group: number) => showRatio ? `${mine.toLocaleString()} / ${group.toLocaleString()}` : mine.toLocaleString()
+                  const g = outcomeGroupSummary ?? outcomeSummary
+                  return (
                   <div className="grid grid-cols-4 gap-3">
                     {[
-                      { label: '已追踪记录', value: outcomeSummary.total, sub: '全部提交' },
-                      { label: '获取排名', value: outcomeSummary.rankedCount, sub: outcomeSummary.total ? `排名率 ${Math.round(outcomeSummary.rankedCount / outcomeSummary.total * 100)}%` : '—', color: 'text-green-600' },
-                      { label: '获取收录', value: outcomeSummary.indexedCount, sub: outcomeSummary.total ? `收录率 ${Math.round((outcomeSummary.rankedCount + outcomeSummary.indexedCount) / outcomeSummary.total * 100)}%` : '—', color: 'text-blue-600' },
-                      { label: '追踪中', value: outcomeSummary.trackingCount, sub: `无效 ${outcomeSummary.invalidCount}` },
+                      { label: '已追踪记录', value: ratioStr(outcomeSummary.total, g.total), sub: '全部提交' },
+                      { label: '获取排名', value: ratioStr(outcomeSummary.rankedCount, g.rankedCount), sub: outcomeSummary.total ? `排名率 ${Math.round(outcomeSummary.rankedCount / outcomeSummary.total * 100)}%` : '—', color: 'text-green-600' },
+                      { label: '获取收录', value: ratioStr(outcomeSummary.indexedCount, g.indexedCount), sub: outcomeSummary.total ? `收录率 ${Math.round((outcomeSummary.rankedCount + outcomeSummary.indexedCount) / outcomeSummary.total * 100)}%` : '—', color: 'text-blue-600' },
+                      { label: '追踪中', value: ratioStr(outcomeSummary.trackingCount, g.trackingCount), sub: `无效 ${outcomeSummary.invalidCount}` },
                     ].map(s => (
                       <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-4 py-3">
-                        <div className={`text-2xl font-bold ${(s as { color?: string }).color ?? 'text-gray-800'}`}>{s.value}</div>
+                        <div className={`font-bold tabular-nums ${(s as { color?: string }).color ?? 'text-gray-800'} ${showRatio ? 'text-lg' : 'text-2xl'}`}>{s.value}</div>
                         <div className="text-xs font-medium text-gray-600 mt-0.5">{s.label}</div>
                         <div className="text-[11px] text-gray-400">{s.sub}</div>
                       </div>
                     ))}
                   </div>
-                )}
+                  )
+                })()}
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-gray-500">提交日期：</span>
@@ -661,7 +671,11 @@ export default function GroupReportPage() {
               setTrackingMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
             }
             const isCurrentMonth = trackingMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
-            const { summary: view, groupSourceEffectiveness, scopeSourceEffectiveness } = trackingData
+            const { summary: view, groupSummary, groupSourceEffectiveness, scopeSourceEffectiveness } = trackingData
+            // 管理员/超管选中某个组员时，卡片主数字改成"该组员 / 全组"方便对比；
+            // 选"全组汇总"时两者相等，直接显示单个数字更干净。
+            const showRatio = trackingScope !== 'total'
+            const ratioStr = (mine: number, group: number) => showRatio ? `${mine.toLocaleString()} / ${group.toLocaleString()}` : mine.toLocaleString()
 
             const SourceEffCards = ({ title, stats }: { title: string; stats: SourceEff[] }) => (
               <div>
@@ -725,17 +739,23 @@ export default function GroupReportPage() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-4 gap-3">
                       {[
-                        { label: '提交条数', value: view.submitted.total, sub: '全部提交' },
-                        { label: '获取排名', value: view.ranked.total, sub: `搜索量 ${fmtVol(view.ranked.totalVolume)}`, color: 'text-green-600' },
-                        { label: '获取收录', value: view.indexed.count, sub: `搜索量 ${fmtVol(view.indexed.volume)}`, color: 'text-blue-600' },
+                        { label: '提交条数', value: ratioStr(view.submitted.total, groupSummary.submitted.total), sub: '全部提交' },
                         {
-                          label: '得分', value: view.avgScore ?? '—',
-                          sub: '平均分（同成效追踪口径）',
-                          color: view.avgScore == null ? 'text-gray-800' : view.avgScore > 0 ? 'text-green-600' : view.avgScore < 0 ? 'text-red-400' : 'text-gray-800',
+                          label: '获取排名', value: ratioStr(view.ranked.total, groupSummary.ranked.total),
+                          sub: `搜索量 ${ratioStr(view.ranked.totalVolume, groupSummary.ranked.totalVolume)}`, color: 'text-green-600',
+                        },
+                        {
+                          label: '获取收录', value: ratioStr(view.indexed.count, groupSummary.indexed.count),
+                          sub: `搜索量 ${ratioStr(view.indexed.volume, groupSummary.indexed.volume)}`, color: 'text-blue-600',
+                        },
+                        {
+                          label: '得分', value: ratioStr(view.totalScore, groupSummary.totalScore),
+                          sub: '累计得分（同成效追踪口径）',
+                          color: view.totalScore > 0 ? 'text-green-600' : view.totalScore < 0 ? 'text-red-400' : 'text-gray-800',
                         },
                       ].map(s => (
                         <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-4 py-3">
-                          <div className={`text-2xl font-bold ${(s as { color?: string }).color ?? 'text-gray-800'}`}>{s.value}</div>
+                          <div className={`font-bold tabular-nums ${(s as { color?: string }).color ?? 'text-gray-800'} ${showRatio ? 'text-lg' : 'text-2xl'}`}>{s.value}</div>
                           <div className="text-xs font-medium text-gray-600 mt-0.5">{s.label}</div>
                           <div className="text-[11px] text-gray-400">{s.sub}</div>
                         </div>

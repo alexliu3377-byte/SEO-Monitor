@@ -17,7 +17,7 @@ interface MemberSummary {
     totalVolume: number
     buckets: { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }[]
   }
-  avgScore: number | null
+  totalScore: number
 }
 
 function buildSummary(
@@ -34,8 +34,8 @@ function buildSummary(
   let rankedTotal = 0
   const buckets = RANK_BUCKETS.map(b => ({ label: b.label, count: 0, volume: 0, bySource: new Map<string, number>() }))
   // 得分口径要跟成效追踪表格里逐条的"得分"列完全一致（同一个 computeOutcomeScore,
-  // 同样排除环境异常日），这里只是把它汇总成一个平均值。
-  let scoreTotal = 0, scoredCount = 0
+  // 同样排除环境异常日）——这里是累加总和，不是平均值，用户明确要"得分总数"。
+  let scoreTotal = 0
 
   for (const r of rows) {
     submittedTotal++
@@ -60,7 +60,6 @@ function buildSummary(
       const rankChange = (r.rank_position != null && r.prev_rank_position != null)
         ? r.prev_rank_position - r.rank_position : null
       scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange, r.rank_volume)
-      scoredCount++
     }
   }
 
@@ -77,7 +76,7 @@ function buildSummary(
       bySource: Array.from(indexedBySource.entries()).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
     },
     ranked: { total: rankedTotal, totalVolume: bucketsOut.reduce((s, b) => s + b.volume, 0), buckets: bucketsOut },
-    avgScore: scoredCount > 0 ? Math.round(scoreTotal / scoredCount * 10) / 10 : null,
+    totalScore: Math.round(scoreTotal),
   }
 }
 
@@ -155,6 +154,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : (usernameOf.get(scopeUserId) ?? scopeUserId.slice(0, 8))
 
   const summary = buildSummary(scopeRows, claimSourceMap, matchesByClaim, badDates, scopeUserIdOut, scopeUsername)
+  // Always computed regardless of scope — lets admin/super compare a selected
+  // member's numbers against the whole group's at a glance (2026-08-04 request:
+  // top cards show "该组员 / 全组" when a specific member is picked). Reuses the
+  // already-fetched claimSourceMap/matchesByClaim, no extra query.
+  const groupSummary = scope === 'total' ? summary : buildSummary(rows, claimSourceMap, matchesByClaim, badDates, groupId, '全组汇总')
   const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, claimSourceMap)
   const scopeSourceEffectiveness: SourceEffectivenessEntry[] = scope === 'total'
     ? groupSourceEffectiveness
@@ -163,7 +167,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   return NextResponse.json({
     month, canSeeAll, isMember, scope: scope === 'member' ? scopeUserId : scope,
     memberList: canSeeAll ? memberList.map(m => ({ userId: m.user_id, username: usernameOf.get(m.user_id)! })) : undefined,
-    summary, groupSourceEffectiveness, scopeSourceEffectiveness,
+    summary, groupSummary, groupSourceEffectiveness, scopeSourceEffectiveness,
     truncated: (rawRows?.length ?? 0) < (exactCount ?? 0),
   })
 }
