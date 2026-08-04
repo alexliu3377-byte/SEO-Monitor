@@ -62,12 +62,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // Build the shared filter set once so the count query and the row query stay
   // in sync — the limit below is sized off this exact count, so a mismatch
   // here would silently reintroduce truncation.
+  //
+  // effectiveness is intentionally NOT included here — unlike user_id/
+  // operation_type/submit_date (fixed per claim), effectiveness is a per-day
+  // snapshot that can change over a claim's tracking history. Pushing it into
+  // the DB query would filter the raw multi-day rows BEFORE dedup, so dedup
+  // would then pick each claim's latest row matching that effectiveness
+  // (its last-ever-ranked day, say) instead of its true latest status —
+  // silently inflating the filtered count above the unfiltered baseline
+  // (found via user report: filtering to 获取排名 showed 76 vs 56 unfiltered).
+  // It's applied as a post-fetch filter on the deduped rows instead, same as
+  // filterIndex/filterKw/filterRankKw below.
   function applyTrackFilters<T extends { eq: any; gte: any; lte: any }>(q: T): T {
     let query = q
     if (!canSeeAll) query = query.eq('user_id', userId)
     if (filterMember && canSeeAll) query = query.eq('user_id', filterMember)
     if (filterOp) query = query.eq('operation_type', filterOp)
-    if (filterEffectiveness) query = query.eq('effectiveness', filterEffectiveness)
     if (filterSubmitStart) query = query.gte('submit_date', filterSubmitStart)
     if (filterSubmitEnd)   query = query.lte('submit_date', filterSubmitEnd)
     return query
@@ -179,6 +189,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   })
 
   // Post-fetch filters
+  if (filterEffectiveness)   rows = rows.filter(r => r.effectiveness === filterEffectiveness)
   if (filterKw)              rows = rows.filter(r => r.keyword.toLowerCase().includes(filterKw) || (r.final_keyword ?? '').toLowerCase().includes(filterKw))
   if (filterIndex === 'has') rows = rows.filter(r => r.is_indexed)
   if (filterIndex === 'none')rows = rows.filter(r => !r.is_indexed)

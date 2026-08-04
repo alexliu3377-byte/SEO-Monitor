@@ -179,7 +179,7 @@ export default function GroupReportPage() {
   const [oPageSize, setOPageSize] = useState(20)
 
   // 追踪汇总 tab state
-  interface SourceEff { source: string; total: number; ranked: number; indexed: number; effective: number }
+  interface SourceEff { source: string; total: number; ranked: number; indexed: number }
   interface TrackingBucket { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }
   interface TrackingSummary {
     userId: string; username: string
@@ -667,7 +667,7 @@ export default function GroupReportPage() {
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {stats.map(s => {
                       const skl = SOURCE_COLORS[s.source]
-                      const effectiveRate = s.total > 0 ? Math.round(s.effective / s.total * 100) : null
+                      const effectiveRate = s.total > 0 ? Math.round((s.indexed + s.ranked * 2) / s.total * 100) : null
                       return (
                         <div key={s.source} className={`flex-shrink-0 rounded-xl border px-4 py-3 min-w-[130px] ${skl ? `border-transparent ${skl.bg}` : 'bg-white border-gray-100'}`}>
                           <p className={`text-xs font-semibold truncate ${skl ? skl.text : 'text-gray-700'}`}>{SOURCE_LABEL[s.source] ?? s.source}</p>

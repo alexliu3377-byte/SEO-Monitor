@@ -125,31 +125,31 @@ export interface SourceEffectivenessEntry {
   total: number
   ranked: number
   indexed: number
-  effective: number
 }
 
-// effective = 获取排名/获取收录（二选一即算），ranked = 有 rank_position，
-// indexed = effectiveness 恰好是"获取收录"（不含已经排名、因而也已收录的—
+// ranked = 有 rank_position（等价于 effectiveness='获取排名'，因为写入时
+// rank_position 存在就优先归类为"获取排名"，见 scripts/crawl.ts 的分类逻辑），
+// indexed = effectiveness 恰好是"获取收录"（不含已经排名、因而也已收录的——
 // 那些算进 ranked，不重复计进 indexed，避免"已收录"卡片的数字比"获取排名"
-// 卡片还大导致误解）。跟 app/api/rules/source-stats/route.ts 的 effective/
-// ranked 定义保持一致（那边是给"规则中心"用的独立实现，这边服务追踪汇总，
-// 两处口径故意对齐但不共享代码）。
+// 卡片还大导致误解）。有效率 = (indexed + ranked*2) / total，排名词权重是收录词的
+// 2 倍（一个词能排上名，说明它一定也被收录了，理应比"只收录"更值钱）——这个加权
+// 只用于本页"追踪汇总"，跟 app/api/rules/source-stats/route.ts（规则中心用的独立
+// 实现，未加权）不共享代码，故意允许两边口径不同步。
 export function computeSourceEffectiveness(
   rows: TrackRow[],
   claimSourceMap: Map<string, string | null>
 ): SourceEffectivenessEntry[] {
-  interface Acc { total: number; ranked: number; indexed: number; effective: number }
+  interface Acc { total: number; ranked: number; indexed: number }
   const map = new Map<string, Acc>()
   for (const r of rows) {
     const source = claimSourceMap.get(r.claim_id) ?? '未知'
     let s = map.get(source)
-    if (!s) { s = { total: 0, ranked: 0, indexed: 0, effective: 0 }; map.set(source, s) }
+    if (!s) { s = { total: 0, ranked: 0, indexed: 0 }; map.set(source, s) }
     s.total++
     if (r.rank_position != null) s.ranked++
     if (r.effectiveness === '获取收录') s.indexed++
-    if (r.effectiveness === '获取排名' || r.effectiveness === '获取收录') s.effective++
   }
   return Array.from(map.entries())
-    .map(([source, s]) => ({ source, total: s.total, ranked: s.ranked, indexed: s.indexed, effective: s.effective }))
+    .map(([source, s]) => ({ source, total: s.total, ranked: s.ranked, indexed: s.indexed }))
     .sort((a, b) => b.total - a.total)
 }
