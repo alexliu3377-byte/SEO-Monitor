@@ -76,7 +76,7 @@ function buildSummary(
       bySource: Array.from(indexedBySource.entries()).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
     },
     ranked: { total: rankedTotal, totalVolume: bucketsOut.reduce((s, b) => s + b.volume, 0), buckets: bucketsOut },
-    totalScore: Math.round(scoreTotal),
+    totalScore: Math.round(scoreTotal * 10) / 10,
   }
 }
 

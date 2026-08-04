@@ -613,16 +613,16 @@ export default function GroupReportPage() {
                                   )
                                   if (row.env_excluded) return (
                                     <button onClick={() => setScoreDetailRow(row)} className="w-full text-center hover:opacity-70 transition-opacity" title="记录日期环境异常（全站大跌或抓取失败），未计入规则平均分">
-                                      <span className="text-sm font-bold tabular-nums text-gray-300">{score}</span>
+                                      <span className="text-sm font-bold tabular-nums text-gray-300">{score.toFixed(1)}</span>
                                       <span className="text-[9px] text-gray-300 block leading-none">环境</span>
                                     </button>
                                   )
-                                  // 分数不再封顶100（排名量用log10加权后常见几百分），旧的70/40分档阈值
-                                  // 已经没有意义——改成按正负号三色：创造了价值/暂无价值/被扣分
+                                  // 分数不再封顶（排名量用log10加权），旧的70/40分档阈值已经没有意义
+                                  // ——改成按正负号三色：创造了价值/暂无价值/被扣分
                                   const color = score > 0 ? 'text-green-600' : score < 0 ? 'text-red-400' : 'text-gray-400'
                                   return (
                                     <button onClick={() => setScoreDetailRow(row)} className="w-full text-center hover:opacity-70 transition-opacity">
-                                      <span className={`text-sm font-bold tabular-nums underline decoration-dotted decoration-gray-300 underline-offset-2 ${color}`}>{score}</span>
+                                      <span className={`text-sm font-bold tabular-nums underline decoration-dotted decoration-gray-300 underline-offset-2 ${color}`}>{score.toFixed(1)}</span>
                                     </button>
                                   )
                                 })()}
@@ -1002,11 +1002,11 @@ export default function GroupReportPage() {
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-gray-100 pb-3">
                   <span className="text-gray-500">涨跌分（{changeDesc}）</span>
-                  <span className={`font-medium tabular-nums ${b.changeScore > 0 ? 'text-green-600' : b.changeScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.changeScore >= 0 ? `+${b.changeScore}` : b.changeScore}</span>
+                  <span className={`font-medium tabular-nums ${b.changeScore > 0 ? 'text-green-600' : b.changeScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.changeScore >= 0 ? `+${b.changeScore.toFixed(1)}` : b.changeScore.toFixed(1)}</span>
                 </div>
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-gray-700 font-semibold">总分</span>
-                  <span className={`text-lg font-bold tabular-nums ${b.total > 0 ? 'text-green-600' : b.total < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.total}</span>
+                  <span className={`text-lg font-bold tabular-nums ${b.total > 0 ? 'text-green-600' : b.total < 0 ? 'text-red-400' : 'text-gray-800'}`}>{b.total.toFixed(1)}</span>
                 </div>
                 {row.env_excluded && (
                   <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">这条记录日期环境异常（全站大跌或抓取失败），不计入"得分"平均分。</p>
@@ -1015,10 +1015,10 @@ export default function GroupReportPage() {
                   <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">公式说明</summary>
                   <div className="mt-2 text-[11px] text-gray-500 leading-relaxed space-y-1">
                     <p>总分 = 排名分 × 搜索量权重 + 收录分 + 涨跌分</p>
-                    <p>排名分：前3名100 / 4-10名80 / 11-20名60 / 21-30名40 / 30名以后20</p>
+                    <p>排名分：前3名10 / 4-10名8 / 11-20名6 / 21-30名4 / 30名以后2</p>
                     <p>搜索量权重：1 + log10(排名量+1)，只在有排名时生效</p>
-                    <p>收录分：收录固定 +10</p>
-                    <p>涨跌分：涨20+位+20 / 涨10-20位+15 / 涨1-9位+10 / 不变0 / 跌1-5位-2 / 跌6-10位-5 / 跌11-20位-10 / 跌20+位-15</p>
+                    <p>收录分：收录固定 +1</p>
+                    <p>涨跌分：涨20+位+2 / 涨10-20位+1.5 / 涨1-9位+1 / 不变0 / 跌1-5位-0.2 / 跌6-10位-0.5 / 跌11-20位-1 / 跌20+位-1.5</p>
                   </div>
                 </details>
               </div>
