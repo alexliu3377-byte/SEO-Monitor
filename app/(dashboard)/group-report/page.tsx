@@ -771,7 +771,7 @@ export default function GroupReportPage() {
                               <td className="px-2 py-2.5 text-sm text-gray-500 text-right tabular-nums">{view.indexed.volume > 0 ? fmtVol(view.indexed.volume) : '—'}</td>
                               <td className="px-4 py-2.5 text-center">
                                 <button onClick={() => { setSourceDetailModal({ kind: 'indexed' }); setSourceDetailPage(0) }} disabled={view.indexed.count === 0}
-                                  className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
+                                  className="text-xs border rounded px-2 py-0.5 whitespace-nowrap text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                               </td>
                             </tr>
                           </tbody>
@@ -807,7 +807,7 @@ export default function GroupReportPage() {
                                 <td className="px-2 py-2.5 text-sm text-gray-500 text-right tabular-nums">{b.volume > 0 ? fmtVol(b.volume) : '—'}</td>
                                 <td className="px-4 py-2.5 text-center">
                                   <button onClick={() => { setSourceDetailModal({ kind: 'rank', bucket: b.label }); setSourceDetailPage(0) }} disabled={b.count === 0}
-                                    className="text-xs border rounded px-2 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
+                                    className="text-xs border rounded px-2 py-0.5 whitespace-nowrap text-gray-400 hover:text-gray-600 border-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">查看</button>
                                 </td>
                               </tr>
                             ))}
