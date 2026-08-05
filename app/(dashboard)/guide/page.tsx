@@ -31,8 +31,8 @@ const NAV_REFERENCE: { id: string; label: string }[] = [
   { id: 'ref-weight-index', label: '权重/收录监控' },
   { id: 'ref-competitor-daily', label: '竞品日收' },
   { id: 'ref-index-pages', label: '收录页面' },
-  { id: 'ref-hot-keywords', label: '热词雷达' },
   { id: 'ref-charts', label: '近期榜单' },
+  { id: 'ref-hot-keywords', label: '热词雷达' },
 ]
 
 function Section({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
@@ -152,7 +152,7 @@ export default function GuidePage() {
                   <ul className="list-disc list-inside space-y-1 text-gray-600">
                     <li>每人负责维护 <b>3 个</b> 账号的 Cookie</li>
                     <li>每天把池子里<b>最旧的那一条</b>（日期最早的）换成一个新取的 Cookie</li>
-                    <li>取 Cookie 的方式：登录对应百度账号 → 打开 Chrome DevTools → Application → Cookies → 全选复制 → 粘贴进弹窗的文本框，系统会自动识别</li>
+                    <li>取 Cookie 的方式：打开百度（已登录对应账号）→ 右键 inspect/检查 打开 DevTools → Application → Cookies → 全选复制 → 粘贴进弹窗的文本框，系统会自动识别</li>
                   </ul>
                 </div>
                 <p className="text-xs text-gray-400">每条 Cookie 前面都带一个日期小标签，一眼就能看出哪条最旧该换了。</p>
@@ -215,7 +215,7 @@ export default function GuidePage() {
 
             <Section id="ref-weight-index" className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-800 mb-2">权重监控 / 收录监控</h3>
-              <p className="text-sm text-gray-600">两个页面结构很像：一个筛选栏（域名、关注级别，收录监控还多一个"状态"筛选）+ 一张表格，每行是一个站点，带 30 天趋势小图。表格标题点一下可以按数值排序。每行"查看"按钮能弹出更大的趋势图；收录监控里非普通成员还能看到"重抓"按钮，手动触发这个站点重新抓一次数据。</p>
+              <p className="text-sm text-gray-600">两个页面结构很像：一个筛选栏（域名、关注级别，收录监控还多一个"状态"筛选）+ 一张表格，每行是一个站点，带 30 天趋势小图。表格标题点一下可以按数值排序。每行"查看"按钮能弹出更大的趋势图。</p>
             </Section>
 
             <Section id="ref-competitor-daily" className="bg-white rounded-xl border border-gray-200 p-5">
@@ -242,15 +242,7 @@ export default function GuidePage() {
 
             <Section id="ref-index-pages" className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-800 mb-2">收录页面</h3>
-              <p className="text-sm text-gray-600">追踪到具体页面（URL）级别的收录状态，记录首次发现/消失/再收录的时间。可以按站点、时间范围、状态（新发现/再收录/已脱收/待验证/更新/已收录）筛选。普通成员一般只用来查看，"手动重抓/手动验证/脱收验证"这几个按钮是管理员专用的。</p>
-            </Section>
-
-            <Section id="ref-hot-keywords" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">热词雷达</h3>
-                <ExtLink href="/hot-keywords">打开热词雷达</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600">找选题、补词库灵感用的。右侧 6 个 tab（搜索量上涨/交叉词/竞品涨排名/连续上涨词/共新增词/更新词库）跟分组任务里的信号来源是同一套逻辑，只是这里是纯浏览，不能直接认领去做。</p>
+              <p className="text-sm text-gray-600">追踪到具体页面（URL）级别的收录状态，记录首次发现/消失/再收录的时间。可以按站点、时间范围、状态（新发现/再收录/已脱收/待验证/更新/已收录）筛选。</p>
             </Section>
 
             <Section id="ref-charts" className="bg-white rounded-xl border border-gray-200 p-5">
@@ -259,6 +251,14 @@ export default function GuidePage() {
                 <ExtLink href="/charts">打开近期榜单</ExtLink>
               </div>
               <p className="text-sm text-gray-600">纯资讯页，汇总 TapTap 和好游快爆的游戏行业榜单（今日游戏、即将上线、热搜榜等），跟自家站点数据完全无关，了解行业动态、蹭热点选题时看看就好，<b>只供参考</b>。</p>
+            </Section>
+
+            <Section id="ref-hot-keywords" className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-800">热词雷达</h3>
+                <ExtLink href="/hot-keywords">打开热词雷达</ExtLink>
+              </div>
+              <p className="text-sm text-gray-600">用来了解行业整体趋势、给分组任务的认领补灵感。右侧 6 个 tab（搜索量上涨/交叉词/竞品涨排名/连续上涨词/共新增词/更新词库）跟分组任务里的信号来源是同一套逻辑，只是这里是纯浏览，不能直接认领去做。理论上分组任务的词可以由管理员按分组筛选站点范围，热词雷达则看全部站点；不过现阶段各分组都还没设置筛选，两边看到的范围其实一样，这里就当参考用。</p>
             </Section>
           </div>
         </div>
