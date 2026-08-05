@@ -154,20 +154,32 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : (usernameOf.get(scopeUserId) ?? scopeUserId.slice(0, 8))
 
   const summary = buildSummary(scopeRows, claimSourceMap, matchesByClaim, badDates, scopeUserIdOut, scopeUsername)
-  // Always computed regardless of scope — lets admin/super compare a selected
-  // member's numbers against the whole group's at a glance (2026-08-04 request:
-  // top cards show "该组员 / 全组" when a specific member is picked). Reuses the
-  // already-fetched claimSourceMap/matchesByClaim, no extra query.
   const groupSummary = scope === 'total' ? summary : buildSummary(rows, claimSourceMap, matchesByClaim, badDates, groupId, '全组汇总')
   const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, claimSourceMap)
   const scopeSourceEffectiveness: SourceEffectivenessEntry[] = scope === 'total'
     ? groupSourceEffectiveness
     : computeSourceEffectiveness(scopeRows, claimSourceMap)
 
+  // 全组排名（2026-08-04 请求，替换掉原来的4张统计卡片）：给每个组员（哪怕这个月
+  // 一条提交都没有）都算一份汇总，按得分从高到低排名。非管理员只能拿到自己那一条
+  // ——不是前端隐藏，是接口本身就只返回caller自己的条目，避免绕过UI直接看接口
+  // 拿到其他组员的具体数字；全组汇总同理，非管理员的响应里完全不含 groupSummary。
+  const rowsByUser = new Map<string, TrackRow[]>()
+  for (const r of rows) {
+    if (!rowsByUser.has(r.user_id)) rowsByUser.set(r.user_id, [])
+    rowsByUser.get(r.user_id)!.push(r)
+  }
+  const fullRanking = memberList
+    .map(m => buildSummary(rowsByUser.get(m.user_id) ?? [], claimSourceMap, matchesByClaim, badDates, m.user_id, usernameOf.get(m.user_id)!))
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .map((s, i) => ({ rank: i + 1, summary: s }))
+  const ranking = canSeeAll ? fullRanking : fullRanking.filter(r => r.summary.userId === user.id)
+
   return NextResponse.json({
     month, canSeeAll, isMember, scope: scope === 'member' ? scopeUserId : scope,
     memberList: canSeeAll ? memberList.map(m => ({ userId: m.user_id, username: usernameOf.get(m.user_id)! })) : undefined,
-    summary, groupSummary, groupSourceEffectiveness, scopeSourceEffectiveness,
+    summary, groupSummary: canSeeAll ? groupSummary : undefined,
+    groupSourceEffectiveness, scopeSourceEffectiveness, ranking,
     truncated: (rawRows?.length ?? 0) < (exactCount ?? 0),
   })
 }

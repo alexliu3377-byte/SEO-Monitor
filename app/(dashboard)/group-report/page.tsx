@@ -190,11 +190,13 @@ export default function GroupReportPage() {
     ranked: { total: number; totalVolume: number; buckets: TrackingBucket[] }
     totalScore: number
   }
+  interface RankingEntry { rank: number; summary: TrackingSummary }
   interface TrackingSummaryResponse {
     month: string; canSeeAll: boolean; isMember: boolean; scope: string
     memberList?: { userId: string; username: string }[]
     summary: TrackingSummary
-    groupSummary: TrackingSummary
+    groupSummary?: TrackingSummary
+    ranking: RankingEntry[]
     groupSourceEffectiveness: SourceEff[]
     scopeSourceEffectiveness: SourceEff[]
   }
@@ -671,11 +673,7 @@ export default function GroupReportPage() {
               setTrackingMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
             }
             const isCurrentMonth = trackingMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
-            const { summary: view, groupSummary, groupSourceEffectiveness, scopeSourceEffectiveness } = trackingData
-            // 管理员/超管选中某个组员时，卡片主数字改成"该组员 / 全组"方便对比；
-            // 选"全组汇总"时两者相等，直接显示单个数字更干净。
-            const showRatio = trackingScope !== 'total'
-            const ratioStr = (mine: number, group: number) => showRatio ? `${mine.toLocaleString()} / ${group.toLocaleString()}` : mine.toLocaleString()
+            const { summary: view, groupSummary, ranking, groupSourceEffectiveness, scopeSourceEffectiveness } = trackingData
 
             const SourceEffCards = ({ title, stats }: { title: string; stats: SourceEff[] }) => (
               <div>
@@ -733,35 +731,55 @@ export default function GroupReportPage() {
                   )}
                 </div>
 
+                <div className="space-y-4">
+                  {/* 全组排名——不跟着上面的范围切换器走，管理员/超管始终看到全部
+                      组员+最下面的全组汇总行；普通组员的接口响应本身就只含自己
+                      那一条（不是前端隐藏），所以这里天然只会渲染出一行。 */}
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                      <span className="text-sm font-semibold text-gray-700">全组排名</span>
+                      <span className="text-xs text-gray-400 ml-2">按得分从高到低</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[520px]">
+                        <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                          <th className="px-4 py-2 text-center font-medium w-14">排名</th>
+                          <th className="px-2 py-2 text-left font-medium">成员</th>
+                          <th className="px-2 py-2 text-center font-medium w-20">提交数</th>
+                          <th className="px-2 py-2 text-center font-medium w-20">获取排名</th>
+                          <th className="px-2 py-2 text-center font-medium w-20">获取收录</th>
+                          <th className="px-4 py-2 text-center font-medium w-20">得分</th>
+                        </tr></thead>
+                        <tbody>
+                          {ranking.map(r => (
+                            <tr key={r.summary.userId} className={`border-b border-gray-50 last:border-0 ${r.summary.userId === currentUserId ? 'bg-green-50/40' : ''}`}>
+                              <td className="px-4 py-2.5 text-center text-sm font-semibold text-gray-500 tabular-nums">{r.rank}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-800">{r.summary.username}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.submitted.total}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.ranked.total}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.indexed.count}</td>
+                              <td className={`px-4 py-2.5 text-sm text-center font-semibold tabular-nums ${r.summary.totalScore > 0 ? 'text-green-600' : r.summary.totalScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{r.summary.totalScore.toFixed(1)}</td>
+                            </tr>
+                          ))}
+                          {groupSummary && (
+                            <tr className="bg-gray-50/70 border-t-2 border-gray-200">
+                              <td className="px-4 py-2.5 text-center text-sm text-gray-400">—</td>
+                              <td className="px-2 py-2.5 text-sm font-semibold text-gray-700">全组汇总</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-800 text-center font-semibold tabular-nums">{groupSummary.submitted.total}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-800 text-center font-semibold tabular-nums">{groupSummary.ranked.total}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-800 text-center font-semibold tabular-nums">{groupSummary.indexed.count}</td>
+                              <td className="px-4 py-2.5 text-sm text-center font-bold tabular-nums text-gray-900">{groupSummary.totalScore.toFixed(1)}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                 {view.submitted.total === 0 ? (
                   <div className="text-center py-10 text-gray-400 text-sm">这个月还没有数据</div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-3">
-                      {[
-                        { label: '提交条数', value: ratioStr(view.submitted.total, groupSummary.submitted.total), sub: '全部提交' },
-                        {
-                          label: '获取排名', value: ratioStr(view.ranked.total, groupSummary.ranked.total),
-                          sub: `搜索量 ${ratioStr(view.ranked.totalVolume, groupSummary.ranked.totalVolume)}`, color: 'text-green-600',
-                        },
-                        {
-                          label: '获取收录', value: ratioStr(view.indexed.count, groupSummary.indexed.count),
-                          sub: `搜索量 ${ratioStr(view.indexed.volume, groupSummary.indexed.volume)}`, color: 'text-blue-600',
-                        },
-                        {
-                          label: '得分', value: ratioStr(view.totalScore, groupSummary.totalScore),
-                          sub: '累计得分（同成效追踪口径）',
-                          color: view.totalScore > 0 ? 'text-green-600' : view.totalScore < 0 ? 'text-red-400' : 'text-gray-800',
-                        },
-                      ].map(s => (
-                        <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-4 py-3">
-                          <div className={`font-bold tabular-nums ${(s as { color?: string }).color ?? 'text-gray-800'} ${showRatio ? 'text-lg' : 'text-2xl'}`}>{s.value}</div>
-                          <div className="text-xs font-medium text-gray-600 mt-0.5">{s.label}</div>
-                          <div className="text-[11px] text-gray-400">{s.sub}</div>
-                        </div>
-                      ))}
-                    </div>
-
+                  <>
                     <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 space-y-4">
                       <SourceEffCards title="全组来源成效" stats={groupSourceEffectiveness} />
                       {trackingScope !== 'total' && (
@@ -840,8 +858,9 @@ export default function GroupReportPage() {
                         </table>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
+                </div>
               </div>
             )
           })()}
