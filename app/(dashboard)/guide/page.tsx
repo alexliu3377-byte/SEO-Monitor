@@ -34,6 +34,12 @@ const NAV_REFERENCE: { id: string; label: string }[] = [
   { id: 'ref-charts', label: '近期榜单' },
   { id: 'ref-hot-keywords', label: '热词雷达' },
 ]
+const NAV_ADMIN: { id: string; label: string }[] = [
+  { id: 'admin-sites', label: '网站管理' },
+  { id: 'admin-crawl-log', label: '抓取日志' },
+  { id: 'admin-home', label: '首页快报' },
+  { id: 'admin-rules', label: '规则中心' },
+]
 
 function Section({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
   return <section id={id} className={`scroll-mt-20 ${className}`}>{children}</section>
@@ -69,12 +75,18 @@ export default function GuidePage() {
               {s.label}
             </a>
           ))}
-          {canSeeAll && (
-            <a href="#admin-zone" className="text-xs px-2.5 py-1 rounded-full bg-violet-50 text-violet-600 border border-violet-200 hover:bg-violet-100 transition-colors">
-              管理员专区
-            </a>
-          )}
         </div>
+        {canSeeAll && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-violet-700 mr-1">管理员</span>
+            {NAV_ADMIN.map(s => (
+              <a key={s.id} href={`#${s.id}`}
+                className="text-xs px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors">
+                {s.label}
+              </a>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="px-6 py-6 max-w-4xl mx-auto space-y-10">
