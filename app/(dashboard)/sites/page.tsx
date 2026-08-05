@@ -297,7 +297,7 @@ export default function SitesPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <h3 className="font-semibold text-gray-900 mb-1">
-              {pendingToggle.direction === 'to_site_rank_keywords' ? '切换至竞品追踪模式' : '切换至排名变动模式'}
+              {pendingToggle.direction === 'to_site_rank_keywords' ? '切换至排名模式' : '切换至涨跌模式'}
             </h3>
             <p className="text-sm text-gray-500 mb-4">
               {pendingToggle.direction === 'to_site_rank_keywords'

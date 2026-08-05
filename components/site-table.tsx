@@ -117,8 +117,8 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
             <th className="table-th text-center">关注</th>
             <th className="table-th text-center">版本清洗</th>
             <th className="table-th"><div className="flex items-center justify-center gap-1">关键词{sortIcons('isEnabled')}</div></th>
-            <th className="table-th"><div className="flex items-center justify-center gap-1">排名{sortIcons('hasRankData')}</div></th>
-            <th className="table-th"><div className="flex items-center justify-center gap-1">竞品追踪{sortIcons('hasRankTitle')}</div></th>
+            <th className="table-th"><div className="flex items-center justify-center gap-1">涨跌{sortIcons('hasRankData')}</div></th>
+            <th className="table-th"><div className="flex items-center justify-center gap-1">排名{sortIcons('hasRankTitle')}</div></th>
             <th className="table-th"><div className="flex items-center justify-center gap-1">收录页面{sortIcons('hasIndexPages')}</div></th>
             <th className="table-th text-right">操作</th>
           </tr>

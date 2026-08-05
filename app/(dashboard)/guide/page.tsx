@@ -287,12 +287,56 @@ export default function GuidePage() {
                   <h3 className="text-sm font-semibold text-gray-800">网站管理</h3>
                   <ExtLink href="/sites">打开网站管理</ExtLink>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">站点要先在这里登记，才会进入整个监控/抓取系统——是所有数据的源头。</p>
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>· <b className="text-gray-700">新增网站</b>：右上角"新增网站"，要填域名、站点名称、分类（大站/中站/小站）、关注级别（1=重点关注 / 2=侧重关注 / 3=普通关注）、友情链接，以及一份抓取用的 HTML 配置（内容类型、列表页 URL、标题/日期/文章链接的 CSS 选择器等）。</p>
-                  <p>· <b className="text-gray-700">列表操作</b>：编辑、删除（<span className="text-red-500">删除不可恢复</span>），可按域名/关注级别/分类筛选。</p>
-                  <p>· <b className="text-gray-700">4 个开关</b>：启用抓取、排名数据、竞品追踪、收录页面追踪，表格里直接点就能改。</p>
-                  <p className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">⚠ "排名数据"和"竞品追踪"两个开关不能同时开——同时开启会弹出数据迁移确认框，迁移会丢弃一部分字段（比如 PC 端数据），操作前务必看清楚提示再确认。</p>
+                <p className="text-sm text-gray-600 mb-4">站点要先在这里登记，才会进入整个监控/抓取系统——是所有数据的源头，配置错了后面全部数据都会跟着错，要仔细来。</p>
+
+                <div className="space-y-4 text-sm text-gray-600">
+                  <div>
+                    <p className="font-medium text-gray-800 mb-1.5">基本信息</p>
+                    <p>域名、站点名称、分类（大站/中站/小站）、关注级别（1=重点关注 / 2=侧重关注 / 3=普通关注，决定首页快报预警的敏感程度）、友情链接（同公司旗下站点，用于关联展示，不影响抓取）。</p>
+                  </div>
+
+                  <div>
+                    <p className="font-medium text-gray-800 mb-1.5">HTML 抓取配置——每个"来源"是一套独立的抓取规则</p>
+                    <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
+                      <p>· <b className="text-gray-700">列表页 URL</b>：一行一个，多页就多写几行（比如翻页翻到第2、3页）。</p>
+                      <p>· <b className="text-gray-700">标题 / 日期 CSS 选择器</b>：抓每条内容的标题和发布日期。</p>
+                      <p>· <b className="text-gray-700">文章链接 CSS 选择器</b>：选填，填了才会记录每条内容自己的 URL。</p>
+                      <p>· <b className="text-gray-700">内容类型</b>：应用/游戏二选一，用于后续分类统计。</p>
+                      <p>· 配完先点<b className="text-gray-700">"预览抓取"</b>，看抓出来的标题对不对、有没有多余的垃圾文字，别直接保存就不管了。</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="font-medium text-gray-800 mb-1.5">AI 帮我识别选择器</p>
+                    <p>每个来源下面都有这个折叠区——不用自己手动摸 CSS 选择器（很容易摸错）。右键页面"检查"，复制一条列表项的 HTML 粘贴进去，点"AI 分析"，会自动给出标题/日期/链接三个选择器，点"应用到上面的选择器"就填好了。<b className="text-gray-700">如果这个站的列表是靠 JS 调 API 加载的（不是纯 HTML），把浏览器 Network 里抓到的那段 JSON 响应粘贴进去也一样能分析</b>，不用切换模式。</p>
+                  </div>
+
+                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-600">
+                    ⚠ <b>日期选择器是硬性要求</b>：如果页面上找不到能抓到的发布日期，这个来源就不要配。没有日期，系统没法判断哪些是"新增"的，结果就是每天都把别人页面上的全部内容当成新增重复抓一遍，数据全是垃圾。
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
+                    ⚠ <b>无限下拉的列表页</b>：先打开浏览器 DevTools 的 Network 面板，往下滚动看看是不是有 JS 在偷偷调接口翻页。如果是，把这些分页各自的 URL（或者接口地址）都当成"来源"依次加进列表里一起抓，别只抓第一屏。<code className="text-xs bg-white px-1 rounded">32r.com</code> 就是这种站，可以参考它的配置方式。
+                  </div>
+
+                  <div>
+                    <p className="font-medium text-gray-800 mb-1.5">列表操作</p>
+                    <p>编辑、删除（<span className="text-red-500">不可恢复</span>），可按域名/关注级别/分类筛选。</p>
+                  </div>
+
+                  <div>
+                    <p className="font-medium text-gray-800 mb-1.5">4 个开关——原则：这个站抓不到/不需要就关掉，别留着空跑</p>
+                    <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
+                      <p>· <b className="text-gray-700">关键词</b>：控制上面那套 HTML 配置要不要跑。自家网站不需要靠这个发现新词（新词是组员在分组任务里自己提交的），HTML 配置可以不填；没有日期字段、或更新很少的小站，也建议关掉，硬抓只会产生垃圾数据。</p>
+                      <p>· <b className="text-gray-700">涨跌</b>：追踪这个站点关键词排名的涨跌变化。如果爱站对这个站屏蔽了涨跌数据（部分站点爱站不开放），开了也抓不到，直接关掉。</p>
+                      <p>· <b className="text-gray-700">排名</b>：追踪这个站具体关键词排第几名，用于分组任务里"竞品涨排名"这类信号和分组报告的排名比对。</p>
+                      <p>· <b className="text-gray-700">收录页面</b>：追踪到具体 URL 级别的收录状态。现在只给<b>需要追踪成效</b>（有分组在这个站点上提交、要看排名/收录结果）的站点开，不是所有站点都开。</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
+                    ⚠ "涨跌"和"排名"两个开关不能同时开——同时开启会弹出数据迁移确认框，迁移会丢弃一部分字段（比如 PC 端数据），操作前务必看清楚提示再确认。
+                  </div>
                 </div>
               </Section>
 
