@@ -110,7 +110,7 @@ export default function GuidePage() {
                     ['跌词更新', '排名下跌了、需要更新页面挽回排名的词'],
                   ].map(([label, desc]) => (
                     <div key={label} className="flex items-start gap-2">
-                      <span className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5">{label}</span>
+                      <span className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-[74px] text-center">{label}</span>
                       <span className="text-xs text-gray-500">{desc}</span>
                     </div>
                   ))}
