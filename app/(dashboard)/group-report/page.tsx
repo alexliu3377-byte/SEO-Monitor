@@ -190,7 +190,12 @@ export default function GroupReportPage() {
     ranked: { total: number; totalVolume: number; buckets: TrackingBucket[] }
     totalScore: number
   }
-  interface RankingEntry { rank: number; summary: TrackingSummary }
+  interface RankingEntry {
+    rank: number; userId: string; username: string
+    // null = 屏蔽的其他组员数据（能看到排名和姓名，看不到具体数字），
+    // 跟"真实值为0"要能区分开，所以不能直接用0代替。
+    submitted: number | null; ranked: number | null; indexed: number | null; totalScore: number | null
+  }
   interface TrackingSummaryResponse {
     month: string; canSeeAll: boolean; isMember: boolean; scope: string
     memberList?: { userId: string; username: string }[]
@@ -752,13 +757,13 @@ export default function GroupReportPage() {
                         </tr></thead>
                         <tbody>
                           {ranking.map(r => (
-                            <tr key={r.summary.userId} className={`border-b border-gray-50 last:border-0 ${r.summary.userId === currentUserId ? 'bg-green-50/40' : ''}`}>
+                            <tr key={r.userId} className={`border-b border-gray-50 last:border-0 ${r.userId === currentUserId ? 'bg-green-50/40' : ''}`}>
                               <td className="px-4 py-2.5 text-center text-sm font-semibold text-gray-500 tabular-nums">{r.rank}</td>
-                              <td className="px-2 py-2.5 text-sm text-gray-800">{r.summary.username}</td>
-                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.submitted.total}</td>
-                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.ranked.total}</td>
-                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.summary.indexed.count}</td>
-                              <td className={`px-4 py-2.5 text-sm text-center font-semibold tabular-nums ${r.summary.totalScore > 0 ? 'text-green-600' : r.summary.totalScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{r.summary.totalScore.toFixed(1)}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-800">{r.username}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.submitted ?? '—'}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.ranked ?? '—'}</td>
+                              <td className="px-2 py-2.5 text-sm text-gray-700 text-center tabular-nums">{r.indexed ?? '—'}</td>
+                              <td className={`px-4 py-2.5 text-sm text-center font-semibold tabular-nums ${r.totalScore == null ? 'text-gray-300' : r.totalScore > 0 ? 'text-green-600' : r.totalScore < 0 ? 'text-red-400' : 'text-gray-800'}`}>{r.totalScore == null ? '—' : r.totalScore.toFixed(1)}</td>
                             </tr>
                           ))}
                           {groupSummary && (

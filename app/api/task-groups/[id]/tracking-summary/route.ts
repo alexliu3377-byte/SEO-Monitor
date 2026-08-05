@@ -161,9 +161,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : computeSourceEffectiveness(scopeRows, claimSourceMap)
 
   // 全组排名（2026-08-04 请求，替换掉原来的4张统计卡片）：给每个组员（哪怕这个月
-  // 一条提交都没有）都算一份汇总，按得分从高到低排名。非管理员只能拿到自己那一条
-  // ——不是前端隐藏，是接口本身就只返回caller自己的条目，避免绕过UI直接看接口
-  // 拿到其他组员的具体数字；全组汇总同理，非管理员的响应里完全不含 groupSummary。
+  // 一条提交都没有）都算一份汇总，按得分从高到低排名。排名和姓名对所有组员可见
+  // （2026-08-04 二次调整：一开始做成非管理员只能看自己那一条，用户改成"能看到
+  // 其他人的排名，只是不能看到其它人的资料"），但具体数字（提交数/获取排名/
+  // 获取收录/得分）只对本人和管理员暴露——这个屏蔽在接口层做，不是前端隐藏，
+  // 避免绕过UI直接读接口拿到其他组员的具体数字；全组汇总同理，非管理员的响应
+  // 里完全不含 groupSummary。
   const rowsByUser = new Map<string, TrackRow[]>()
   for (const r of rows) {
     if (!rowsByUser.has(r.user_id)) rowsByUser.set(r.user_id, [])
@@ -173,7 +176,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .map(m => buildSummary(rowsByUser.get(m.user_id) ?? [], claimSourceMap, matchesByClaim, badDates, m.user_id, usernameOf.get(m.user_id)!))
     .sort((a, b) => b.totalScore - a.totalScore)
     .map((s, i) => ({ rank: i + 1, summary: s }))
-  const ranking = canSeeAll ? fullRanking : fullRanking.filter(r => r.summary.userId === user.id)
+  const ranking = fullRanking.map(({ rank, summary: s }) => {
+    const visible = canSeeAll || s.userId === user.id
+    return {
+      rank, userId: s.userId, username: s.username,
+      submitted: visible ? s.submitted.total : null,
+      ranked: visible ? s.ranked.total : null,
+      indexed: visible ? s.indexed.count : null,
+      totalScore: visible ? s.totalScore : null,
+    }
+  })
 
   return NextResponse.json({
     month, canSeeAll, isMember, scope: scope === 'member' ? scopeUserId : scope,
