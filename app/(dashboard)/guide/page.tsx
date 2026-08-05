@@ -109,8 +109,8 @@ export default function GuidePage() {
                     ['更新词库', '持续被搜索、适合拿现有页面去"更新"而不是新增的词根'],
                     ['跌词更新', '排名下跌了、需要更新页面挽回排名的词'],
                   ].map(([label, desc]) => (
-                    <div key={label} className="flex items-start gap-2">
-                      <span className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-[74px] text-center">{label}</span>
+                    <div key={label} className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-[74px] text-center">{label}</span>
                       <span className="text-xs text-gray-500">{desc}</span>
                     </div>
                   ))}
@@ -167,16 +167,16 @@ export default function GuidePage() {
               </div>
               <div className="p-6 space-y-4 text-sm text-gray-700">
                 <div className="grid gap-3">
-                  <div className="flex items-start gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-20 text-center">提交记录</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">提交记录</span>
                     <span className="text-gray-600">按日期看谁那天提交了哪些词，最基础的流水记录。</span>
                   </div>
-                  <div className="flex items-start gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-20 text-center">成效追踪</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">成效追踪</span>
                     <span className="text-gray-600">每一条提交后来有没有排上名、有没有被收录，逐条列出来，最后一列"得分"点一下能展开看这一条是怎么算出来的（排名档位 × 搜索量权重 + 收录分 + 涨跌分）。</span>
                   </div>
-                  <div className="flex items-start gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-20 text-center">追踪汇总</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">追踪汇总</span>
                     <span className="text-gray-600">月度整体统计：全组排名表（能看到自己和所有人排第几，但别人的具体数字看不到，只有自己那一行能看数字）、来源成效对比、获取收录/排名分布明细。</span>
                   </div>
                 </div>
@@ -232,8 +232,8 @@ export default function GuidePage() {
                   ['排名变动', '涨入/跌出的关键词排名波动列表，带搜索量'],
                   ['不稳定词', '近30天在涨入和跌出里都出现过的词，按波动天数排序——排名很不稳定的词'],
                 ].map(([label, desc]) => (
-                  <div key={label} className="flex items-start gap-2 text-sm">
-                    <span className="text-xs font-semibold text-blue-700 bg-blue-50 rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5 w-16 text-center">{label}</span>
+                  <div key={label} className="flex items-center gap-2 text-sm">
+                    <span className="text-xs font-semibold text-blue-700 bg-blue-50 rounded px-1.5 py-0.5 flex-shrink-0 w-16 text-center">{label}</span>
                     <span className="text-gray-600">{desc}</span>
                   </div>
                 ))}
