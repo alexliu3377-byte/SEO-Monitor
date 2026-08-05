@@ -51,7 +51,7 @@ export const CRAWL_RULES: RuleSection[] = [
     badge: 'step=rank · GitHub Actions · 目标 02:30 MYT（cron 01:30 MYT + 排队约 1h）',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每4个站点1个job）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT。失败/空站由 retry-crawl.yml (cron 30 21 UTC = 05:30 MYT) 自动补抓' },
-      { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关，cron 不会自动修改该字段' },
+      { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关（列表里显示为"涨跌"），cron 不会自动修改该字段' },
       { label: '数据来源', text: '爱站移动端 baidurank.aizhan.com/mobile/…，抓涨入词与跌出词及搜索量' },
       { label: '浏览器验证', text: '爱站的挑战机制自 2026-06 起变过三次，历史记录：① 2026-06-19 起，简单 JS 挑战（响应体内嵌 document.cookie="C3VK=...";window.open(...)，无真实跳转）；② 2026-07 起升级为约2分钟的浏览器指纹深度挑战（_jsc_sbu 环境探测，纯 fetch 无法通过），抓取一度改用 Playwright headless Chromium（createAizhanBrowserSession()，job 开始时过一次约2分钟验证，全 job 复用同一浏览器 context；若150秒内未通过则 AIZHAN_CHALLENGE_TIMEOUT 直接崩溃退出，且这类崩溃发生在任何单站日志写入之前，导致 retry-crawl.yml 的"按失败站点重试"完全查不到失败记录、白跑一次——2026-08-02 实测 07-31/08-01 两个 MYT 日期的 rank+rank-title 全站数据因此双双丢失且未被自动补上）；③ 2026-08 起验证又变简单，退回① 那种量级（一次请求内含 302+Set-Cookie 或内嵌 document.cookie 两种形式之一，均无需执行JS，一次额外往返即可拿到有效 cookie）。当前实现（lib/crawler-aizhan-http.ts，createAizhanHttpSession()）是纯 fetch，同时处理这两种 cookie 下发形式，整个抓取过程复用同一个 session（cookie 会随每次响应的 Set-Cookie / 内嵌值持续刷新，不会中途过期）。lib/crawler-browser.ts 的 Playwright 方案保留未删，若爱站之后重新上强度，换回来只需改 scripts/crawl.ts / scripts/crawl-rank.ts 里这一行 import' },
       { label: '并行策略', text: '排名段1-5最多2个并发（各自启动前随机延迟0-400ms），段内按页顺序，每页间隔300ms；每页请求带 Referer=上一页URL（第1页 Referer=站点首页），模拟真实"点下一页"的跳转链，而不是每次都用固定 Referer（2026-07-27 加入：实测发现翻页 100% 卡在第1-2页、从未翻到第3页，怀疑反爬专门检查翻页请求的 Referer 链；2026-08 切到纯 fetch 后继续保留这个逻辑；同批 2026-08-02 还发现5段完全并行会被爱站按 UND_ERR_SOCKET 拒绝大部分连接，改成2并发+抖动后消失）' },
@@ -96,7 +96,7 @@ export const CRAWL_RULES: RuleSection[] = [
     badge: 'step=rank-title · daily-crawl.yml · GitHub Actions · 02:30 MYT（cron 18:30 UTC）；retry 06:00 MYT',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 18 * * * UTC = 02:30 MYT)，动态 matrix job 并行（每2个站点1个job）；retry-crawl.yml (cron 0 22 UTC = 06:00 MYT) 智能重试：setup job 查询 activity_site_log 统计今日失败/空站数，仅为失败站创建 job（每站1个），scripts/crawl-rank.ts 以 --retry-failed 模式运行只处理当日失败站点；脚本：scripts/crawl-rank.ts；支持手动 workflow_dispatch 选 step=rank-title' },
-      { label: '抓取对象', text: 'sites 表中 has_rank_title=true 的站点；动态读取，每次运行重新查询' },
+      { label: '抓取对象', text: 'sites 表中 has_rank_title=true 的站点（网站管理列表里显示为"排名"）；动态读取，每次运行重新查询' },
       { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）+ PC端（/baidu/），各抓涨入和跌出，共 4 个组合；含标题（title）和排名页 URL（url）' },
       { label: '浏览器验证', text: '与 rank 步骤相同（详见 rank 小节"浏览器验证"完整历史），job 开始时用 createAizhanHttpSession() 拿一次会话 cookie（纯 fetch，一次额外往返，非 2026-07 那版约2分钟的 Playwright 验证），本 job 内全部站点/平台/涨跌组合复用同一 session；支持 --date=YYYY-MM-DD 补抓历史日期，用法同 rank 步骤' },
       { label: '并行策略', text: '排名段 1-5 同时并行（各开一个浏览器 page），段内按页顺序，每页间隔 300ms；4 个组合顺序执行，组合间隔随机 3-5 秒；站点间间隔 60 秒' },
@@ -125,7 +125,7 @@ export const CRAWL_RULES: RuleSection[] = [
     badge: 'step=tracking · GitHub Actions · 06:45 MYT（cron 22:45 UTC，index-pages retry 完成后）',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 45 22 * * * UTC = 06:45 MYT)，在所有主抓取和重试（含 index-pages retry 06:30 MYT）完成后运行；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可' },
-      { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同）' },
+      { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同；网站管理列表里显示为"排名"）' },
       { label: '竞品信号来源', text: '① 排名信号（by keyword + by URL）：site_keyword_ranks 表中 stat_date=today + platform=mobile 的当日涨跌词；还通过 site_keyword_ranks.url 与 raw_keywords.source_url 交叉匹配（URL 优先级高，能捕获 keyword 名称不一致的案例）；② 收录信号：site_indexed_pages 表中 first_seen_date=today 的新收录 URL，通过 source_url 反查 raw_keywords 得到关键词' },
       { label: '竞品过滤条件', text: '信号词必须同时存在于 raw_keywords（60天内有提交记录）才会被记录；无提交记录的信号词跳过' },
       { label: '信号词匹配查询方式', text: '信号词/信号URL 与 raw_keywords 交叉匹配、以及后续 keyword_volume/site_indexed_pages 查询，改用 Postgres RPC 函数（match_raw_keywords_by_keyword / match_raw_keywords_by_url / match_keyword_volume / match_site_indexed_pages，见 migration add_competitor_tracking_match_rpcs），一次调用传入全部信号词/URL数组，不再用 .in() 分批查询（2026-07-29：此前固定 .slice(0,500) 截断信号词列表导致 competitor_tracking_records 自建表以来一直是空的、规则中心8条规则成功/失败次数全部为0；改成分批 .in() 后中文关键词经URL编码体积膨胀，即使150个一批在连续多批请求下仍会不稳定报 HeadersOverflowError；改为 RPC 后参数走请求体不受URL长度限制，问题彻底解决）' },

@@ -116,8 +116,8 @@ function ManageCompetitorsModal({ groupName, initialDomains, allSites, onSave, o
         <div className="overflow-y-auto flex-1 px-6 py-3 space-y-4">
           {competitorSites.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-6">
-              网站管理中暂无开启「竞品追踪」的站点<br />
-              <span className="text-xs">请先在网站管理中为对应站点开启橙色竞品追踪开关</span>
+              网站管理中暂无开启「排名」的站点<br />
+              <span className="text-xs">请先在网站管理中为对应站点开启橙色排名开关</span>
             </p>
           ) : (
             cats.map(cat => {
@@ -298,8 +298,8 @@ function CompetitorOutcomesPanel({ site, outcomes, summary, loading }: {
   if (!site) return <div className="flex justify-center py-14 text-sm text-gray-400">该域名未在网站管理中找到</div>
   if (!site.has_rank_title) return (
     <div className="flex flex-col items-center justify-center py-14 gap-1">
-      <span className="text-sm text-gray-400">该竞品未开启竞品追踪抓取</span>
-      <span className="text-xs text-gray-300">请前往网站管理为 {site.domain} 开启橙色「竞品追踪」开关</span>
+      <span className="text-sm text-gray-400">该竞品未开启排名抓取</span>
+      <span className="text-xs text-gray-300">请前往网站管理为 {site.domain} 开启橙色「排名」开关</span>
     </div>
   )
 

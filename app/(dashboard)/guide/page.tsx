@@ -298,7 +298,7 @@ export default function GuidePage() {
                   <div>
                     <p className="font-medium text-gray-800 mb-1.5">HTML 抓取配置——每个"来源"是一套独立的抓取规则</p>
                     <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
-                      <p>· <b className="text-gray-700">列表页 URL</b>：一行一个，多页就多写几行（比如翻页翻到第2、3页）。</p>
+                      <p>· <b className="text-gray-700">列表页 URL</b>：填一个起始网址就行，<b>系统会自己往后自动翻页抓</b>（默认最多翻3页，抓到内容比上次更新的日期还旧就自动停），不用手动把每一页网址都列出来。一行是一个独立的起始入口，只有当同一个"来源"下有好几个不同的列表分类要一起抓时才需要多写几行（比如两个不同栏目各自的列表页）。</p>
                       <p>· <b className="text-gray-700">标题 / 日期 CSS 选择器</b>：抓每条内容的标题和发布日期。</p>
                       <p>· <b className="text-gray-700">文章链接 CSS 选择器</b>：选填，填了才会记录每条内容自己的 URL。</p>
                       <p>· <b className="text-gray-700">内容类型</b>：应用/游戏二选一，用于后续分类统计。</p>
@@ -309,6 +309,7 @@ export default function GuidePage() {
                   <div>
                     <p className="font-medium text-gray-800 mb-1.5">AI 帮我识别选择器</p>
                     <p>每个来源下面都有这个折叠区——不用自己手动摸 CSS 选择器（很容易摸错）。右键页面"检查"，复制一条列表项的 HTML 粘贴进去，点"AI 分析"，会自动给出标题/日期/链接三个选择器，点"应用到上面的选择器"就填好了。<b className="text-gray-700">如果这个站的列表是靠 JS 调 API 加载的（不是纯 HTML），把浏览器 Network 里抓到的那段 JSON 响应粘贴进去也一样能分析</b>，不用切换模式。</p>
+                    <p className="mt-1.5">⚠ 有个前提：这一段 HTML/JSON 里不能混着<b className="text-gray-700">其它类型</b>的内容（比如同一个列表里应用和游戏混排、都带日期）——AI 只会给一套选择器，页面混着别的类型就会连带错误地把不相关的内容也抓进来。遇到这种混排列表，要按类型分别当成不同的"来源"各加一份、各自用更精确的选择器只圈住自己要的那一块。</p>
                   </div>
 
                   <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-600">
@@ -316,7 +317,7 @@ export default function GuidePage() {
                   </div>
 
                   <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
-                    ⚠ <b>无限下拉的列表页</b>：先打开浏览器 DevTools 的 Network 面板，往下滚动看看是不是有 JS 在偷偷调接口翻页。如果是，把这些分页各自的 URL（或者接口地址）都当成"来源"依次加进列表里一起抓，别只抓第一屏。<code className="text-xs bg-white px-1 rounded">32r.com</code> 就是这种站，可以参考它的配置方式。
+                    ⚠ <b>无限下拉的列表页</b>：不是自动翻页就能解决的（那是给"点下一页"链接式翻页用的）。先打开浏览器 DevTools 的 Network 面板，往下滚动看看是不是有 JS 在调一个返回 JSON 的接口来加载更多。如果是，把接口地址里的页码换成 <code className="text-xs bg-white px-1 rounded">{'{page}'}</code> 占位符填进"列表页 URL"（比如 <code className="text-xs bg-white px-1 rounded">https://api.example.com/more?page={'{page}'}</code>），系统识别到这个占位符会自动切换成接口轮询模式，自己把页码从1加到底（最多30页）。<code className="text-xs bg-white px-1 rounded">32r.com</code> 就是这种站，可以参考它的配置方式。
                   </div>
 
                   <div>
@@ -328,8 +329,8 @@ export default function GuidePage() {
                     <p className="font-medium text-gray-800 mb-1.5">4 个开关——原则：这个站抓不到/不需要就关掉，别留着空跑</p>
                     <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
                       <p>· <b className="text-gray-700">关键词</b>：控制上面那套 HTML 配置要不要跑。自家网站不需要靠这个发现新词（新词是组员在分组任务里自己提交的），HTML 配置可以不填；没有日期字段、或更新很少的小站，也建议关掉，硬抓只会产生垃圾数据。</p>
-                      <p>· <b className="text-gray-700">涨跌</b>：追踪这个站点关键词排名的涨跌变化。如果爱站对这个站屏蔽了涨跌数据（部分站点爱站不开放），开了也抓不到，直接关掉。</p>
-                      <p>· <b className="text-gray-700">排名</b>：追踪这个站具体关键词排第几名，用于分组任务里"竞品涨排名"这类信号和分组报告的排名比对。</p>
+                      <p>· <b className="text-gray-700">涨跌</b>：抓这个站当天新涨入/跌出排名的词（有没有变化，不是具体第几名），是"竞品日收"里排名波动信号的来源。如果爱站对这个站屏蔽了涨跌数据（部分站点爱站不开放），开了也抓不到，直接关掉。</p>
+                      <p>· <b className="text-gray-700">排名</b>：抓这个站每个关键词具体排第几名。自家站点开这个是为了分组报告"成效追踪"能比对提交的词有没有排上名；竞品站点开这个是为了挖竞品排名信号（"竞品涨排名"这类 tab 的数据来源）。</p>
                       <p>· <b className="text-gray-700">收录页面</b>：追踪到具体 URL 级别的收录状态。现在只给<b>需要追踪成效</b>（有分组在这个站点上提交、要看排名/收录结果）的站点开，不是所有站点都开。</p>
                     </div>
                   </div>
