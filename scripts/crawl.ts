@@ -323,10 +323,13 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
   }
 
   // 清理旧数据（只由 group 0 执行，避免多个 job 同时清理）
+  // raw_keywords/rank_changes 2026-08-05 起改为永久保留，不再清理——同一个关键词
+  // 隔了很久又出现时，能靠历史记录判断是"之前见过的"而不是重新算一次新增
+  // （raw_keywords 的去重就是靠 site_id+content_date+keyword 精确匹配历史记录，
+  // 之前删了30天前的记录导致这个匹配会失效，同词同日期隔了30天又抓到就被误判成
+  // 新增）。
   if (isMainGroup) {
-    await supabase.rpc('delete_old_raw_keywords').maybeSingle()
-    await supabase.from('rank_changes').delete().lt('stat_date', getMalaysiaDate(-30))
-    await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-10))
+    await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-30))
   }
 
   const durationMs = Date.now() - stepStart

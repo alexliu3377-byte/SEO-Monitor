@@ -306,9 +306,8 @@ export async function GET(request: Request) {
       })
 
       // Cleanup old data (only on keywords step to avoid running 3x per day)
-      await supabase.rpc('delete_old_raw_keywords').maybeSingle()
-      await supabase.from('rank_changes').delete().lt('stat_date', getMalaysiaDate(-30))
-      await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-10))
+      // raw_keywords/rank_changes 永久保留，见 scripts/crawl.ts 里同名清理逻辑上的注释
+      await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-30))
       await supabase.from('activity_log').delete().lt('logged_at', new Date(Date.now() - 7 * 86400000).toISOString())
     }
 

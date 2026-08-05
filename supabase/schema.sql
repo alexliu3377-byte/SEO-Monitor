@@ -40,6 +40,9 @@ CREATE INDEX IF NOT EXISTS idx_raw_keywords_keyword ON raw_keywords(keyword);
 CREATE INDEX IF NOT EXISTS idx_raw_keywords_content_date ON raw_keywords(content_date);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_keywords_site_date_kw ON raw_keywords(site_id, content_date, keyword) WHERE content_date IS NOT NULL;
 
+-- 2026-08-05: raw_keywords 改成永久保留（同一关键词隔很久再出现要能靠历史记录
+-- 判断成"之前见过的"而不是又算一次新增），app 代码不再调用这个函数，函数本身
+-- 留着没删，如果以后想恢复自动清理可以重新调用它。
 -- Function to auto-delete raw_keywords older than 30 days
 CREATE OR REPLACE FUNCTION delete_old_raw_keywords()
 RETURNS void AS $$
