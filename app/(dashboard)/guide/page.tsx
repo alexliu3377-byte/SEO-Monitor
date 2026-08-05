@@ -263,13 +263,55 @@ export default function GuidePage() {
           </div>
         </div>
 
-        {/* ══════════ 管理员专区（占位） ══════════ */}
+        {/* ══════════ 管理员专区 ══════════ */}
         {canSeeAll && (
           <div id="admin-zone" className="scroll-mt-20">
-            <h2 className="text-lg font-semibold text-violet-700 mb-1">管理员专区</h2>
-            <p className="text-sm text-gray-400 mb-5">只有管理权限能看到这一块，教程还在整理中。</p>
-            <div className="bg-violet-50/60 border border-dashed border-violet-200 rounded-xl p-8 text-center text-sm text-violet-400">
-              规则中心 / 网站管理 / 抓取日志 的使用说明整理中，敬请期待。
+            <h2 className="text-lg font-semibold text-violet-700 mb-1">管理员</h2>
+            <p className="text-sm text-gray-400 mb-5">只有管理权限能看到这一块。</p>
+
+            <div className="space-y-4">
+              <Section id="admin-sites" className="bg-white rounded-xl border border-violet-200 p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-800">网站管理</h3>
+                  <ExtLink href="/sites">打开网站管理</ExtLink>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">站点要先在这里登记，才会进入整个监控/抓取系统——是所有数据的源头。</p>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>· <b className="text-gray-700">新增网站</b>：右上角"新增网站"，要填域名、站点名称、分类（大站/中站/小站）、关注级别（1=重点关注 / 2=侧重关注 / 3=普通关注）、友情链接，以及一份抓取用的 HTML 配置（内容类型、列表页 URL、标题/日期/文章链接的 CSS 选择器等）。</p>
+                  <p>· <b className="text-gray-700">列表操作</b>：编辑、删除（<span className="text-red-500">删除不可恢复</span>），可按域名/关注级别/分类筛选。</p>
+                  <p>· <b className="text-gray-700">4 个开关</b>：启用抓取、排名数据、竞品追踪、收录页面追踪，表格里直接点就能改。</p>
+                  <p className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">⚠ "排名数据"和"竞品追踪"两个开关不能同时开——同时开启会弹出数据迁移确认框，迁移会丢弃一部分字段（比如 PC 端数据），操作前务必看清楚提示再确认。</p>
+                </div>
+              </Section>
+
+              <Section id="admin-crawl-log" className="bg-white rounded-xl border border-violet-200 p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-800">抓取日志</h3>
+                  <ExtLink href="/crawl-log">打开抓取日志</ExtLink>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">监控每天的抓取任务有没有正常跑完，纯监控+出问题时补救，不是配置页。</p>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>· <b className="text-gray-700">今日任务卡片</b>：关键词/权重/排名 3 张，显示成功/空/失败站点数；有异常可以"查看"展开具体是哪些站点出问题，或者点"重试"勾选失败/空的站点重新抓一次。</p>
+                  <p>· <b className="text-gray-700">运行记录表</b>：按日期/类型/域名筛选，也有"运行异常"快捷筛选；每行能"查看"这次运行的站点明细。</p>
+                  <p>· <b className="text-gray-700">"规则"按钮</b>：点开会弹出这一类抓取的完整说明——触发时间/触发方式、抓取对象、数据来源、限流策略、写入哪张表、已知风险，排查"为什么这个站点没抓到"时先看这个。</p>
+                </div>
+              </Section>
+
+              <Section id="admin-home" className="bg-white rounded-xl border border-violet-200 p-5">
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">首页快报里的管理员功能</h3>
+                <p className="text-sm text-gray-600 mb-3">普通成员看到的首页快报没有导出功能，管理员额外多两处：</p>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>· <b className="text-gray-700">收录变动卡片</b>——"涨词导出"/"跌词导出"：点击后要再输一次爱站账号密码验证，成功后按域名+日期范围（最多7天，爱站接口限制）逐日抓取涨入/跌出的关键词，生成一份按天分 sheet 的 Excel 下载。</p>
+                  <p>· <b className="text-gray-700">搜索量查询卡片</b>——"导出今日"/"导出全部"：同样要账号密码验证，导出关键词+搜索量的 CSV。</p>
+                </div>
+              </Section>
+
+              <Section id="admin-rules" className="bg-white rounded-xl border border-dashed border-violet-200 p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-800">规则中心</h3>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-500 border border-violet-200">开发中</span>
+                </div>
+              </Section>
             </div>
           </div>
         )}
