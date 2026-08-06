@@ -140,7 +140,7 @@ export default function RulesPage() {
     if (role === 'normal') router.replace('/task-groups')
   }, [role, router])
 
-  const [activeTab, setActiveTab] = useState<'research' | 'suggestions' | 'ruleList'>('research')
+  const [activeTab, setActiveTab] = useState<'research' | 'suggestions' | 'ruleList' | 'monthlyTrend'>('research')
   const [allSites, setAllSites] = useState<SiteInfo[]>([])
 
   useEffect(() => {
@@ -169,11 +169,16 @@ export default function RulesPage() {
           className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'ruleList' ? 'text-indigo-600 border-indigo-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
           规则列表
         </button>
+        <button onClick={() => setActiveTab('monthlyTrend')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'monthlyTrend' ? 'text-rose-600 border-rose-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          月度趋势
+        </button>
       </div>
 
       {activeTab === 'research' && <ResearchTab allSites={allSites} />}
       {activeTab === 'suggestions' && <SuggestionsTab allSites={allSites} onStartResearch={() => setActiveTab('research')} />}
       {activeTab === 'ruleList' && <RuleListTab canEdit={canEdit} isSuper={role === 'super'} allSites={allSites} />}
+      {activeTab === 'monthlyTrend' && <MonthlyTrendTab />}
     </div>
   )
 }
@@ -1102,5 +1107,101 @@ function RuleListTab({ canEdit, isSuper, allSites }: { canEdit: boolean; isSuper
         </div>
       )}
     </>
+  )
+}
+
+// ══════════════════════════════ 月度趋势 ══════════════════════════════
+
+interface MonthlyTrendPoint { month: string; app: number; game: number }
+interface MonthlyDrillItem { keyword: string; contentType: string; volume: number }
+
+function MonthlyTrendTab() {
+  const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
+  const [earliestMonth, setEarliestMonth] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [drillMonth, setDrillMonth] = useState<string | null>(null)
+  const [drillData, setDrillData] = useState<{ app: MonthlyDrillItem[]; game: MonthlyDrillItem[] } | null>(null)
+  const [drillLoading, setDrillLoading] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/rules/monthly-trend').then(r => r.json()).then(d => {
+      setMonths(d.months ?? [])
+      setEarliestMonth(d.earliestMonth ?? null)
+    }).finally(() => setLoading(false))
+  }, [])
+
+  function openDrill(month: string) {
+    setDrillMonth(month)
+    setDrillLoading(true)
+    setDrillData(null)
+    fetch(`/api/rules/monthly-trend?month=${month}`).then(r => r.json()).then(d => setDrillData({ app: d.app ?? [], game: d.game ?? [] })).finally(() => setDrillLoading(false))
+  }
+
+  const maxCount = Math.max(1, ...months.map(m => m.app + m.game))
+
+  if (loading) return <Spinner />
+
+  return (
+    <div>
+      <p className="text-sm text-gray-500 mb-1">全部监控站点按月汇总新增关键词数量（应用/游戏），用来发现"哪个月哪个类目在涨"这种跨站点规律。</p>
+      {earliestMonth && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+          ⚠ 数据从 {earliestMonth} 才开始有——这张表之前是30天自动清理，2026-08-05 才改成永久保留，再往前的历史已经清掉了。跨年/跨月的季节性规律要再攒几个月数据才看得出来。
+        </p>
+      )}
+      {months.length === 0 ? (
+        <p className="text-sm text-gray-300 text-center py-10">暂无数据</p>
+      ) : (
+        <div className="space-y-2 mb-6">
+          {months.map(m => (
+            <button key={m.month} onClick={() => openDrill(m.month)}
+              className={`w-full text-left px-4 py-2.5 rounded-lg border transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50/40' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium text-gray-800">{m.month}</span>
+                <span className="text-xs text-gray-400">应用 {m.app} · 游戏 {m.game}</span>
+              </div>
+              <div className="flex h-2 rounded-full overflow-hidden bg-gray-100">
+                <div className="bg-blue-400" style={{ width: `${(m.app / maxCount) * 100}%` }} />
+                <div className="bg-purple-400" style={{ width: `${(m.game / maxCount) * 100}%` }} />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {drillMonth && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+            <span className="text-sm font-semibold text-gray-700">{drillMonth} 热门新增词（按搜索量排序）</span>
+          </div>
+          {drillLoading ? <Spinner /> : drillData && (
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-blue-600 px-4 py-2 bg-blue-50/40">应用</p>
+                <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.app.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.app.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{fmtVol(i.volume)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-purple-600 px-4 py-2 bg-purple-50/40">游戏</p>
+                <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.game.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.game.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{fmtVol(i.volume)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
