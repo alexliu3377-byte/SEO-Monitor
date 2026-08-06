@@ -41,6 +41,12 @@ interface DrillPayload {
   domainWeights: Record<string, { pc: number; mobile: number }>
 }
 
+// 2026-08-06 从 规则中心 移到 近期榜单（这个功能本质是"跨站点趋势发现"，
+// 不是规则中心的"单站点研究"逻辑，放这边更贴切）。路由本身没变，还是需要
+// super/admin 角色——近期榜单页面里的 TapTap/好游快爆两个tab是公开资讯，
+// 但月度趋势读的是站内竞品域名/权重等内部数据，前端在 charts/page.tsx 里
+// 按角色隐藏了这个tab，这里的角色检查是双重保险。
+//
 // 全站（不分站点）按月汇总 raw_keywords 的应用/游戏新增数量，用来发现"哪个月
 // 哪个类目在涨"这种跨站点、跨时间的规律。
 //

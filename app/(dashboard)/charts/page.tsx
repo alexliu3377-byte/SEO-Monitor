@@ -1,8 +1,17 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { useUser } from '@/lib/user-context'
 
 // ── Helper components ─────────────────────────────────────────────────────────
+
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
 
 function RankBadge({ rank }: { rank: number }) {
   const colors =
@@ -87,7 +96,328 @@ function MoreButton({ total, shown, onClick }: { total: number; shown: number; o
   )
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ── 月度趋势（2026-08-06 从规则中心移过来——本质是跨站点趋势发现，放"近期
+// 榜单"更贴切，不是规则中心那种单站点研究逻辑）────────────────────────────
+
+interface MonthlyTrendPoint { month: string; app: number; game: number }
+interface MonthlyDrillItem { keyword: string; contentType: string; volume: number; domains: string[] }
+interface MonthlyRankChangeItem { keyword: string; type: string; volume: number; domains: string[] }
+interface MonthlyStreakItem { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }
+interface MonthlyVolumeChangeItem { keyword: string; volume: number; volumeChange: number; domains: string[] }
+interface MonthlyDrillData {
+  app: MonthlyDrillItem[]; game: MonthlyDrillItem[]
+  rankup: MonthlyRankChangeItem[]; rankdown: MonthlyRankChangeItem[]
+  continuousTrend: MonthlyStreakItem[]
+  volumeRising: MonthlyVolumeChangeItem[]; volumeFalling: MonthlyVolumeChangeItem[]
+  domainWeights: Record<string, { pc: number; mobile: number }>
+}
+
+// 跟分组任务详情弹窗（app/(dashboard)/task-groups/page.tsx 的"共新增词"/"竞品涨
+// 排名"面板）同一个展示方式——域名下面带一行 PC/M权重，不是单纯罗列域名。
+function DomainListModal({ title, domains, weights, onClose }: { title: string; domains: string[]; weights: Record<string, { pc: number; mobile: number }>; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-5 py-3 max-h-64 overflow-y-auto flex flex-wrap gap-1.5">
+          {domains.map(d => {
+            const w = weights[d]
+            return (
+              <span key={d} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-2 py-1 text-gray-700">
+                <span className="flex flex-col leading-tight">
+                  <span>{d}</span>
+                  {w && <span className="text-[10px] text-gray-400">PC{w.pc} · M{w.mobile}</span>}
+                </span>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MonthlyTrendTab() {
+  const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [chartYear, setChartYear] = useState('')
+  const [filterYear, setFilterYear] = useState('')
+  const [drillMonth, setDrillMonth] = useState<string | null>(null)
+  const [drillData, setDrillData] = useState<MonthlyDrillData | null>(null)
+  const [drillLoading, setDrillLoading] = useState(false)
+  const [domainModal, setDomainModal] = useState<{ title: string; domains: string[] } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/charts/monthly-trend').then(r => r.json()).then(d => setMonths(d.months ?? [])).finally(() => setLoading(false))
+  }, [])
+
+  // 数据一到手默认选最新年份+自动打开最新月份，不用用户手动点
+  useEffect(() => {
+    if (months.length === 0) return
+    const latestYear = months[months.length - 1].month.slice(0, 4)
+    setChartYear(latestYear)
+    setFilterYear(latestYear)
+    openDrill(months[months.length - 1].month)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [months])
+
+  function openDrill(month: string) {
+    setDrillMonth(month)
+    setDrillLoading(true)
+    setDrillData(null)
+    fetch(`/api/charts/monthly-trend?month=${month}`).then(r => r.json()).then(d => setDrillData({
+      app: d.app ?? [], game: d.game ?? [], rankup: d.rankup ?? [], rankdown: d.rankdown ?? [], continuousTrend: d.continuousTrend ?? [],
+      volumeRising: d.volumeRising ?? [], volumeFalling: d.volumeFalling ?? [], domainWeights: d.domainWeights ?? {},
+    })).finally(() => setDrillLoading(false))
+  }
+
+  function openDomainModal(title: string, domains: string[]) {
+    setDomainModal({ title, domains })
+  }
+
+  if (loading) return <Spinner />
+
+  const years = Array.from(new Set(months.map(m => m.month.slice(0, 4))))
+  const chartMonths = months.filter(m => m.month.startsWith(chartYear))
+  const filterMonths = months.filter(m => m.month.startsWith(filterYear))
+
+  return (
+    <div>
+      <p className="text-sm text-gray-500 mb-4">全部监控站点按月汇总新增关键词数量（应用/游戏），用来发现"哪个月哪个类目在涨"这种跨站点规律。</p>
+      {months.length === 0 ? (
+        <p className="text-sm text-gray-300 text-center py-10">暂无数据</p>
+      ) : (
+        <>
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-4">
+            <div className="flex items-center justify-between mb-5">
+              <span className="text-sm font-semibold text-gray-700">类目占比</span>
+              <select value={chartYear} onChange={e => setChartYear(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            {chartMonths.length === 0 ? (
+              <p className="text-sm text-gray-300 text-center py-10">{chartYear}年暂无数据</p>
+            ) : (
+              <div className="flex items-end gap-6 overflow-x-auto px-1">
+                {chartMonths.map(m => {
+                  const total = m.app + m.game
+                  const appPct = total === 0 ? 0 : Math.round(m.app / total * 100)
+                  const gamePct = total === 0 ? 0 : 100 - appPct
+                  return (
+                    <div key={m.month} className="flex flex-col items-center gap-2 flex-shrink-0">
+                      <div className="flex items-end gap-1.5 h-32">
+                        <div className="flex flex-col items-center justify-end h-full">
+                          {appPct > 0 && <span className="text-[11px] text-sky-600 font-medium mb-1">{appPct}%</span>}
+                          <div className="w-6 bg-sky-500 rounded-t transition-all" style={{ height: `${appPct}%` }} />
+                        </div>
+                        <div className="flex flex-col items-center justify-end h-full">
+                          {gamePct > 0 && <span className="text-[11px] text-violet-600 font-medium mb-1">{gamePct}%</span>}
+                          <div className="w-6 bg-violet-500 rounded-t transition-all" style={{ height: `${gamePct}%` }} />
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-500">{parseInt(m.month.slice(5), 10)}月</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-50">
+              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" />应用</span>
+              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-violet-500 inline-block" />游戏</span>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            {filterMonths.length === 0 ? (
+              <p className="text-sm text-gray-300 py-4">{filterYear}年暂无数据</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {filterMonths.map(m => (
+                  <button key={m.month} onClick={() => openDrill(m.month)}
+                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+                    {parseInt(m.month.slice(5), 10)}月
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {drillMonth && (drillLoading || !drillData ? <Spinner /> : (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 热门新增词（按搜索量排序）</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-blue-600 px-4 py-2 bg-blue-50/40">应用</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.app.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.app.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-purple-600 px-4 py-2 bg-purple-50/40">游戏</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.game.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.game.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 涨跌词（按搜索量排序，不分站点汇总）</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">涨入</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.rankup.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.rankup.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 涨入`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">跌出</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.rankdown.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.rankdown.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 跌出`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 搜索量变动（跟这个月涨跌词有关联的关键词，现在的搜索需求走势）</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">上涨</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.volumeRising.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeRising.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-green-600 ml-1">+{i.volumeChange.toLocaleString()}</span></span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量上涨`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">下跌</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.volumeFalling.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeFalling.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-red-500 ml-1">{i.volumeChange.toLocaleString()}</span></span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量下跌`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 排名连续涨跌（同一个词在同一个站，这个月连续多天同向变化）</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">连续上涨</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.continuousTrend.filter(i => i.type === 'rankup').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankup').map((i, idx) => (
+                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">连续下跌</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.continuousTrend.filter(i => i.type === 'rankdown').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankdown').map((i, idx) => (
+                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {domainModal && <DomainListModal title={domainModal.title} domains={domainModal.domains} weights={drillData?.domainWeights ?? {}} onClose={() => setDomainModal(null)} />}
+    </div>
+  )
+}
+
+// ── 新游榜单（TapTap + 好游快爆，原来这个页面唯一的内容）───────────────────
 
 interface HotItem { rank: number; name: string; labels: string[] }
 interface TodayGame { title: string; tag: string; startDate: string; startTime: string; endDate: string; rating: number | null; labels: string[]; icon: string }
@@ -164,7 +494,7 @@ function GameItem({ g, showDate }: { g: TodayGame; showDate?: boolean }) {
   )
 }
 
-export default function ChartsPage() {
+function NewGamesTab() {
   const [hotItems, setHotItems] = useState<HotItem[]>([])
   const [hotLoading, setHotLoading] = useState(true)
   const [todayGames, setTodayGames] = useState<TodayGame[]>([])
@@ -248,12 +578,7 @@ export default function ChartsPage() {
   ))
 
   return (
-    <div className="p-8 space-y-10">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold text-gray-900">近期榜单</h1>
-        <p className="text-gray-500 text-sm mt-1">TapTap · 好游快爆 榜单汇总</p>
-      </div>
-
+    <div className="space-y-10">
       {/* ── TapTap ── */}
       <div>
         <SectionHeader title="TapTap" color="bg-teal-500" updatedAt={hotUpdatedAt || '加载中…'} />
@@ -374,6 +699,47 @@ export default function ChartsPage() {
       </div>
 
       {modal && <MoreModal title={modal.title} items={modal.items} onClose={() => setModal(null)} />}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
+export default function ChartsPage() {
+  const { role } = useUser()
+  const canSeeMonthlyTrend = role === 'super' || role === 'admin'
+  const [activeTab, setActiveTab] = useState<'monthlyTrend' | 'newGames'>('newGames')
+
+  // 月度趋势涉及内部竞品域名/权重数据，只有admin/super能看；角色确认后自动
+  // 切过去（用户要求"第一个就是月度趋势"）。普通用户角色恒为'normal'，永远
+  // 不会切，也不会看到这个tab按钮，体验跟改动前完全一样。
+  useEffect(() => {
+    if (canSeeMonthlyTrend) setActiveTab('monthlyTrend')
+  }, [canSeeMonthlyTrend])
+
+  return (
+    <div className="p-8">
+      <div className="mb-2">
+        <h1 className="text-2xl font-bold text-gray-900">近期榜单</h1>
+        <p className="text-gray-500 text-sm mt-1">TapTap · 好游快爆 榜单汇总{canSeeMonthlyTrend ? ' · 月度趋势' : ''}</p>
+      </div>
+
+      {canSeeMonthlyTrend && (
+        <div className="flex border-b border-gray-100 my-6">
+          <button onClick={() => setActiveTab('monthlyTrend')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'monthlyTrend' ? 'text-rose-600 border-rose-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+            月度趋势
+          </button>
+          <button onClick={() => setActiveTab('newGames')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'newGames' ? 'text-teal-600 border-teal-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+            新游榜单
+          </button>
+        </div>
+      )}
+
+      <div className={canSeeMonthlyTrend ? '' : 'mt-6'}>
+        {activeTab === 'monthlyTrend' && canSeeMonthlyTrend ? <MonthlyTrendTab /> : <NewGamesTab />}
+      </div>
     </div>
   )
 }
