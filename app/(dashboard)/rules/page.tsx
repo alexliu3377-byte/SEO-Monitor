@@ -3,34 +3,56 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
-import { CompetitorAnalysis } from '@/components/competitor-analysis'
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface SiteInfo { id: string; domain: string; name: string }
 
-interface RuleDraft {
-  id: string
-  draft_category: 'new_rule' | 'rule_review'
-  pattern_description: string
-  case_count: number
-  draft_name: string
-  draft_type: 'add' | 'update' | 'mixed'
-  draft_rule_status: 'active' | 'inactive' | 'testing'
-  draft_description: string | null
-  draft_confidence: number
-  draft_stage_applicability: string[]
-  supporting_cases: string[]
-  status: 'pending' | 'approved' | 'rejected'
-  created_at: string
+interface SiteFull extends SiteInfo {
+  research_notes: string | null
+  game_categories: string[] | null
+  app_categories: string[] | null
+  publish_mode: 'auto' | 'manual' | null
+  publish_interval_notes: string | null
+  content_focus: 'new' | 'update' | 'mixed' | null
+  has_rank_title: boolean
 }
 
-interface DraftEditForm {
-  draft_name: string
-  draft_type: 'add' | 'update' | 'mixed'
-  draft_rule_status: 'active' | 'inactive' | 'testing'
-  draft_description: string
-  draft_confidence: number
-  draft_stage_applicability: string[]
+interface ResearchTask {
+  id: string
+  site_id: string
+  date_start: string
+  date_end: string
+  status: 'in_progress' | 'completed'
+  promoted_rule_id: string | null
+  created_at: string
+  completed_at: string | null
+  site: { domain: string; name: string } | null
 }
+
+interface EffectivenessRow {
+  keyword: string
+  discovery_date: string
+  source_url: string | null
+  rank_position: number | null
+  rank_type: string | null
+  rank_volume: number
+  effectiveness: string
+  score: number | null
+}
+
+interface ResearchTaskDetail {
+  task: ResearchTask & { ai_analysis: string | null; ai_candidate_rule: { name: string; type: string; description: string; confidence: number } | null }
+  site: SiteFull
+  weightTrend: { record_date: string; pc_weight: number; mobile_weight: number }[]
+  indexTrend: { snapshot_date: string; index_count: number }[]
+  rankChangeTrend: { date: string; rankup: number; rankdown: number }[]
+  newKeywordsTrend: { date: string; app: number; game: number }[]
+  effectivenessRows: EffectivenessRow[]
+}
+
+interface SiteSuggestion { siteId: string; domain: string; month: string; count: number; keywords: string[] }
+interface DecliningRule { name: string; histRate: number; recentRate: number; histCount: number; recentCount: number }
 
 interface Rule {
   id: string
@@ -53,16 +75,6 @@ interface Rule {
   tracked_tracking: number
   avg_score: number | null
   avg_score_count: number
-  source_key: string | null
-}
-
-interface SourceStat {
-  source: string
-  total: number
-  ranked: number
-  effective: number
-  avg_score: number | null
-  scored_count: number
 }
 
 interface RuleForm {
@@ -78,14 +90,13 @@ interface RuleForm {
   priority: number
   site_ids: string[]
   competitor_domains: string[]
-  source_key: string
 }
 
 const EMPTY_FORM: RuleForm = {
   name: '', type: 'add', status: 'active', source: 'manual',
   stage_applicability: [],
   description: '', confidence: 0, success_count: 0, fail_count: 0, priority: 0,
-  site_ids: [], competitor_domains: [], source_key: '',
+  site_ids: [], competitor_domains: [],
 }
 
 const STAGE_TYPES = ['起站期', '成长期', '成熟期', '通用']
@@ -107,16 +118,6 @@ const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }>
   testing:  { label: '测试中', bg: 'bg-yellow-50', text: 'text-yellow-700' },
 }
 
-const SOURCE_KEY_OPTIONS = ['竞品涨排名', '共新增词', '交叉词', '连续上涨词', '更新词库', '搜索量查询']
-const SOURCE_KEY_LABELS: Record<string, { bg: string; text: string }> = {
-  '竞品涨排名': { bg: 'bg-orange-50', text: 'text-orange-600' },
-  '共新增词':   { bg: 'bg-emerald-50', text: 'text-emerald-700' },
-  '交叉词':     { bg: 'bg-blue-50', text: 'text-blue-600' },
-  '连续上涨词': { bg: 'bg-purple-50', text: 'text-purple-600' },
-  '更新词库':   { bg: 'bg-rose-50', text: 'text-rose-600' },
-  '搜索量查询': { bg: 'bg-teal-50', text: 'text-teal-600' },
-}
-
 function Spinner() {
   return (
     <div className="flex items-center justify-center py-16">
@@ -125,13 +126,10 @@ function Spinner() {
   )
 }
 
-function SparkleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
-    </svg>
-  )
-}
+function fmtVol(v: number) { return v >= 10000 ? `${(v / 10000).toFixed(1)}万` : v.toLocaleString() }
+
+function todayMY() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10) }
+function daysAgoMY(n: number) { return new Date(Date.now() + 8 * 3600000 - n * 86400000).toISOString().slice(0, 10) }
 
 export default function RulesPage() {
   const { role } = useUser()
@@ -142,12 +140,587 @@ export default function RulesPage() {
     if (role === 'normal') router.replace('/task-groups')
   }, [role, router])
 
+  const [activeTab, setActiveTab] = useState<'research' | 'suggestions' | 'ruleList'>('research')
+  const [allSites, setAllSites] = useState<SiteInfo[]>([])
+
+  useEffect(() => {
+    fetch('/api/sites')
+      .then(r => r.json())
+      .then(d => setAllSites((d.sites ?? []).map((s: SiteInfo) => ({ id: s.id, domain: s.domain, name: s.name }))))
+  }, [])
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-4">
+        <h1 className="text-xl font-bold text-gray-900">规则中心</h1>
+        <p className="text-sm text-gray-400 mt-0.5">站点研究工作台 — 人工发起研究，AI 辅助分析，沉淀成规则</p>
+      </div>
+
+      <div className="flex border-b border-gray-100 mb-6">
+        <button onClick={() => setActiveTab('research')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'research' ? 'text-green-600 border-green-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          站点研究
+        </button>
+        <button onClick={() => setActiveTab('suggestions')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'suggestions' ? 'text-amber-600 border-amber-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          推荐研究
+        </button>
+        <button onClick={() => setActiveTab('ruleList')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'ruleList' ? 'text-indigo-600 border-indigo-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          规则列表
+        </button>
+      </div>
+
+      {activeTab === 'research' && <ResearchTab allSites={allSites} />}
+      {activeTab === 'suggestions' && <SuggestionsTab allSites={allSites} onStartResearch={() => setActiveTab('research')} />}
+      {activeTab === 'ruleList' && <RuleListTab canEdit={canEdit} isSuper={role === 'super'} allSites={allSites} />}
+    </div>
+  )
+}
+
+// ══════════════════════════════ 站点研究 ══════════════════════════════
+
+// 建新研究任务时可以从"推荐研究"tab带一个预填过来（site_id + 建议的时间范围），
+// 用 module 级变量简单传值，避免为这一个跨tab的小需求专门上 context/状态管理库。
+let pendingNewTask: { siteId: string; dateStart: string; dateEnd: string } | null = null
+
+function ResearchTab({ allSites }: { allSites: SiteInfo[] }) {
+  const [tasks, setTasks] = useState<ResearchTask[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showNewModal, setShowNewModal] = useState(false)
+
+  function loadTasks() {
+    setLoading(true)
+    fetch('/api/rules/research-tasks').then(r => r.json()).then(d => setTasks(d.tasks ?? [])).finally(() => setLoading(false))
+  }
+  useEffect(loadTasks, [])
+
+  useEffect(() => {
+    if (pendingNewTask) { setShowNewModal(true) }
+  }, [])
+
+  return (
+    <div className="grid grid-cols-[280px_1fr] gap-5">
+      <div>
+        <button onClick={() => setShowNewModal(true)}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors mb-3">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+          新建研究任务
+        </button>
+        {loading ? <Spinner /> : tasks.length === 0 ? (
+          <p className="text-xs text-gray-300 text-center py-8">还没有研究任务</p>
+        ) : (
+          <div className="space-y-1.5">
+            {tasks.map(t => (
+              <button key={t.id} onClick={() => setSelectedId(t.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${selectedId === t.id ? 'border-green-400 bg-green-50/60' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-800 truncate">{t.site?.domain ?? t.site_id.slice(0, 8)}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1 ${t.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                    {t.status === 'completed' ? '已完成' : '进行中'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5">{t.date_start} ~ {t.date_end}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        {selectedId ? (
+          <ResearchTaskDetailView taskId={selectedId} onChanged={loadTasks} />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-300">
+            <svg className="w-12 h-12 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <span className="text-sm">左边选一个研究任务，或者新建一个</span>
+          </div>
+        )}
+      </div>
+
+      {showNewModal && (
+        <NewResearchTaskModal
+          allSites={allSites}
+          onClose={() => { setShowNewModal(false); pendingNewTask = null }}
+          onCreated={(id) => { setShowNewModal(false); pendingNewTask = null; loadTasks(); setSelectedId(id) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function NewResearchTaskModal({ allSites, onClose, onCreated }: { allSites: SiteInfo[]; onClose: () => void; onCreated: (id: string) => void }) {
+  const prefill = pendingNewTask
+  const [siteQ, setSiteQ] = useState('')
+  const [siteId, setSiteId] = useState(prefill?.siteId ?? '')
+  const [dateStart, setDateStart] = useState(prefill?.dateStart ?? daysAgoMY(30))
+  const [dateEnd, setDateEnd] = useState(prefill?.dateEnd ?? todayMY())
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const filteredSites = siteQ.trim() ? allSites.filter(s => s.domain.includes(siteQ) || s.name.toLowerCase().includes(siteQ.toLowerCase())) : allSites
+
+  async function create() {
+    if (!siteId) { setErr('请选一个站点'); return }
+    setSaving(true); setErr('')
+    try {
+      const res = await fetch('/api/rules/research-tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_id: siteId, date_start: dateStart, date_end: dateEnd }),
+      })
+      const d = await res.json()
+      if (!res.ok) { setErr(d.error || '创建失败'); return }
+      onCreated(d.task.id)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-800">新建研究任务</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-6 py-4 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">站点</label>
+            {siteId ? (
+              <div className="flex items-center justify-between text-sm border border-gray-200 rounded-lg px-3 py-2">
+                <span className="text-gray-800">{allSites.find(s => s.id === siteId)?.domain}</span>
+                <button onClick={() => setSiteId('')} className="text-xs text-gray-400 hover:text-red-500">换一个</button>
+              </div>
+            ) : (
+              <>
+                <input type="text" value={siteQ} onChange={e => setSiteQ(e.target.value)} placeholder="搜索域名…" autoFocus
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+                <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-lg bg-gray-50 p-1.5 space-y-0.5">
+                  {filteredSites.slice(0, 50).map(s => (
+                    <button key={s.id} onClick={() => setSiteId(s.id)}
+                      className="w-full text-left px-2 py-1.5 rounded hover:bg-white text-sm text-gray-700 transition-colors">
+                      {s.domain} <span className="text-xs text-gray-400">{s.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">时间范围</label>
+            <div className="flex items-center gap-1.5 mb-2">
+              {[30, 60, 90].map(n => (
+                <button key={n} onClick={() => { setDateStart(daysAgoMY(n)); setDateEnd(todayMY()) }}
+                  className="text-xs px-2.5 py-1 rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">近{n}天</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+              <span className="text-gray-300">~</span>
+              <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} max={todayMY()}
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+            </div>
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+          <button onClick={create} disabled={saving || !siteId}
+            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+            {saving ? '创建中…' : '创建'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const CATEGORY_FIELDS: { key: 'game_categories' | 'app_categories'; label: string }[] = [
+  { key: 'game_categories', label: '游戏分类' },
+  { key: 'app_categories', label: '应用分类' },
+]
+
+function ResearchTaskDetailView({ taskId, onChanged }: { taskId: string; onChanged: () => void }) {
+  const [detail, setDetail] = useState<ResearchTaskDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [siteForm, setSiteForm] = useState<Partial<SiteFull> | null>(null)
+  const [catInput, setCatInput] = useState<Record<string, string>>({ game_categories: '', app_categories: '' })
+  const [savingSite, setSavingSite] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [promoting, setPromoting] = useState(false)
+  const [showPromoteModal, setShowPromoteModal] = useState(false)
+
+  function load() {
+    setLoading(true)
+    fetch(`/api/rules/research-tasks/${taskId}`).then(r => r.json()).then(d => {
+      setDetail(d)
+      setSiteForm({
+        research_notes: d.site.research_notes ?? '',
+        game_categories: d.site.game_categories ?? [],
+        app_categories: d.site.app_categories ?? [],
+        publish_mode: d.site.publish_mode ?? null,
+        publish_interval_notes: d.site.publish_interval_notes ?? '',
+        content_focus: d.site.content_focus ?? null,
+      })
+    }).finally(() => setLoading(false))
+  }
+  useEffect(load, [taskId])
+
+  async function saveSiteProfile() {
+    if (!detail || !siteForm) return
+    setSavingSite(true)
+    try {
+      await fetch('/api/sites', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: detail.site.id, ...siteForm }),
+      })
+    } finally { setSavingSite(false) }
+  }
+
+  function addCategory(key: 'game_categories' | 'app_categories') {
+    const val = catInput[key].trim()
+    if (!val || !siteForm) return
+    const cur = siteForm[key] ?? []
+    if (cur.includes(val)) return
+    setSiteForm(prev => ({ ...prev, [key]: [...(prev?.[key] ?? []), val] }))
+    setCatInput(prev => ({ ...prev, [key]: '' }))
+  }
+  function removeCategory(key: 'game_categories' | 'app_categories', val: string) {
+    setSiteForm(prev => ({ ...prev, [key]: (prev?.[key] ?? []).filter(v => v !== val) }))
+  }
+
+  async function runAnalysis() {
+    setAnalyzing(true)
+    try {
+      const res = await fetch(`/api/rules/research-tasks/${taskId}/analyze`, { method: 'POST' })
+      const d = await res.json()
+      if (res.ok) setDetail(prev => prev ? { ...prev, task: { ...prev.task, ai_analysis: d.ai_analysis, ai_candidate_rule: d.ai_candidate_rule } } : prev)
+      else alert(d.error || 'AI 分析失败')
+    } finally { setAnalyzing(false) }
+  }
+
+  async function markComplete() {
+    await fetch(`/api/rules/research-tasks/${taskId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'complete' }),
+    })
+    load(); onChanged()
+  }
+
+  if (loading || !detail) return <Spinner />
+  const { task, site, weightTrend, indexTrend, rankChangeTrend, newKeywordsTrend, effectivenessRows } = detail
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">{site.domain}</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{site.name} · {task.date_start} ~ {task.date_end}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {task.status === 'in_progress' && (
+            <button onClick={markComplete} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">标记完成</button>
+          )}
+          <span className={`text-xs px-2.5 py-1 rounded-full ${task.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+            {task.status === 'completed' ? '已完成' : '进行中'}
+          </span>
+        </div>
+      </div>
+
+      {/* 人工补充信息 */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <p className="text-sm font-semibold text-gray-700">站点研究档案 <span className="text-xs text-gray-400 font-normal">（存在站点本身，下次研究这个站点直接带出来）</span></p>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">为什么监控它</label>
+          <textarea value={siteForm?.research_notes ?? ''} onChange={e => setSiteForm(p => ({ ...p, research_notes: e.target.value }))}
+            rows={2} placeholder="比如：同类目里数据表现突出，怀疑有可复制的打法"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {CATEGORY_FIELDS.map(({ key, label }) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {(siteForm?.[key] ?? []).map(v => (
+                  <span key={v} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 rounded px-2 py-0.5">
+                    {v}<button onClick={() => removeCategory(key, v)} className="text-blue-300 hover:text-red-500">×</button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input type="text" value={catInput[key]} onChange={e => setCatInput(p => ({ ...p, [key]: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && addCategory(key)} placeholder="输入后回车添加"
+                  className="flex-1 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">发布方式</label>
+            <div className="flex items-center gap-3 mb-1.5">
+              {(['auto', 'manual'] as const).map(m => (
+                <label key={m} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                  <input type="radio" checked={siteForm?.publish_mode === m} onChange={() => setSiteForm(p => ({ ...p, publish_mode: m }))} />
+                  {m === 'auto' ? '自动发布' : '手动发布'}
+                </label>
+              ))}
+            </div>
+            <input type="text" value={siteForm?.publish_interval_notes ?? ''} onChange={e => setSiteForm(p => ({ ...p, publish_interval_notes: e.target.value }))}
+              placeholder="间隔说明，比如：工作日每天1-2篇"
+              className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">内容侧重</label>
+            <div className="flex items-center gap-3">
+              {([['new', '新增为主'], ['update', '更新为主'], ['mixed', '都有']] as const).map(([v, l]) => (
+                <label key={v} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                  <input type="radio" checked={siteForm?.content_focus === v} onChange={() => setSiteForm(p => ({ ...p, content_focus: v }))} />
+                  {l}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <button onClick={saveSiteProfile} disabled={savingSite}
+            className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 transition-colors">
+            {savingSite ? '保存中…' : '保存档案'}
+          </button>
+        </div>
+      </div>
+
+      {/* 历史监控数据 */}
+      <div className="grid grid-cols-2 gap-4">
+        <TrendCard title="权重变化" rows={weightTrend} render={(r: { record_date: string; pc_weight: number; mobile_weight: number }) => `${r.record_date.slice(5)}：PC${r.pc_weight} / 移动${r.mobile_weight}`} />
+        <TrendCard title="收录量变化" rows={indexTrend} render={(r: { snapshot_date: string; index_count: number }) => `${r.snapshot_date.slice(5)}：${r.index_count.toLocaleString()}`} />
+        <TrendCard title="涨跌词（每日）" rows={rankChangeTrend} render={(r: { date: string; rankup: number; rankdown: number }) => `${r.date.slice(5)}：涨${r.rankup} / 跌${r.rankdown}`} />
+        <TrendCard title="新增关键词（每日）" rows={newKeywordsTrend} render={(r: { date: string; app: number; game: number }) => `${r.date.slice(5)}：应用${r.app} / 游戏${r.game}`} />
+      </div>
+
+      {/* 排名成效 */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-700">排名成效（按得分排序）</span>
+          <span className="text-xs text-gray-400">{effectivenessRows.length} 条</span>
+        </div>
+        {effectivenessRows.length === 0 ? (
+          <p className="text-sm text-gray-300 text-center py-8">这段时间没有追踪到排名数据（可能站点没开"排名"模式，或者这段时间没有命中）</p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+            {effectivenessRows.slice(0, 100).map((r, i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                <div className="min-w-0 flex-1">
+                  <span className="text-gray-800 truncate">{r.keyword}</span>
+                  {r.rank_position != null && <span className="text-xs text-gray-400 ml-2">第{r.rank_position}名 · 搜索量{fmtVol(r.rank_volume)}</span>}
+                </div>
+                <span className={`text-sm font-semibold ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
+                  {r.score == null ? '—' : r.score.toFixed(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* AI 分析 */}
+      <div className="bg-white rounded-xl border border-violet-200 p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-700">AI 分析</span>
+          <button onClick={runAnalysis} disabled={analyzing}
+            className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+            {analyzing ? '分析中…' : task.ai_analysis ? '重新分析' : '开始 AI 分析'}
+          </button>
+        </div>
+        {task.ai_analysis && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{task.ai_analysis}</p>}
+        {task.ai_candidate_rule && (
+          <div className="border border-dashed border-violet-200 rounded-lg p-3 bg-violet-50/40">
+            <p className="text-sm font-medium text-gray-800">候选规则：{task.ai_candidate_rule.name}</p>
+            <p className="text-xs text-gray-500 mt-1">{task.ai_candidate_rule.description}</p>
+            {!task.promoted_rule_id ? (
+              <button onClick={() => setShowPromoteModal(true)}
+                className="mt-2 text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors">转成规则</button>
+            ) : (
+              <p className="mt-2 text-xs text-green-600">✓ 已转成规则</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showPromoteModal && task.ai_candidate_rule && (
+        <PromoteRuleModal
+          taskId={taskId}
+          candidate={task.ai_candidate_rule}
+          onClose={() => setShowPromoteModal(false)}
+          onDone={() => { setShowPromoteModal(false); load(); onChanged() }}
+          promoting={promoting}
+          setPromoting={setPromoting}
+        />
+      )}
+    </div>
+  )
+}
+
+function TrendCard<T>({ title, rows, render }: { title: string; rows: T[]; render: (r: T) => string }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50/60">
+        <span className="text-xs font-semibold text-gray-600">{title}</span>
+      </div>
+      <div className="max-h-40 overflow-y-auto px-4 py-2">
+        {rows.length === 0 ? (
+          <p className="text-xs text-gray-300 py-3 text-center">无数据</p>
+        ) : (
+          <div className="space-y-1">
+            {rows.map((r, i) => <p key={i} className="text-xs text-gray-600">{render(r)}</p>)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PromoteRuleModal({ taskId, candidate, onClose, onDone, promoting, setPromoting }: {
+  taskId: string
+  candidate: { name: string; type: string; description: string; confidence: number }
+  onClose: () => void
+  onDone: () => void
+  promoting: boolean
+  setPromoting: (v: boolean) => void
+}) {
+  const [name, setName] = useState(candidate.name)
+  const [type, setType] = useState(candidate.type)
+  const [description, setDescription] = useState(candidate.description)
+  const [confidence, setConfidence] = useState(candidate.confidence)
+
+  async function submit() {
+    setPromoting(true)
+    try {
+      const res = await fetch(`/api/rules/research-tasks/${taskId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'promote', rule: { name, type, description, confidence } }),
+      })
+      if (res.ok) onDone()
+      else { const d = await res.json(); alert(d.error || '转成规则失败') }
+    } finally { setPromoting(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
+        <div className="px-6 py-4 border-b border-gray-100"><h3 className="text-base font-semibold text-gray-800">转成规则</h3></div>
+        <div className="px-6 py-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">规则名称</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">类型</label>
+            <select value={type} onChange={e => setType(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700">
+              <option value="add">新增</option><option value="update">更新</option><option value="mixed">混合</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">说明</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">信心度 %</label>
+            <input type="number" min={0} max={100} value={confidence} onChange={e => setConfidence(Number(e.target.value))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+          <button onClick={submit} disabled={promoting || !name.trim()}
+            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+            {promoting ? '创建中…' : '创建规则'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ══════════════════════════════ 推荐研究 ══════════════════════════════
+
+function SuggestionsTab({ allSites, onStartResearch }: { allSites: SiteInfo[]; onStartResearch: () => void }) {
+  const [siteSuggestions, setSiteSuggestions] = useState<SiteSuggestion[]>([])
+  const [decliningRules, setDecliningRules] = useState<DecliningRule[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/rules/research-suggestions').then(r => r.json()).then(d => {
+      setSiteSuggestions(d.siteSuggestions ?? [])
+      setDecliningRules(d.decliningRules ?? [])
+    }).finally(() => setLoading(false))
+  }, [])
+
+  function startResearch(s: SiteSuggestion) {
+    pendingNewTask = { siteId: s.siteId, dateStart: daysAgoMY(30), dateEnd: todayMY() }
+    onStartResearch()
+  }
+
+  if (loading) return <Spinner />
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-1">值得研究的站点</p>
+        <p className="text-xs text-gray-400 mb-3">近90天有效追踪、还没关联规则的案例，按"站点+月份"聚类——数量多说明可能有可复制的规律</p>
+        {siteSuggestions.length === 0 ? (
+          <p className="text-sm text-gray-300 py-6 text-center">暂无建议，数据不够或都已经关联了规则</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {siteSuggestions.map(s => (
+              <div key={`${s.siteId}|${s.month}`} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-semibold text-gray-800">{s.domain}</span>
+                  <span className="text-xs text-gray-400">{s.month}</span>
+                </div>
+                <p className="text-xs text-gray-500 mb-2">{s.count} 条有效案例：{s.keywords.join('、')}</p>
+                <button onClick={() => startResearch(s)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors">发起研究</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-1">效果下滑的规则</p>
+        <p className="text-xs text-gray-400 mb-3">近30天成功率比历史下降超过20个百分点，可能是打法过时了</p>
+        {decliningRules.length === 0 ? (
+          <p className="text-sm text-gray-300 py-6 text-center">暂无规则效果明显下滑</p>
+        ) : (
+          <div className="space-y-2">
+            {decliningRules.map(r => (
+              <div key={r.name} className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between">
+                <span className="text-sm text-gray-800">{r.name}</span>
+                <span className="text-xs text-gray-500">历史{r.histRate}%（{r.histCount}条）→ 近30天{r.recentRate}%（{r.recentCount}条）</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {allSites.length === 0 && null /* keep prop used */}
+    </div>
+  )
+}
+
+// ══════════════════════════════ 规则列表 ══════════════════════════════
+
+function RuleListTab({ canEdit, isSuper, allSites }: { canEdit: boolean; isSuper: boolean; allSites: SiteInfo[] }) {
   const [rules, setRules] = useState<Rule[]>([])
   const [loading, setLoading] = useState(true)
-  const [allSites, setAllSites] = useState<SiteInfo[]>([])
   const [allCompetitorDomains, setAllCompetitorDomains] = useState<string[]>([])
 
-  // Filters
   const [filterStatus, setFilterStatus] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterSource, setFilterSource] = useState('')
@@ -155,7 +728,6 @@ export default function RulesPage() {
   const [filterQ, setFilterQ] = useState('')
   const [rulePage, setRulePage] = useState(0)
 
-  // Modal
   const [showModal, setShowModal] = useState(false)
   const [editingRule, setEditingRule] = useState<Rule | null>(null)
   const [form, setForm] = useState<RuleForm>(EMPTY_FORM)
@@ -163,58 +735,12 @@ export default function RulesPage() {
   const [siteQ, setSiteQ] = useState('')
   const [compQ, setCompQ] = useState('')
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState<'rules' | 'ai' | 'drafts' | 'competitor'>('rules')
-
-  // Drafts state
-  const [drafts, setDrafts] = useState<RuleDraft[]>([])
-  const [draftsLoading, setDraftsLoading] = useState(false)
-  const [draftForms, setDraftForms] = useState<Record<string, DraftEditForm>>({})
-  const [draftActing, setDraftActing] = useState<Record<string, boolean>>({})
-
-  // Source stats
-  const [sourceStats, setSourceStats] = useState<SourceStat[]>([])
-
-  // AI state
-  const [aiPrompt, setAiPrompt] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiOutput, setAiOutput] = useState('')
-  const [proposedRule, setProposedRule] = useState<Partial<RuleForm> | null>(null)
-  const [savingProposal, setSavingProposal] = useState(false)
-
   useEffect(() => {
     setLoading(true)
     fetch('/api/rules')
       .then(r => r.json())
       .then(d => setRules((d.rules ?? []).map((r: Rule) => ({ ...r, site_ids: r.site_ids ?? [], competitor_domains: r.competitor_domains ?? [] }))))
       .finally(() => setLoading(false))
-
-    if (canEdit) {
-      setDraftsLoading(true)
-      fetch('/api/rules/drafts')
-        .then(r => r.json())
-        .then(d => {
-          const ds: RuleDraft[] = d.drafts ?? []
-          setDrafts(ds)
-          const forms: Record<string, DraftEditForm> = {}
-          for (const dr of ds) {
-            forms[dr.id] = {
-              draft_name: dr.draft_name,
-              draft_type: dr.draft_type,
-              draft_rule_status: dr.draft_rule_status,
-              draft_description: dr.draft_description ?? '',
-              draft_confidence: dr.draft_confidence,
-              draft_stage_applicability: dr.draft_stage_applicability ?? [],
-            }
-          }
-          setDraftForms(forms)
-        })
-        .finally(() => setDraftsLoading(false))
-    }
-
-    fetch('/api/sites')
-      .then(r => r.json())
-      .then(d => setAllSites((d.sites ?? []).map((s: SiteInfo) => ({ id: s.id, domain: s.domain, name: s.name }))))
 
     fetch('/api/task-groups')
       .then(r => r.json())
@@ -227,10 +753,6 @@ export default function RulesPage() {
         }
         setAllCompetitorDomains(domains.sort())
       })
-
-    fetch('/api/rules/source-stats')
-      .then(r => r.json())
-      .then(d => setSourceStats(d.stats ?? []))
   }, [])
 
   const filtered = useMemo(() => rules.filter(r => {
@@ -248,10 +770,6 @@ export default function RulesPage() {
   const pagedFiltered = filtered.slice(rulePage * RULE_PAGE_SIZE, (rulePage + 1) * RULE_PAGE_SIZE)
   useEffect(() => { setRulePage(0) }, [filterStatus, filterType, filterSource, filterStage, filterQ])
 
-  function openNew() {
-    setEditingRule(null); setForm(EMPTY_FORM); setSiteQ(''); setCompQ(''); setShowModal(true)
-  }
-
   function openEdit(rule: Rule) {
     setEditingRule(rule)
     setForm({
@@ -262,35 +780,21 @@ export default function RulesPage() {
       fail_count: rule.fail_count, priority: rule.priority,
       site_ids: rule.site_ids ?? [],
       competitor_domains: rule.competitor_domains ?? [],
-      source_key: rule.source_key ?? '',
     })
     setSiteQ(''); setCompQ(''); setShowModal(true)
   }
-
   function closeModal() { setShowModal(false); setEditingRule(null); setForm(EMPTY_FORM) }
 
   async function saveRule() {
-    if (!form.name.trim()) return
+    if (!editingRule || !form.name.trim()) return
     setSaving(true)
     try {
-      if (editingRule) {
-        const res = await fetch(`/api/rules/${editingRule.id}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
-        })
-        if (res.ok) {
-          const { rule } = await res.json()
-          setRules(prev => prev.map(r => r.id === rule.id ? { ...rule, site_ids: rule.site_ids ?? [], competitor_domains: rule.competitor_domains ?? [] } : r))
-        }
-      } else {
-        const res = await fetch('/api/rules', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
-        })
-        if (res.ok) {
-          const { rule } = await res.json()
-          setRules(prev => [...prev, { ...rule, site_ids: rule.site_ids ?? [], competitor_domains: rule.competitor_domains ?? [] }])
-        }
+      const res = await fetch(`/api/rules/${editingRule.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+      })
+      if (res.ok) {
+        const { rule } = await res.json()
+        setRules(prev => prev.map(r => r.id === rule.id ? { ...rule, site_ids: rule.site_ids ?? [], competitor_domains: rule.competitor_domains ?? [] } : r))
       }
       closeModal()
     } finally { setSaving(false) }
@@ -298,10 +802,7 @@ export default function RulesPage() {
 
   async function toggleStatus(rule: Rule) {
     const next = rule.status === 'active' ? 'inactive' : 'active'
-    const res = await fetch(`/api/rules/${rule.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
-    })
+    const res = await fetch(`/api/rules/${rule.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) })
     if (res.ok) {
       const { rule: updated } = await res.json()
       setRules(prev => prev.map(r => r.id === updated.id ? { ...updated, site_ids: updated.site_ids ?? [], competitor_domains: updated.competitor_domains ?? [] } : r))
@@ -315,763 +816,243 @@ export default function RulesPage() {
   }
 
   function toggleStage(val: string) {
-    setForm(prev => {
-      const arr = prev.stage_applicability
-      return { ...prev, stage_applicability: arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val] }
-    })
+    setForm(prev => { const arr = prev.stage_applicability; return { ...prev, stage_applicability: arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val] } })
   }
-
   function toggleSiteId(siteId: string) {
-    setForm(prev => ({
-      ...prev,
-      site_ids: prev.site_ids.includes(siteId) ? prev.site_ids.filter(id => id !== siteId) : [...prev.site_ids, siteId],
-    }))
+    setForm(prev => ({ ...prev, site_ids: prev.site_ids.includes(siteId) ? prev.site_ids.filter(id => id !== siteId) : [...prev.site_ids, siteId] }))
   }
-
   function toggleCompDomain(domain: string) {
-    setForm(prev => ({
-      ...prev,
-      competitor_domains: prev.competitor_domains.includes(domain) ? prev.competitor_domains.filter(d => d !== domain) : [...prev.competitor_domains, domain],
-    }))
+    setForm(prev => ({ ...prev, competitor_domains: prev.competitor_domains.includes(domain) ? prev.competitor_domains.filter(d => d !== domain) : [...prev.competitor_domains, domain] }))
   }
 
-  const successRate = (r: Rule) => {
-    const total = r.success_count + r.fail_count
-    return total > 0 ? Math.round(r.success_count / total * 100) : null
-  }
-
-  const filteredModalSites = siteQ.trim()
-    ? allSites.filter(s => s.domain.includes(siteQ) || s.name.toLowerCase().includes(siteQ.toLowerCase()))
-    : allSites
-  const filteredModalComps = compQ.trim()
-    ? allCompetitorDomains.filter(d => d.includes(compQ))
-    : allCompetitorDomains
-
-  const siteIdToDomain = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const s of allSites) m.set(s.id, s.domain)
-    return m
-  }, [allSites])
-
-  async function runAiAnalysis() {
-    if (!aiPrompt.trim() || aiLoading) return
-    setAiLoading(true)
-    setAiOutput('')
-    setProposedRule(null)
-    try {
-      const res = await fetch('/api/rules/ai-suggest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: aiPrompt }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        setAiOutput(`错误：${err.error ?? res.statusText}`)
-        return
-      }
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-      let fullText = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const parsed = JSON.parse(line.slice(6))
-            if (parsed.text) { fullText += parsed.text; setAiOutput(fullText) }
-          } catch { /* skip */ }
-        }
-      }
-      const m = fullText.match(/```json\n([\s\S]*?)\n```/)
-      if (m) {
-        try { setProposedRule(JSON.parse(m[1])) } catch { /* invalid JSON */ }
-      }
-    } finally {
-      setAiLoading(false)
-    }
-  }
-
-  async function saveProposedRule() {
-    if (!proposedRule || savingProposal) return
-    setSavingProposal(true)
-    try {
-      const res = await fetch('/api/rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...proposedRule, source: 'ai', priority: 0, success_count: 0, fail_count: 0 }),
-      })
-      if (res.ok) {
-        const { rule } = await res.json()
-        setRules(prev => [...prev, { ...rule, site_ids: rule.site_ids ?? [], competitor_domains: rule.competitor_domains ?? [] }])
-        setProposedRule(null)
-        setAiOutput(prev => prev.replace(/```json\n[\s\S]*?\n```/, '').trimEnd() + '\n\n✓ 规则已保存到全局规则库')
-      }
-    } finally {
-      setSavingProposal(false)
-    }
-  }
-
-  const aiDisplayText = proposedRule
-    ? aiOutput.replace(/```json\n[\s\S]*?\n```/, '').trim()
-    : aiOutput
+  const filteredModalSites = siteQ.trim() ? allSites.filter(s => s.domain.includes(siteQ) || s.name.toLowerCase().includes(siteQ.toLowerCase())) : allSites
+  const filteredModalComps = compQ.trim() ? allCompetitorDomains.filter(d => d.includes(compQ)) : allCompetitorDomains
+  const siteIdToDomain = useMemo(() => { const m = new Map<string, string>(); for (const s of allSites) m.set(s.id, s.domain); return m }, [allSites])
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-xl font-bold text-gray-900">规则中心</h1>
-        <p className="text-sm text-gray-400 mt-0.5">全局实验室 — 创建规则并分配到各站点</p>
+    <>
+      <p className="text-xs text-gray-400 mb-4">这里的规则都是从"站点研究"任务转出来的，或者是 #900/#901 这类自动打标规则——新规则只能从研究任务产出，这里不支持手动新建。</p>
+
+      <div className="flex items-center gap-2 flex-wrap mb-5">
+        <input type="text" value={filterQ} onChange={e => setFilterQ(e.target.value)} placeholder="搜索规则名称或说明…"
+          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 w-44 text-gray-700" />
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
+          <option value="">全部状态</option><option value="active">启用</option><option value="inactive">停用</option><option value="testing">测试中</option>
+        </select>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
+          <option value="">全部类型</option><option value="add">新增</option><option value="update">更新</option><option value="mixed">混合</option>
+        </select>
+        <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
+          <option value="">全部来源</option><option value="manual">手动</option><option value="experiment">实验</option><option value="data">数据</option><option value="ai">AI</option>
+        </select>
+        <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
+          <option value="">全部阶段</option>{STAGE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span className="text-xs text-gray-400 ml-1">{filtered.length} / {rules.length} 条</span>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-100 mb-6">
-        <button
-          onClick={() => setActiveTab('rules')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'rules' ? 'text-green-600 border-green-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
-        >
-          全局规则库
-        </button>
-        <button
-          onClick={() => setActiveTab('ai')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${activeTab === 'ai' ? 'text-violet-600 border-violet-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
-        >
-          <SparkleIcon className="w-3.5 h-3.5" />
-          AI 新建规则
-        </button>
-        {canEdit && (
-          <button
-            onClick={() => setActiveTab('drafts')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${activeTab === 'drafts' ? 'text-amber-600 border-amber-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
-          >
-            AI 草稿
-            {drafts.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full">{drafts.length}</span>
-            )}
-          </button>
-        )}
-        <button
-          onClick={() => setActiveTab('competitor')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'competitor' ? 'text-orange-600 border-orange-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}
-        >
-          竞品分析
-        </button>
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        {[
+          { label: '全部规则', value: rules.length, color: 'text-gray-800' },
+          { label: '启用中', value: rules.filter(r => r.status === 'active').length, color: 'text-green-600' },
+          { label: '测试中', value: rules.filter(r => r.status === 'testing').length, color: 'text-yellow-600' },
+          { label: '停用', value: rules.filter(r => r.status === 'inactive').length, color: 'text-gray-400' },
+        ].map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-gray-100 px-4 py-3">
+            <p className="text-xs text-gray-400">{s.label}</p>
+            <p className={`text-2xl font-bold mt-0.5 ${s.color}`}>{s.value}</p>
+          </div>
+        ))}
       </div>
 
-      {/* ── 全局规则库 tab ── */}
-      {activeTab === 'rules' && (
+      {loading ? <Spinner /> : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-300">
+          <svg className="w-12 h-12 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          <span className="text-sm">{rules.length === 0 ? '暂无规则，去"站点研究"发起一个任务' : '没有符合筛选条件的规则'}</span>
+        </div>
+      ) : (
         <>
-          {/* Toolbar */}
-          <div className="flex items-center gap-2 flex-wrap mb-5">
-            <input
-              type="text" value={filterQ} onChange={e => setFilterQ(e.target.value)}
-              placeholder="搜索规则名称或说明…"
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 w-44 text-gray-700"
-            />
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
-              <option value="">全部状态</option>
-              <option value="active">启用</option>
-              <option value="inactive">停用</option>
-              <option value="testing">测试中</option>
-            </select>
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
-              <option value="">全部类型</option>
-              <option value="add">新增</option>
-              <option value="update">更新</option>
-              <option value="mixed">混合</option>
-            </select>
-            <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
-              <option value="">全部来源</option>
-              <option value="manual">手动</option>
-              <option value="experiment">实验</option>
-              <option value="data">数据</option>
-              <option value="ai">AI</option>
-            </select>
-            <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
-              <option value="">全部阶段</option>
-              {STAGE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <span className="text-xs text-gray-400 ml-1">{filtered.length} / {rules.length} 条</span>
-            <div className="flex-1" />
-            {canEdit && (
-              <button onClick={openNew}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-                新建规则
-              </button>
-            )}
-          </div>
-
-          {/* Stats row */}
-          <div className="grid grid-cols-4 gap-3 mb-5">
-            {[
-              { label: '全部规则', value: rules.length, color: 'text-gray-800' },
-              { label: '启用中', value: rules.filter(r => r.status === 'active').length, color: 'text-green-600' },
-              { label: '测试中', value: rules.filter(r => r.status === 'testing').length, color: 'text-yellow-600' },
-              { label: '停用', value: rules.filter(r => r.status === 'inactive').length, color: 'text-gray-400' },
-            ].map(s => (
-              <div key={s.label} className="bg-white rounded-xl border border-gray-100 px-4 py-3">
-                <p className="text-xs text-gray-400">{s.label}</p>
-                <p className={`text-2xl font-bold mt-0.5 ${s.color}`}>{s.value}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Source stats — real feedback loop from member submissions */}
-          {sourceStats.length > 0 && (
-            <div className="mb-5">
-              <p className="text-xs font-medium text-gray-400 mb-2">今日推荐来源成效（组员认领记录）</p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {sourceStats.map(s => {
-                  const skl = SOURCE_KEY_LABELS[s.source]
-                  const effectiveRate = s.total > 0 ? Math.round(s.effective / s.total * 100) : null
-                  return (
-                    <div key={s.source} className={`flex-shrink-0 rounded-xl border px-4 py-3 min-w-[130px] ${skl ? `border-transparent ${skl.bg}` : 'bg-white border-gray-100'}`}>
-                      <p className={`text-xs font-semibold truncate ${skl ? skl.text : 'text-gray-700'}`}>{s.source}</p>
-                      <p className="text-xl font-bold text-gray-800 mt-1">{s.total.toLocaleString()}</p>
-                      <div className="mt-1 space-y-0.5">
-                        {effectiveRate !== null && (
-                          <p className="text-[10px] text-gray-500">有效率 <span className={`font-semibold ${effectiveRate >= 30 ? 'text-green-600' : 'text-amber-500'}`}>{effectiveRate}%</span></p>
-                        )}
-                        {s.avg_score !== null && (
-                          <p className="text-[10px] text-gray-500">均分 <span className={`font-semibold ${s.avg_score >= 60 ? 'text-green-600' : s.avg_score >= 35 ? 'text-amber-500' : 'text-red-400'}`}>{s.avg_score}pt</span></p>
-                        )}
-                        <p className="text-[10px] text-gray-400">{s.ranked} 已排名</p>
-                      </div>
+          <div className="space-y-2">
+            {pagedFiltered.map(rule => {
+              const tl = TYPE_LABELS[rule.type]; const sl = SOURCE_LABELS[rule.source]; const stl = STATUS_LABELS[rule.status]
+              const appliedSiteDomains = rule.site_ids.map(id => siteIdToDomain.get(id)).filter(Boolean) as string[]
+              return (
+                <div key={rule.id} className={`bg-white rounded-xl border transition-colors ${rule.status === 'inactive' ? 'border-gray-100 opacity-60' : 'border-gray-200'}`}>
+                  <div className="px-4 py-3 flex items-start gap-3">
+                    <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center">
+                      <span className="text-xs font-bold text-gray-500">#{rule.rule_number}</span>
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Rule list */}
-          {loading ? <Spinner /> : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-gray-300">
-              <svg className="w-12 h-12 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              <span className="text-sm">{rules.length === 0 ? '暂无规则，点击「新建规则」开始建立规则库' : '没有符合筛选条件的规则'}</span>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                {pagedFiltered.map(rule => {
-                  const sr = successRate(rule)
-                  const total = rule.success_count + rule.fail_count
-                  const tl = TYPE_LABELS[rule.type]
-                  const sl = SOURCE_LABELS[rule.source]
-                  const stl = STATUS_LABELS[rule.status]
-                  const appliedSiteDomains = rule.site_ids.map(id => siteIdToDomain.get(id)).filter(Boolean) as string[]
-                  return (
-                    <div key={rule.id} className={`bg-white rounded-xl border transition-colors ${rule.status === 'inactive' ? 'border-gray-100 opacity-60' : 'border-gray-200'}`}>
-                      <div className="px-4 py-3 flex items-start gap-3">
-                        <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center">
-                          <span className="text-xs font-bold text-gray-500">#{rule.rule_number}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-gray-800">{rule.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${tl.bg} ${tl.text}`}>{tl.label}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${stl.bg} ${stl.text}`}>{stl.label}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sl.bg} ${sl.text}`}>{sl.label}</span>
+                      </div>
+                      {rule.description && <p className="text-xs text-gray-500 mt-1 leading-relaxed line-clamp-2">{rule.description}</p>}
+                      {rule.stage_applicability.length > 0 && (
+                        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                          {rule.stage_applicability.map(s => <span key={s} className="text-[10px] bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded">{s}</span>)}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold text-gray-800">{rule.name}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${tl.bg} ${tl.text}`}>{tl.label}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${stl.bg} ${stl.text}`}>{stl.label}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sl.bg} ${sl.text}`}>{sl.label}</span>
-                            {rule.source_key && SOURCE_KEY_LABELS[rule.source_key] && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${SOURCE_KEY_LABELS[rule.source_key].bg} ${SOURCE_KEY_LABELS[rule.source_key].text}`}>
-                                {rule.source_key}
-                              </span>
+                      )}
+                      {(appliedSiteDomains.length > 0 || rule.competitor_domains.length > 0) && (
+                        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                          {appliedSiteDomains.slice(0, 4).map(d => <span key={d} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded border border-indigo-100">{d}</span>)}
+                          {appliedSiteDomains.length > 4 && <span className="text-[10px] text-gray-400">+{appliedSiteDomains.length - 4} 站点</span>}
+                          {rule.competitor_domains.slice(0, 3).map(d => <span key={d} className="text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded border border-orange-100">{d}</span>)}
+                          {rule.competitor_domains.length > 3 && <span className="text-[10px] text-gray-400">+{rule.competitor_domains.length - 3} 竞品</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0 text-right space-y-1.5">
+                      {(rule.tracked_success + rule.tracked_fail + rule.tracked_tracking) > 0 ? (() => {
+                        const trackedTotal = rule.tracked_success + rule.tracked_fail + rule.tracked_tracking
+                        const resolvedTotal = rule.tracked_success + rule.tracked_fail
+                        const trackedRate = resolvedTotal > 0 ? Math.round(rule.tracked_success / resolvedTotal * 100) : null
+                        return (
+                          <div className="text-right">
+                            {trackedRate !== null && <div className="mb-0.5"><span className={`text-base font-bold ${trackedRate >= 70 ? 'text-green-600' : trackedRate >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{trackedRate}%</span></div>}
+                            <div className="flex items-center gap-1.5 justify-end">
+                              <span className="text-[10px] text-green-600 font-medium">✓{rule.tracked_success}</span>
+                              <span className="text-[10px] text-red-400 font-medium">✗{rule.tracked_fail}</span>
+                              {rule.tracked_tracking > 0 && <span className="text-[10px] text-amber-500 font-medium">…{rule.tracked_tracking}</span>}
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{trackedTotal} 条追踪</p>
+                            {rule.avg_score !== null && rule.avg_score_count > 0 && (
+                              <div className="mt-1 pt-1 border-t border-gray-100 text-right">
+                                <span className={`text-xs font-bold ${rule.avg_score > 0 ? 'text-green-600' : rule.avg_score < 0 ? 'text-red-400' : 'text-gray-800'}`}>{rule.avg_score.toFixed(1)}</span>
+                                <span className="text-[10px] text-gray-400 ml-1">均分</span>
+                                <p className="text-[10px] text-gray-400">{rule.avg_score_count} 条认领</p>
+                              </div>
                             )}
                           </div>
-                          {rule.description && (
-                            <p className="text-xs text-gray-500 mt-1 leading-relaxed line-clamp-2">{rule.description}</p>
-                          )}
-                          {rule.stage_applicability.length > 0 && (
-                            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                              {rule.stage_applicability.map(s => (
-                                <span key={s} className="text-[10px] bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded">{s}</span>
-                              ))}
-                            </div>
-                          )}
-                          {(appliedSiteDomains.length > 0 || rule.competitor_domains.length > 0) && (
-                            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                              {appliedSiteDomains.slice(0, 4).map(d => (
-                                <span key={d} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded border border-indigo-100">{d}</span>
-                              ))}
-                              {appliedSiteDomains.length > 4 && (
-                                <span className="text-[10px] text-gray-400">+{appliedSiteDomains.length - 4} 站点</span>
-                              )}
-                              {rule.competitor_domains.slice(0, 3).map(d => (
-                                <span key={d} className="text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded border border-orange-100">{d}</span>
-                              ))}
-                              {rule.competitor_domains.length > 3 && (
-                                <span className="text-[10px] text-gray-400">+{rule.competitor_domains.length - 3} 竞品</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-shrink-0 text-right space-y-1.5">
-                          {(() => {
-                            // Source-key real stats from member submissions
-                            const srcStat = rule.source_key ? sourceStats.find(s => s.source === rule.source_key) : null
-                            if (srcStat) {
-                              const effectiveRate = srcStat.total > 0 ? Math.round(srcStat.effective / srcStat.total * 100) : null
-                              return (
-                                <div className="text-right">
-                                  {effectiveRate !== null && (
-                                    <div className="mb-0.5">
-                                      <span className={`text-base font-bold ${effectiveRate >= 30 ? 'text-green-600' : 'text-amber-500'}`}>{effectiveRate}%</span>
-                                    </div>
-                                  )}
-                                  <p className="text-[10px] text-gray-400">{srcStat.total.toLocaleString()} 条认领</p>
-                                  {srcStat.avg_score !== null && (
-                                    <p className="text-[10px] text-gray-500 mt-0.5">均分 <span className={`font-semibold ${srcStat.avg_score >= 60 ? 'text-green-600' : srcStat.avg_score >= 35 ? 'text-amber-500' : 'text-red-400'}`}>{srcStat.avg_score}pt</span></p>
-                                  )}
-                                  <p className="text-[10px] text-gray-400">{srcStat.ranked} 已排名</p>
-                                </div>
-                              )
-                            }
-                            // Competitor tracking stats
-                            if ((rule.tracked_success + rule.tracked_fail + rule.tracked_tracking) > 0) {
-                              const trackedTotal = rule.tracked_success + rule.tracked_fail + rule.tracked_tracking
-                              const resolvedTotal = rule.tracked_success + rule.tracked_fail
-                              const trackedRate = resolvedTotal > 0 ? Math.round(rule.tracked_success / resolvedTotal * 100) : null
-                              return (
-                                <div className="text-right">
-                                  {trackedRate !== null && (
-                                    <div className="mb-0.5">
-                                      <span className={`text-base font-bold ${trackedRate >= 70 ? 'text-green-600' : trackedRate >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{trackedRate}%</span>
-                                    </div>
-                                  )}
-                                  <div className="flex items-center gap-1.5 justify-end">
-                                    <span className="text-[10px] text-green-600 font-medium">✓{rule.tracked_success}</span>
-                                    <span className="text-[10px] text-red-400 font-medium">✗{rule.tracked_fail}</span>
-                                    {rule.tracked_tracking > 0 && <span className="text-[10px] text-amber-500 font-medium">…{rule.tracked_tracking}</span>}
-                                  </div>
-                                  <p className="text-[10px] text-gray-400 mt-0.5">{trackedTotal} 条追踪</p>
-                                  {rule.avg_score !== null && rule.avg_score_count > 0 && (
-                                    <div className="mt-1 pt-1 border-t border-gray-100 text-right">
-                                      <span className={`text-xs font-bold ${rule.avg_score >= 70 ? 'text-green-600' : rule.avg_score >= 40 ? 'text-amber-500' : 'text-red-400'}`}>{rule.avg_score}pt</span>
-                                      <span className="text-[10px] text-gray-400 ml-1">均分</span>
-                                      <p className="text-[10px] text-gray-400">{rule.avg_score_count} 条认领</p>
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            }
-                            if (sr !== null) {
-                              return (
-                                <div>
-                                  <span className="text-base font-bold text-green-600">{sr}%</span>
-                                  <p className="text-[10px] text-gray-400">{total} 次验证</p>
-                                </div>
-                              )
-                            }
-                            if (rule.confidence > 0) {
-                              return (
-                                <div>
-                                  <span className="text-base font-bold text-gray-400">{rule.confidence}%</span>
-                                  <p className="text-[10px] text-gray-400">信心度</p>
-                                </div>
-                              )
-                            }
-                            return null
-                          })()}
-                        </div>
-                        {canEdit && (
-                          <div className="flex-shrink-0 flex items-center gap-1 ml-1">
-                            <button onClick={() => openEdit(rule)} title="编辑"
-                              className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                            </button>
-                            <button onClick={() => toggleStatus(rule)} title={rule.status === 'active' ? '停用' : '启用'}
-                              className={`p-1.5 rounded-lg transition-colors ${rule.status === 'active' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-100'}`}>
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728M12 8v4m0 4h.01"/></svg>
-                            </button>
-                            {role === 'super' && (
-                              <button onClick={() => deleteRule(rule)} title="删除"
-                                className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                              </button>
-                            )}
-                          </div>
+                        )
+                      })() : rule.confidence > 0 ? (
+                        <div><span className="text-base font-bold text-gray-400">{rule.confidence}%</span><p className="text-[10px] text-gray-400">信心度</p></div>
+                      ) : null}
+                    </div>
+                    {canEdit && (
+                      <div className="flex-shrink-0 flex items-center gap-1 ml-1">
+                        <button onClick={() => openEdit(rule)} title="编辑" className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        </button>
+                        <button onClick={() => toggleStatus(rule)} title={rule.status === 'active' ? '停用' : '启用'}
+                          className={`p-1.5 rounded-lg transition-colors ${rule.status === 'active' ? 'text-green-500 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-100'}`}>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728M12 8v4m0 4h.01"/></svg>
+                        </button>
+                        {isSuper && (
+                          <button onClick={() => deleteRule(rule)} title="删除" className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          </button>
                         )}
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
-              {ruleTotalPages > 1 && (
-                <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                  <span className="text-xs text-gray-400">第 {rulePage * RULE_PAGE_SIZE + 1}–{Math.min((rulePage + 1) * RULE_PAGE_SIZE, filtered.length)} 条，共 {filtered.length} 条</span>
-                  <div className="flex items-center gap-2">
-                    <button disabled={rulePage === 0} onClick={() => setRulePage(p => p - 1)} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">上一页</button>
-                    <span className="text-xs text-gray-400 px-1">{rulePage + 1} / {ruleTotalPages}</span>
-                    <button disabled={rulePage >= ruleTotalPages - 1} onClick={() => setRulePage(p => p + 1)} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">下一页</button>
+                    )}
                   </div>
                 </div>
-              )}
-            </>
+              )
+            })}
+          </div>
+          {ruleTotalPages > 1 && (
+            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+              <span className="text-xs text-gray-400">第 {rulePage * RULE_PAGE_SIZE + 1}–{Math.min((rulePage + 1) * RULE_PAGE_SIZE, filtered.length)} 条，共 {filtered.length} 条</span>
+              <div className="flex items-center gap-2">
+                <button disabled={rulePage === 0} onClick={() => setRulePage(p => p - 1)} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">上一页</button>
+                <span className="text-xs text-gray-400 px-1">{rulePage + 1} / {ruleTotalPages}</span>
+                <button disabled={rulePage >= ruleTotalPages - 1} onClick={() => setRulePage(p => p + 1)} className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">下一页</button>
+              </div>
+            </div>
           )}
         </>
       )}
 
-      {/* ── AI 新建规则 tab ── */}
-      {activeTab === 'ai' && (
-        <div>
-          {/* Rate limit notice */}
-          <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5 flex items-start gap-2.5">
-            <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            <div>
-              <p className="text-xs font-medium text-amber-800">Gemini 免费版限制</p>
-              <p className="text-xs text-amber-700 mt-0.5">
-                每分钟最多 <span className="font-semibold">15 次</span>请求 · 每天最多 <span className="font-semibold">500 次</span>请求（gemini-3.1-flash-lite 免费套餐）
-              </p>
-            </div>
-          </div>
-
-          {/* Prompt input */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-4">
-            <label className="block text-sm font-semibold text-gray-800 mb-2">描述你想建立的规则</label>
-            <textarea
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runAiAnalysis() }}
-              rows={4}
-              disabled={aiLoading}
-              placeholder="例如：针对权重与竞品相对一样或较低的词，通过新增内容来抢排名。请分析我们目前有没有相关数据可以支撑这条规则…"
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-700 disabled:bg-gray-50 disabled:text-gray-400"
-            />
-            <div className="flex items-center justify-between mt-3">
-              <p className="text-xs text-gray-400">AI 会检查现有数据是否充足，数据不足时会说明需要哪些 cron 任务（可联系开发者添加）</p>
-              <button
-                onClick={runAiAnalysis}
-                disabled={aiLoading || !aiPrompt.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 bg-violet-500 text-white text-sm font-medium rounded-lg hover:bg-violet-600 disabled:opacity-50 transition-colors ml-3 flex-shrink-0"
-              >
-                {aiLoading
-                  ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  : <SparkleIcon className="w-3.5 h-3.5" />
-                }
-                {aiLoading ? '分析中…' : 'AI 分析'}
-              </button>
-            </div>
-          </div>
-
-          {/* AI Output */}
-          {aiOutput && (
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <SparkleIcon className="w-4 h-4 text-violet-500" />
-                <p className="text-sm font-semibold text-gray-800">分析结果</p>
-                {aiLoading
-                  ? <div className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin ml-1" />
-                  : <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-medium">完成</span>
-                }
-              </div>
-
-              <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {aiDisplayText}
-              </div>
-
-              {/* Rule proposal card */}
-              {proposedRule && !aiLoading && (
-                <div className="mt-5 border-t border-gray-100 pt-4">
-                  <p className="text-xs font-medium text-gray-500 mb-3">AI 建议的规则</p>
-                  <div className="bg-violet-50 border border-violet-100 rounded-xl p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800">{proposedRule.name}</p>
-                        {proposedRule.description && (
-                          <p className="text-xs text-gray-600 mt-1 leading-relaxed">{proposedRule.description}</p>
-                        )}
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                          {proposedRule.type && TYPE_LABELS[proposedRule.type] && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${TYPE_LABELS[proposedRule.type].bg} ${TYPE_LABELS[proposedRule.type].text}`}>
-                              {TYPE_LABELS[proposedRule.type].label}
-                            </span>
-                          )}
-                          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-violet-100 text-violet-700">AI 来源</span>
-                          {proposedRule.status && STATUS_LABELS[proposedRule.status] && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${STATUS_LABELS[proposedRule.status].bg} ${STATUS_LABELS[proposedRule.status].text}`}>
-                              {STATUS_LABELS[proposedRule.status].label}
-                            </span>
-                          )}
-                          {(proposedRule.stage_applicability ?? []).map(s => (
-                            <span key={s} className="text-[10px] bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded">{s}</span>
-                          ))}
-                          {proposedRule.confidence != null && (
-                            <span className="text-[10px] text-gray-500">信心度 {proposedRule.confidence}%</span>
-                          )}
-                        </div>
-                      </div>
-                      {canEdit && (
-                        <button
-                          onClick={saveProposedRule}
-                          disabled={savingProposal}
-                          className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-violet-500 text-white text-xs font-medium rounded-lg hover:bg-violet-600 disabled:opacity-50 transition-colors"
-                        >
-                          {savingProposal ? '保存中…' : '保存为规则'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── AI 草稿审核 tab ── */}
-      {activeTab === 'drafts' && canEdit && (
-        <div className="space-y-4">
-          {draftsLoading ? <Spinner /> : drafts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-gray-300 gap-3">
-              <SparkleIcon className="w-10 h-10" />
-              <span className="text-sm text-gray-400">暂无待审核草稿</span>
-              <p className="text-xs text-gray-400">每周一 AI 自动分析竞品数据生成规则建议，满足10条新案例后触发</p>
-            </div>
-          ) : drafts.map(dr => {
-            const f = draftForms[dr.id] ?? { draft_name: dr.draft_name, draft_type: dr.draft_type, draft_rule_status: dr.draft_rule_status, draft_description: dr.draft_description ?? '', draft_confidence: dr.draft_confidence, draft_stage_applicability: dr.draft_stage_applicability ?? [] }
-            const isNew = dr.draft_category === 'new_rule'
-            const acting = draftActing[dr.id]
-
-            function updateF(patch: Partial<DraftEditForm>) {
-              setDraftForms(prev => ({ ...prev, [dr.id]: { ...(prev[dr.id] ?? f), ...patch } }))
-            }
-
-            async function actDraft(action: 'approve' | 'reject') {
-              setDraftActing(prev => ({ ...prev, [dr.id]: true }))
-              try {
-                const latestF = draftForms[dr.id] ?? f
-                const body = action === 'approve' ? { action, ...latestF } : { action }
-                const res = await fetch(`/api/rules/drafts/${dr.id}`, {
-                  method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(body),
-                })
-                if (res.ok) {
-                  setDrafts(prev => prev.filter(d => d.id !== dr.id))
-                  if (action === 'approve' && isNew) {
-                    const d = await res.json()
-                    if (d.rule) setRules(prev => [...prev, { ...d.rule, site_ids: [], competitor_domains: [], tracked_success: 0, tracked_fail: 0, tracked_tracking: 0, avg_score: null, avg_score_count: 0 }])
-                  }
-                }
-              } finally { setDraftActing(prev => ({ ...prev, [dr.id]: false })) }
-            }
-
-            return (
-              <div key={dr.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                {/* Header */}
-                <div className={`px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-3 ${isNew ? 'bg-violet-50/50' : 'bg-amber-50/50'}`}>
-                  <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isNew ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>
-                      {isNew ? '新规则发现' : '规则预警'}
-                    </span>
-                    <span className="text-xs text-gray-500">{dr.case_count} 条案例</span>
-                    <span className="text-xs text-gray-400">{dr.created_at.slice(0, 10)}</span>
-                  </div>
-                  <div className="flex gap-1.5 flex-shrink-0">
-                    <button onClick={() => actDraft('reject')} disabled={acting}
-                      className="px-3 py-1.5 text-xs text-red-400 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors">
-                      驳回
-                    </button>
-                    <button onClick={() => actDraft('approve')} disabled={acting}
-                      className={`px-3 py-1.5 text-xs font-medium text-white rounded-lg disabled:opacity-50 transition-colors ${isNew ? 'bg-violet-500 hover:bg-violet-600' : 'bg-amber-500 hover:bg-amber-600'}`}>
-                      {acting ? '处理中…' : isNew ? '批准并创建规则' : '已确认'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* AI pattern description */}
-                <div className="px-4 pt-3 pb-2">
-                  <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
-                    <span className="font-medium text-gray-600">AI 发现：</span>{dr.pattern_description}
-                  </p>
-                </div>
-
-                {/* Editable form */}
-                <div className="px-4 pb-4 grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">规则名称</label>
-                    <input value={f.draft_name} onChange={e => updateF({ draft_name: e.target.value })}
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-800" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">类型</label>
-                    <select value={f.draft_type} onChange={e => updateF({ draft_type: e.target.value as DraftEditForm['draft_type'] })}
-                      className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-700 bg-white">
-                      <option value="add">新增</option>
-                      <option value="update">更新</option>
-                      <option value="mixed">混合</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">初始状态</label>
-                    <select value={f.draft_rule_status} onChange={e => updateF({ draft_rule_status: e.target.value as DraftEditForm['draft_rule_status'] })}
-                      className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-700 bg-white">
-                      <option value="testing">测试中</option>
-                      <option value="active">启用</option>
-                      <option value="inactive">停用</option>
-                    </select>
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">规则说明</label>
-                    <textarea value={f.draft_description} onChange={e => updateF({ draft_description: e.target.value })} rows={3}
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-800 resize-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">信心度 {f.draft_confidence}%</label>
-                    <input type="range" min={0} max={100} value={f.draft_confidence} onChange={e => updateF({ draft_confidence: Number(e.target.value) })}
-                      className="w-full accent-violet-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-2">适用阶段</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {STAGE_TYPES.map(s => (
-                        <button key={s} onClick={() => updateF({ draft_stage_applicability: f.draft_stage_applicability.includes(s) ? f.draft_stage_applicability.filter(x => x !== s) : [...f.draft_stage_applicability, s] })}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${f.draft_stage_applicability.includes(s) ? 'bg-violet-500 text-white border-violet-500' : 'border-gray-200 text-gray-500 hover:border-violet-300'}`}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Create/Edit modal */}
-      {showModal && (
+      {showModal && editingRule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[92vh] overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <h3 className="text-base font-semibold text-gray-800">{editingRule ? `编辑规则 #${editingRule.rule_number}` : '新建规则'}</h3>
+              <h3 className="text-base font-semibold text-gray-800">编辑规则 #{editingRule.rule_number}</h3>
               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
             <div className="px-6 py-4 space-y-4 overflow-y-auto">
-              {/* Name */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">规则名称 *</label>
                 <input type="text" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  autoFocus placeholder="简短描述这条规则的核心逻辑"
                   className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
               </div>
-              {/* Type + Status + Source */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">类型</label>
                   <select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value as RuleForm['type'] }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700">
-                    <option value="add">新增</option>
-                    <option value="update">更新</option>
-                    <option value="mixed">混合</option>
+                    <option value="add">新增</option><option value="update">更新</option><option value="mixed">混合</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">状态</label>
                   <select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value as RuleForm['status'] }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700">
-                    <option value="active">启用</option>
-                    <option value="testing">测试中</option>
-                    <option value="inactive">停用</option>
+                    <option value="active">启用</option><option value="testing">测试中</option><option value="inactive">停用</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">来源</label>
                   <select value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value as RuleForm['source'] }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700">
-                    <option value="manual">手动</option>
-                    <option value="experiment">实验</option>
-                    <option value="data">数据</option>
-                    <option value="ai">AI</option>
+                    <option value="manual">手动</option><option value="experiment">实验</option><option value="data">数据</option><option value="ai">AI</option>
                   </select>
                 </div>
               </div>
-              {/* Source key — links rule to today's recommendation source type */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">关联今日推荐来源</label>
-                <select value={form.source_key} onChange={e => setForm(p => ({ ...p, source_key: e.target.value }))}
-                  className="w-full text-sm border border-gray-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700">
-                  <option value="">不关联（仅显示竞品追踪数据）</option>
-                  {SOURCE_KEY_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-                </select>
-                <p className="text-[10px] text-gray-400 mt-1">关联后，规则卡片右侧显示该来源的真实认领成效数据</p>
-              </div>
-              {/* Stage */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-2">适用阶段</label>
                 <div className="flex gap-2 flex-wrap">
                   {STAGE_TYPES.map(s => (
                     <label key={s} className="flex items-center gap-1.5 cursor-pointer">
-                      <input type="checkbox" checked={form.stage_applicability.includes(s)}
-                        onChange={() => toggleStage(s)}
+                      <input type="checkbox" checked={form.stage_applicability.includes(s)} onChange={() => toggleStage(s)}
                         className="rounded border-gray-300 text-green-500 focus:ring-green-400" />
                       <span className="text-sm text-gray-700">{s}</span>
                     </label>
                   ))}
                 </div>
               </div>
-              {/* Description */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">规则说明</label>
-                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                  rows={3} placeholder="描述触发条件、执行动作、预期效果…"
+                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={3}
                   className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
               </div>
-              {/* Numbers */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">信心度 %</label>
-                  <input type="number" min={0} max={100} value={form.confidence}
-                    onChange={e => setForm(p => ({ ...p, confidence: Number(e.target.value) }))}
+                  <input type="number" min={0} max={100} value={form.confidence} onChange={e => setForm(p => ({ ...p, confidence: Number(e.target.value) }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">历史成功</label>
-                  <input type="number" min={0} value={form.success_count}
-                    onChange={e => setForm(p => ({ ...p, success_count: Number(e.target.value) }))}
+                  <input type="number" min={0} value={form.success_count} onChange={e => setForm(p => ({ ...p, success_count: Number(e.target.value) }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">历史失败</label>
-                  <input type="number" min={0} value={form.fail_count}
-                    onChange={e => setForm(p => ({ ...p, fail_count: Number(e.target.value) }))}
+                  <input type="number" min={0} value={form.fail_count} onChange={e => setForm(p => ({ ...p, fail_count: Number(e.target.value) }))}
                     className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
                 </div>
               </div>
-
-              {/* Apply to own sites */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  应用到自有站点
-                  {form.site_ids.length > 0 && <span className="ml-2 text-indigo-500 font-normal">已选 {form.site_ids.length} 个</span>}
+                  应用到自有站点 {form.site_ids.length > 0 && <span className="ml-2 text-indigo-500 font-normal">已选 {form.site_ids.length} 个</span>}
                 </label>
-                <input
-                  type="text" value={siteQ} onChange={e => setSiteQ(e.target.value)}
-                  placeholder="搜索站点…"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-gray-700"
-                />
+                <input type="text" value={siteQ} onChange={e => setSiteQ(e.target.value)} placeholder="搜索站点…"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-gray-700" />
                 <div className="max-h-36 overflow-y-auto border border-gray-100 rounded-lg bg-gray-50 p-2 space-y-1">
-                  {filteredModalSites.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-2">无匹配站点</p>
-                  ) : filteredModalSites.map(s => (
+                  {filteredModalSites.length === 0 ? <p className="text-xs text-gray-400 text-center py-2">无匹配站点</p> : filteredModalSites.map(s => (
                     <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded transition-colors">
-                      <input type="checkbox"
-                        checked={form.site_ids.includes(s.id)}
-                        onChange={() => toggleSiteId(s.id)}
+                      <input type="checkbox" checked={form.site_ids.includes(s.id)} onChange={() => toggleSiteId(s.id)}
                         className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-300 flex-shrink-0" />
                       <span className="text-sm text-gray-700 truncate">{s.domain}</span>
                       {s.name && <span className="text-xs text-gray-400 truncate">{s.name}</span>}
@@ -1079,27 +1060,19 @@ export default function RulesPage() {
                   ))}
                 </div>
               </div>
-
-              {/* Apply to competitors */}
               {allCompetitorDomains.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                    应用到竞品
-                    {form.competitor_domains.length > 0 && <span className="ml-2 text-orange-500 font-normal">已选 {form.competitor_domains.length} 个</span>}
+                    应用到竞品 {form.competitor_domains.length > 0 && <span className="ml-2 text-orange-500 font-normal">已选 {form.competitor_domains.length} 个</span>}
                   </label>
                   {allCompetitorDomains.length > 6 && (
-                    <input
-                      type="text" value={compQ} onChange={e => setCompQ(e.target.value)}
-                      placeholder="搜索竞品…"
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-orange-200 text-gray-700"
-                    />
+                    <input type="text" value={compQ} onChange={e => setCompQ(e.target.value)} placeholder="搜索竞品…"
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-orange-200 text-gray-700" />
                   )}
                   <div className="max-h-28 overflow-y-auto border border-gray-100 rounded-lg bg-gray-50 p-2 space-y-1">
                     {filteredModalComps.map(d => (
                       <label key={d} className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded transition-colors">
-                        <input type="checkbox"
-                          checked={form.competitor_domains.includes(d)}
-                          onChange={() => toggleCompDomain(d)}
+                        <input type="checkbox" checked={form.competitor_domains.includes(d)} onChange={() => toggleCompDomain(d)}
                           className="rounded border-gray-300 text-orange-500 focus:ring-orange-300 flex-shrink-0" />
                         <span className="text-sm text-gray-700">{d}</span>
                       </label>
@@ -1109,21 +1082,15 @@ export default function RulesPage() {
               )}
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-shrink-0">
-              <button onClick={closeModal}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+              <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
               <button onClick={saveRule} disabled={saving || !form.name.trim()}
                 className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
-                {saving ? '保存中…' : editingRule ? '保存修改' : '创建规则'}
+                {saving ? '保存中…' : '保存修改'}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* ── 竞品分析 tab ── */}
-      {activeTab === 'competitor' && (
-        <CompetitorAnalysis canEdit={canEdit} />
-      )}
-    </div>
+    </>
   )
 }

@@ -3,17 +3,11 @@
     "app/api/cron/route.ts": {
       "maxDuration": 300
     },
-    "app/api/rules/ai-discover/route.ts": {
-      "maxDuration": 60
-    },
     "app/api/environment/daily-snapshot/route.ts": {
       "maxDuration": 30
+    },
+    "app/api/rules/research-tasks/[id]/analyze/route.ts": {
+      "maxDuration": 60
     }
-  },
-  "crons": [
-    {
-      "path": "/api/rules/ai-discover",
-      "schedule": "30 23 * * 6"
-    }
-  ]
+  }
 }
