@@ -30,11 +30,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const { date_start, date_end } = task as { date_start: string; date_end: string }
 
+  // rank_changes/site_keyword_ranks 在数据量大的站点上可能远超 Supabase 客户端
+  // 默认的单次返回上限（曾在这个路由踩过——某站单独3天数据就有2.7万行，不设
+  // 上限会被静默截断成默认的1000/3000条，误判成"这段时间只有几天数据"）。
+  // 参照本项目其它地方的写法：先精确count，再按count设limit，杜绝截断。
+  const [{ count: rcCount }, { count: skrCount }] = await Promise.all([
+    service.from('rank_changes').select('id', { count: 'exact', head: true })
+      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end),
+    service.from('site_keyword_ranks').select('id', { count: 'exact', head: true })
+      .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end),
+  ])
+
   const [
     { data: weightRows },
     { data: indexRows },
     { data: rankChangeRows },
-    { data: trackingRows },
+    { data: rankRows },
     { data: rawKwRows },
   ] = await Promise.all([
     service.from('weight_history').select('record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
@@ -42,11 +53,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     service.from('index_snapshots').select('snapshot_date, index_count')
       .eq('site_id', site.id).gte('snapshot_date', date_start).lte('snapshot_date', date_end).order('snapshot_date'),
     service.from('rank_changes').select('stat_date, keyword, type, volume')
-      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end),
-    service.from('competitor_tracking_records')
-      .select('keyword, discovery_date, source_url, rank_position, rank_type, rank_volume, effectiveness')
-      .eq('site_id', site.id).gte('discovery_date', date_start).lte('discovery_date', date_end)
-      .order('discovery_date', { ascending: false }),
+      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end)
+      .limit(Math.max(rcCount ?? 0, 1)),
+    // "排名"模式（has_rank_title）数据——keyword+具体第几名+URL+搜索量都在这张表，
+    // 不需要像自己站点成效追踪那样去匹配 raw_keywords.source_url 找"是不是新增
+    // 的页面"：竞品这边直接看"这个词现在排第几、搜索量多少"就够评分了，跳过
+    // "新增/更新"归因这一步（2026-08-06 用户明确要求这样简化，那一步依赖的
+    // URL选择器目前49/51个竞品站点都没配）。
+    service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume, url')
+      .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
+      .order('stat_date', { ascending: false })
+      .limit(Math.max(skrCount ?? 0, 1)),
     service.from('raw_keywords').select('content_date, content_type')
       .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end),
   ])
@@ -70,17 +87,48 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     else d.app++
   }
 
+  // 每个关键词只留时间范围内最新一天的快照（site_keyword_ranks 一天一条，
+  // 已按 stat_date 降序排列，取每个 keyword 第一次出现的那条）。
+  const seenKw = new Set<string>()
+  const latestRankRows = ((rankRows ?? []) as {
+    keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number; url: string | null
+  }[]).filter(r => {
+    if (seenKw.has(r.keyword)) return false
+    seenKw.add(r.keyword)
+    return true
+  })
+
+  // 搜索量上涨交叉引用——跟热词雷达"搜索量上涨"tab同一张表（keyword_volume），
+  // 帮判断这个词排名涨了，是不是刚好赶上了搜索需求本身在涨（而不完全是这个
+  // 站SEO做得好）。keyword_volume 不分站点，按关键词精确匹配。
+  const rankedKeywords = latestRankRows.filter(r => r.rank_position != null).map(r => r.keyword)
+  const volumeTrendMap = new Map<string, { volume: number; prev_volume: number; volume_change: number }>()
+  for (let i = 0; i < rankedKeywords.length; i += 150) {
+    const { data: kv } = await service.from('keyword_volume')
+      .select('keyword, volume, prev_volume, volume_change')
+      .in('keyword', rankedKeywords.slice(i, i + 150))
+    for (const k of (kv ?? []) as { keyword: string; volume: number; prev_volume: number; volume_change: number }[]) {
+      volumeTrendMap.set(k.keyword, k)
+    }
+  }
+
   // "排名"模式的成效——跟分组报告成效追踪同一套打分公式（lib/outcome-score.ts）。
-  // 有 rank_position 就等于已经被收录（排名的前提是收录），isIndexed 这里恒传 true；
-  // competitor_tracking_records 不记录具体涨跌幅度，rankChange 传 null（只有 rank_type
-  // 方向，没有涨跌了几位的数字）。
-  const effectivenessRows = ((trackingRows ?? []) as {
-    keyword: string; discovery_date: string; source_url: string | null
-    rank_position: number | null; rank_type: string | null; rank_volume: number; effectiveness: string
-  }[]).map(r => ({
-    ...r,
-    score: r.rank_position != null ? computeOutcomeScore(r.rank_position, true, null, r.rank_volume) : null,
-  }))
+  // 有 rank_position 就等于已经被收录，isIndexed 恒传 true；rankChange 直接用
+  // site_keyword_ranks 自带的 prev_rank 字段算（不用像自己站点那样另外查历史）。
+  const effectivenessRows = latestRankRows.map(r => {
+    const rankChange = (r.rank_position != null && r.prev_rank != null) ? r.prev_rank - r.rank_position : null
+    const volTrend = volumeTrendMap.get(r.keyword) ?? null
+    return {
+      keyword: r.keyword,
+      stat_date: r.stat_date,
+      url: r.url,
+      rank_position: r.rank_position,
+      prev_rank: r.prev_rank,
+      volume: r.volume,
+      score: r.rank_position != null ? computeOutcomeScore(r.rank_position, true, rankChange, r.volume) : null,
+      searchVolumeRising: volTrend != null && volTrend.volume_change > 0 ? volTrend : null,
+    }
+  })
 
   return NextResponse.json({
     task,

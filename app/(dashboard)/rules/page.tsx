@@ -32,13 +32,13 @@ interface ResearchTask {
 
 interface EffectivenessRow {
   keyword: string
-  discovery_date: string
-  source_url: string | null
+  stat_date: string
+  url: string | null
   rank_position: number | null
-  rank_type: string | null
-  rank_volume: number
-  effectiveness: string
+  prev_rank: number | null
+  volume: number
   score: number | null
+  searchVolumeRising: { volume: number; prev_volume: number; volume_change: number } | null
 }
 
 interface ResearchTaskDetail {
@@ -504,18 +504,28 @@ function ResearchTaskDetailView({ taskId, onChanged }: { taskId: string; onChang
       {/* 排名成效 */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-700">排名成效（按得分排序）</span>
+          <div>
+            <span className="text-sm font-semibold text-gray-700">排名成效（按得分排序）</span>
+            <span className="text-xs text-gray-400 ml-2">带🔥的词，搜索量同期也在涨</span>
+          </div>
           <span className="text-xs text-gray-400">{effectivenessRows.length} 条</span>
         </div>
         {effectivenessRows.length === 0 ? (
-          <p className="text-sm text-gray-300 text-center py-8">这段时间没有追踪到排名数据（可能站点没开"排名"模式，或者这段时间没有命中）</p>
+          <p className="text-sm text-gray-300 text-center py-8">这段时间没有追踪到排名数据（要先在网站管理给这个站点开"排名"开关，"涨跌"开关不带具体排名）</p>
         ) : (
           <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
             {effectivenessRows.slice(0, 100).map((r, i) => (
               <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
                 <div className="min-w-0 flex-1">
-                  <span className="text-gray-800 truncate">{r.keyword}</span>
-                  {r.rank_position != null && <span className="text-xs text-gray-400 ml-2">第{r.rank_position}名 · 搜索量{fmtVol(r.rank_volume)}</span>}
+                  <span className="text-gray-800 truncate">
+                    {r.searchVolumeRising && <span className="mr-1" title={`搜索量 ${r.searchVolumeRising.prev_volume} → ${r.searchVolumeRising.volume}`}>🔥</span>}
+                    {r.keyword}
+                  </span>
+                  {r.rank_position != null && (
+                    <span className="text-xs text-gray-400 ml-2">
+                      第{r.rank_position}名{r.prev_rank != null && r.prev_rank !== r.rank_position ? `（原第${r.prev_rank}名）` : ''} · 搜索量{fmtVol(r.volume)}
+                    </span>
+                  )}
                 </div>
                 <span className={`text-sm font-semibold ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
                   {r.score == null ? '—' : r.score.toFixed(1)}
