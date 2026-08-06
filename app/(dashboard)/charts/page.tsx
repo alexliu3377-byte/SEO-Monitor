@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { useUser } from '@/lib/user-context'
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
@@ -706,39 +705,28 @@ function NewGamesTab() {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ChartsPage() {
-  const { role } = useUser()
-  const canSeeMonthlyTrend = role === 'super' || role === 'admin'
-  const [activeTab, setActiveTab] = useState<'monthlyTrend' | 'newGames'>('newGames')
-
-  // 月度趋势涉及内部竞品域名/权重数据，只有admin/super能看；角色确认后自动
-  // 切过去（用户要求"第一个就是月度趋势"）。普通用户角色恒为'normal'，永远
-  // 不会切，也不会看到这个tab按钮，体验跟改动前完全一样。
-  useEffect(() => {
-    if (canSeeMonthlyTrend) setActiveTab('monthlyTrend')
-  }, [canSeeMonthlyTrend])
+  const [activeTab, setActiveTab] = useState<'monthlyTrend' | 'newGames'>('monthlyTrend')
 
   return (
     <div className="p-8">
       <div className="mb-2">
         <h1 className="text-2xl font-bold text-gray-900">近期榜单</h1>
-        <p className="text-gray-500 text-sm mt-1">TapTap · 好游快爆 榜单汇总{canSeeMonthlyTrend ? ' · 月度趋势' : ''}</p>
+        <p className="text-gray-500 text-sm mt-1">TapTap · 好游快爆 榜单汇总 · 月度趋势</p>
       </div>
 
-      {canSeeMonthlyTrend && (
-        <div className="flex border-b border-gray-100 my-6">
-          <button onClick={() => setActiveTab('monthlyTrend')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'monthlyTrend' ? 'text-rose-600 border-rose-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
-            月度趋势
-          </button>
-          <button onClick={() => setActiveTab('newGames')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'newGames' ? 'text-teal-600 border-teal-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
-            新游榜单
-          </button>
-        </div>
-      )}
+      <div className="flex border-b border-gray-100 my-6">
+        <button onClick={() => setActiveTab('monthlyTrend')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'monthlyTrend' ? 'text-rose-600 border-rose-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          月度趋势
+        </button>
+        <button onClick={() => setActiveTab('newGames')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'newGames' ? 'text-teal-600 border-teal-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          新游榜单
+        </button>
+      </div>
 
-      <div className={canSeeMonthlyTrend ? '' : 'mt-6'}>
-        {activeTab === 'monthlyTrend' && canSeeMonthlyTrend ? <MonthlyTrendTab /> : <NewGamesTab />}
+      <div>
+        {activeTab === 'monthlyTrend' ? <MonthlyTrendTab /> : <NewGamesTab />}
       </div>
     </div>
   )

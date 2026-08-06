@@ -262,8 +262,8 @@ export default function GuidePage() {
                 <h3 className="text-sm font-semibold text-gray-800">近期榜单</h3>
                 <ExtLink href="/charts">打开近期榜单</ExtLink>
               </div>
-              <p className="text-sm text-gray-600 mb-2"><b>新游榜单</b>tab：纯资讯，汇总 TapTap 和好游快爆的游戏行业榜单（今日游戏、即将上线、热搜榜等），跟自家站点数据完全无关，了解行业动态、蹭热点选题时看看就好，<b>只供参考</b>。</p>
-              <p className="text-sm text-gray-600">{canSeeAll && <span className="text-[11px] font-semibold text-violet-700 mr-1">管理员</span>}<b>月度趋势</b>tab：全部监控站点按月汇总应用/游戏新增关键词占比，能看涨跌词、搜索量变动、排名连续涨跌，跨年按月对比，找"哪个月哪个类目该发力"这种规律。只有管理员能看到这个tab。</p>
+              <p className="text-sm text-gray-600 mb-2"><b>月度趋势</b>tab：全部监控站点按月汇总应用/游戏新增关键词占比，能看涨跌词、搜索量变动、排名连续涨跌，跨年按月对比，找"哪个月哪个类目该发力"这种规律。</p>
+              <p className="text-sm text-gray-600"><b>新游榜单</b>tab：纯资讯，汇总 TapTap 和好游快爆的游戏行业榜单（今日游戏、即将上线、热搜榜等），跟自家站点数据完全无关，了解行业动态、蹭热点选题时看看就好，<b>只供参考</b>。</p>
             </Section>
 
             <Section id="ref-hot-keywords" className="bg-white rounded-xl border border-gray-200 p-5">

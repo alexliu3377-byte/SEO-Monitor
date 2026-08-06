@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
-async function requireAdmin() {
+// 2026-08-06 用户明确要求"全部组员都能看"——不再限 super/admin，只要登录了
+// 就能查，跟这个页面另一个tab（TapTap/好游快爆）门槛一致。
+async function requireLogin() {
   const authClient = createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   return { service }
 }
 
@@ -42,10 +42,7 @@ interface DrillPayload {
 }
 
 // 2026-08-06 从 规则中心 移到 近期榜单（这个功能本质是"跨站点趋势发现"，
-// 不是规则中心的"单站点研究"逻辑，放这边更贴切）。路由本身没变，还是需要
-// super/admin 角色——近期榜单页面里的 TapTap/好游快爆两个tab是公开资讯，
-// 但月度趋势读的是站内竞品域名/权重等内部数据，前端在 charts/page.tsx 里
-// 按角色隐藏了这个tab，这里的角色检查是双重保险。
+// 不是规则中心的"单站点研究"逻辑，放这边更贴切）。
 //
 // 全站（不分站点）按月汇总 raw_keywords 的应用/游戏新增数量，用来发现"哪个月
 // 哪个类目在涨"这种跨站点、跨时间的规律。
@@ -58,7 +55,7 @@ interface DrillPayload {
 // 不会再变，算完一次写进 monthly_trend_cache 表，下次直接读缓存。只有还在
 // 变动的当月每次都会重新查（现在已经是 SQL 聚合，不再是瓶颈）。
 export async function GET(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireLogin()
   if (ctx.error) return ctx.error
   const { service } = ctx
 
