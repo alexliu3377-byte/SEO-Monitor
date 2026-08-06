@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { callGeminiJSON } from '@/lib/gemini'
 import { computeOutcomeScore } from '@/lib/outcome-score'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export const maxDuration = 60
 
@@ -26,33 +27,34 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const { date_start, date_end } = task as { date_start: string; date_end: string }
 
-  const [{ data: weightRows }, { data: indexRows }, { data: rankChangeRows }, { data: rankRows }, { data: rawKwRows }] = await Promise.all([
+  // Supabase/PostgREST 在这个项目上单次查询硬截到3000行，不管 .limit() 传多大——
+  // 固定 .limit(20000) 看起来够大，实际还是会被截断。改用 fetchAllRows 真分页。
+  const [{ data: weightRows }, { data: indexRows }, rankChanges, rankRows, rawKw] = await Promise.all([
     service.from('weight_history').select('record_date, pc_weight, mobile_weight')
       .eq('site_id', site.id).gte('record_date', date_start).lte('record_date', date_end).order('record_date'),
     service.from('index_snapshots').select('snapshot_date, index_count')
       .eq('site_id', site.id).gte('snapshot_date', date_start).lte('snapshot_date', date_end).order('snapshot_date'),
-    service.from('rank_changes').select('stat_date, type')
-      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end).limit(20000),
+    fetchAllRows<{ stat_date: string; type: string }>((from, to) =>
+      service.from('rank_changes').select('stat_date, type')
+        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end).range(from, to)),
     // 排名成效直接用 site_keyword_ranks（keyword+具体第几名+搜索量），跳过
     // "是不是新增页面"这层归因——那需要 raw_keywords.source_url 匹配，多数
     // 竞品站点还没配文章链接选择器，这条路径本来就走不通。
-    service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume')
-      .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
-      .order('stat_date', { ascending: false })
-      .limit(20000),
-    service.from('raw_keywords').select('content_date, content_type')
-      .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end).limit(20000),
+    fetchAllRows<{ keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number }>((from, to) =>
+      service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume')
+        .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
+        .order('stat_date', { ascending: false }).range(from, to)),
+    fetchAllRows<{ content_date: string | null; content_type: string }>((from, to) =>
+      service.from('raw_keywords').select('content_date, content_type')
+        .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end).range(from, to)),
   ])
 
   const weight = (weightRows ?? []) as { record_date: string; pc_weight: number; mobile_weight: number }[]
   const index = (indexRows ?? []) as { snapshot_date: string; index_count: number }[]
-  const rankChanges = (rankChangeRows ?? []) as { stat_date: string; type: string }[]
-  const rawKw = (rawKwRows ?? []) as { content_date: string | null; content_type: string }[]
 
   // 每个关键词只留最新一天的快照
   const seenKw = new Set<string>()
-  const latestRanks = ((rankRows ?? []) as { keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number }[])
-    .filter(r => { if (seenKw.has(r.keyword)) return false; seenKw.add(r.keyword); return true })
+  const latestRanks = rankRows.filter(r => { if (seenKw.has(r.keyword)) return false; seenKw.add(r.keyword); return true })
   const ranked = latestRanks.filter(r => r.rank_position != null)
 
   // 搜索量上涨交叉引用，跟主详情接口（route.ts）同一个逻辑

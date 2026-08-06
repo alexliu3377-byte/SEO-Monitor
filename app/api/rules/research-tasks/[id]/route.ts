@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeOutcomeScore } from '@/lib/outcome-score'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 async function requireAdmin() {
   const authClient = createClient()
@@ -30,47 +31,41 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const { date_start, date_end } = task as { date_start: string; date_end: string }
 
-  // rank_changes/site_keyword_ranks 在数据量大的站点上可能远超 Supabase 客户端
-  // 默认的单次返回上限（曾在这个路由踩过——某站单独3天数据就有2.7万行，不设
-  // 上限会被静默截断成默认的1000/3000条，误判成"这段时间只有几天数据"）。
-  // 参照本项目其它地方的写法：先精确count，再按count设limit，杜绝截断。
-  const [{ count: rcCount }, { count: skrCount }] = await Promise.all([
-    service.from('rank_changes').select('id', { count: 'exact', head: true })
-      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end),
-    service.from('site_keyword_ranks').select('id', { count: 'exact', head: true })
-      .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end),
-  ])
-
+  // rank_changes/site_keyword_ranks 在数据量大的站点上可能远超单次查询能返回的
+  // 行数——之前用"先精确count再按count设limit"防截断，但发现 Supabase/PostgREST
+  // 在这个项目上无论 .limit()/.range() 传多大都会硬截到3000行一次返回，count-then
+  // -limit 治标不治本（超过3000还是会被截断）。改用 fetchAllRows 真分页，翻页
+  // 拿全，见 lib/supabase-paginate.ts。
   const [
     { data: weightRows },
     { data: indexRows },
-    { data: rankChangeRows },
-    { data: rankRows },
+    rankChangeRows,
+    rankRows,
     { data: rawKwRows },
   ] = await Promise.all([
     service.from('weight_history').select('record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
       .eq('site_id', site.id).gte('record_date', date_start).lte('record_date', date_end).order('record_date'),
     service.from('index_snapshots').select('snapshot_date, index_count')
       .eq('site_id', site.id).gte('snapshot_date', date_start).lte('snapshot_date', date_end).order('snapshot_date'),
-    service.from('rank_changes').select('stat_date, keyword, type, volume')
-      .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end)
-      .limit(Math.max(rcCount ?? 0, 1)),
+    fetchAllRows<{ stat_date: string; keyword: string; type: string; volume: number }>((from, to) =>
+      service.from('rank_changes').select('stat_date, keyword, type, volume')
+        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end).range(from, to)),
     // "排名"模式（has_rank_title）数据——keyword+具体第几名+URL+搜索量都在这张表，
     // 不需要像自己站点成效追踪那样去匹配 raw_keywords.source_url 找"是不是新增
     // 的页面"：竞品这边直接看"这个词现在排第几、搜索量多少"就够评分了，跳过
     // "新增/更新"归因这一步（2026-08-06 用户明确要求这样简化，那一步依赖的
     // URL选择器目前49/51个竞品站点都没配）。
-    service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume, url')
-      .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
-      .order('stat_date', { ascending: false })
-      .limit(Math.max(skrCount ?? 0, 1)),
+    fetchAllRows<{ keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number; url: string | null }>((from, to) =>
+      service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume, url')
+        .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
+        .order('stat_date', { ascending: false }).range(from, to)),
     service.from('raw_keywords').select('content_date, content_type')
       .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end),
   ])
 
   // 涨跌（rank_changes）按天汇总涨入/跌出数量
   const rankChangeByDate = new Map<string, { date: string; rankup: number; rankdown: number }>()
-  for (const r of (rankChangeRows ?? []) as { stat_date: string; type: string; volume: number }[]) {
+  for (const r of rankChangeRows) {
     if (!rankChangeByDate.has(r.stat_date)) rankChangeByDate.set(r.stat_date, { date: r.stat_date, rankup: 0, rankdown: 0 })
     const d = rankChangeByDate.get(r.stat_date)!
     if (r.type === 'rankup') d.rankup++
@@ -90,9 +85,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 每个关键词只留时间范围内最新一天的快照（site_keyword_ranks 一天一条，
   // 已按 stat_date 降序排列，取每个 keyword 第一次出现的那条）。
   const seenKw = new Set<string>()
-  const latestRankRows = ((rankRows ?? []) as {
-    keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number; url: string | null
-  }[]).filter(r => {
+  const latestRankRows = rankRows.filter(r => {
     if (seenKw.has(r.keyword)) return false
     seenKw.add(r.keyword)
     return true

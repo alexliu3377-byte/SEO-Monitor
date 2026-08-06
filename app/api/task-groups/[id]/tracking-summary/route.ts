@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeOutcomeScore } from '@/lib/outcome-score'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   currentMonth, monthRange, dedupeByClaim, fetchClaimSourceMap, fetchRankMatches,
   fetchBadDates, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
@@ -123,19 +124,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // by source, not by member, so it doesn't expose individual identities),
   // and reusing this same set avoids a second round-trip for whichever
   // scope ends up selected.
-  const { count: exactCount } = await service
-    .from('site_tracking_records').select('id', { count: 'exact', head: true })
-    .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
-
-  const { data: rawRows, error } = await service
+  // Supabase/PostgREST 在这个项目上单次查询硬截到3000行，不管 .limit() 传多大——
+  // count-then-limit 治标不治本，改用 fetchAllRows 真分页（见 lib/supabase-paginate.ts）。
+  const rawRows = await fetchAllRows<TrackRow>((from, to) => service
     .from('site_tracking_records')
     .select('claim_id, user_id, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
     .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
     .order('record_date', { ascending: false })
-    .limit(Math.max(exactCount ?? 0, 1))
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    .range(from, to))
 
-  const rows = dedupeByClaim((rawRows || []) as TrackRow[])
+  const rows = dedupeByClaim(rawRows)
   const claimIds = rows.map(r => r.claim_id)
   const [claimSourceMap, badDates] = await Promise.all([
     fetchClaimSourceMap(service, claimIds),
@@ -192,6 +190,5 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     memberList: canSeeAll ? memberList.map(m => ({ userId: m.user_id, username: usernameOf.get(m.user_id)! })) : undefined,
     summary, groupSummary: canSeeAll ? groupSummary : undefined,
     groupSourceEffectiveness, scopeSourceEffectiveness, ranking,
-    truncated: (rawRows?.length ?? 0) < (exactCount ?? 0),
   })
 }

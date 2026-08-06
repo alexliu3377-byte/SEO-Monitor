@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeOutcomeScore } from '@/lib/outcome-score'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
@@ -94,26 +95,24 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   // site_tracking_records keeps one row per claim per tracking day forever, so a
   // fixed LIMIT eventually truncates any long-lived group (verified 2026-07-29:
-  // one group already had 3441 rows against the old 2000 cap). Each claim can
-  // only ever accumulate rows while claimed_date is within the 90-day tracking
-  // window, so counting exact matching rows first and sizing the limit off that
-  // is a real upper bound, not a guess — it can never truncate.
-  const { count: exactCount } = await applyTrackFilters(
-    service.from('site_tracking_records').select('id', { count: 'exact', head: true }).eq('group_id', groupId)
-  )
-  const rowLimit = Math.max(exactCount ?? 0, 1)
-
-  let trackQuery = service
-    .from('site_tracking_records')
-    .select('id, claim_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submit_date, record_date, is_indexed, index_first_seen, index_disappeared, rank_keyword, rank_position, prev_rank_position, rank_volume, rank_date, effectiveness')
-    .eq('group_id', groupId)
-    .order('record_date', { ascending: false })
-    .order('submit_date', { ascending: false })
-    .limit(rowLimit)
-  trackQuery = applyTrackFilters(trackQuery)
-
-  const { data: trackRows, error: trackErr } = await trackQuery
-  if (trackErr) return NextResponse.json({ error: trackErr.message }, { status: 500 })
+  // one group already had 3441 rows against the old 2000 cap). Counting first
+  // and sizing a .limit() off that count does NOT actually fix this — Supabase/
+  // PostgREST on this project hard-caps every single request at 3000 rows
+  // regardless of what .limit()/.range() asks for (found 2026-08-06 while
+  // debugging the same pattern in the rules-center research tasks route: a
+  // .limit(2700000)-style call still silently came back with exactly 3000 rows).
+  // The only real fix is pagination — fetchAllRows loops with .range() until a
+  // page comes back short, which actually retrieves every row no matter the count.
+  const trackRows = await fetchAllRows<TrackRow>((from, to) => {
+    let trackQuery = service
+      .from('site_tracking_records')
+      .select('id, claim_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submit_date, record_date, is_indexed, index_first_seen, index_disappeared, rank_keyword, rank_position, prev_rank_position, rank_volume, rank_date, effectiveness')
+      .eq('group_id', groupId)
+      .order('record_date', { ascending: false })
+      .order('submit_date', { ascending: false })
+      .range(from, to)
+    return applyTrackFilters(trackQuery)
+  })
 
   type TrackRow = {
     id: string; claim_id: string; user_id: string
@@ -267,11 +266,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
   }))
 
-  // rowLimit is sized off an exact pre-count of the same filtered query, so this
-  // should only trip if rows were deleted between the count and the fetch (rare
-  // race), not as a real cap — real truncation is no longer possible.
+  // fetchAllRows pages through .range() until a page comes back short, so
+  // truncation is no longer structurally possible (a fetch error throws and
+  // 500s instead of silently returning a partial set).
   return NextResponse.json({
     rows: pagedRowsWithMatches, summary, groupSummary, totalRows, page, pageSize,
-    truncated: (trackRows?.length ?? 0) < (exactCount ?? 0),
+    truncated: false,
   })
 }

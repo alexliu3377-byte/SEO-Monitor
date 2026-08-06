@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   currentMonth, monthRange, dedupeByClaim, fetchClaimSourceMap, fetchRankMatches,
   effectiveMatchesForClaim, RANK_BUCKETS, type TrackRow,
@@ -55,31 +56,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     else scopeUserId = requestedMemberId
   }
 
-  // Exact-count first, then size the fetch limit off that count — same
-  // truncation-safe pattern as outcomes/route.ts, so a busy group/month can
-  // never silently lose rows off the end of a fixed cap.
-  let countQuery = service
-    .from('site_tracking_records').select('id', { count: 'exact', head: true })
-    .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
-    .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
-  if (scope === 'own') countQuery = countQuery.eq('user_id', user.id)
-  else if (scope === 'member') countQuery = countQuery.eq('user_id', scopeUserId)
-  const { count: exactCount } = await countQuery
+  // Supabase/PostgREST 在这个项目上单次查询硬截到3000行，不管 .limit() 传多大——
+  // count-then-limit 治标不治本，改用 fetchAllRows 真分页（见 lib/supabase-paginate.ts）。
+  const rawRows = await fetchAllRows<TrackRow & DetailRow>((from, to) => {
+    let query = service
+      .from('site_tracking_records')
+      .select('claim_id, user_id, submit_date, record_date, keyword, final_keyword, search_volume, rank_position, rank_volume, rank_keyword, operation_type, effectiveness')
+      .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
+      .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
+      .order('record_date', { ascending: false })
+      .range(from, to)
+    if (scope === 'own') query = query.eq('user_id', user.id)
+    else if (scope === 'member') query = query.eq('user_id', scopeUserId)
+    return query
+  })
 
-  let query = service
-    .from('site_tracking_records')
-    .select('claim_id, user_id, submit_date, record_date, keyword, final_keyword, search_volume, rank_position, rank_volume, rank_keyword, operation_type, effectiveness')
-    .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
-    .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
-    .order('record_date', { ascending: false })
-    .limit(Math.max(exactCount ?? 0, 1))
-  if (scope === 'own') query = query.eq('user_id', user.id)
-  else if (scope === 'member') query = query.eq('user_id', scopeUserId)
-
-  const { data: rawRows, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const rows = dedupeByClaim((rawRows || []) as (TrackRow & DetailRow)[])
+  const rows = dedupeByClaim(rawRows)
   const claimIds = rows.map(r => r.claim_id)
   const claimSourceMap = await fetchClaimSourceMap(service, claimIds)
   const showUsername = scope === 'total'

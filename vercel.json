@@ -8,6 +8,12 @@
     },
     "app/api/rules/research-tasks/[id]/analyze/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/rules/research-tasks/[id]/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/rules/monthly-trend/route.ts": {
+      "maxDuration": 60
     }
   }
 }
