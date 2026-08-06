@@ -64,7 +64,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .select('claim_id, user_id, submit_date, record_date, keyword, final_keyword, search_volume, rank_position, rank_volume, rank_keyword, operation_type, effectiveness')
       .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
       .eq('effectiveness', kind === 'rank' ? '获取排名' : '获取收录')
-      .order('record_date', { ascending: false })
+      .order('record_date', { ascending: false }).order('id', { ascending: true })
       .range(from, to)
     if (scope === 'own') query = query.eq('user_id', user.id)
     else if (scope === 'member') query = query.eq('user_id', scopeUserId)

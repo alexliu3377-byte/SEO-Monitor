@@ -130,7 +130,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .from('site_tracking_records')
     .select('claim_id, user_id, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
     .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
-    .order('record_date', { ascending: false })
+    .order('record_date', { ascending: false }).order('id', { ascending: true })
     .range(from, to))
 
   const rows = dedupeByClaim(rawRows)

@@ -110,6 +110,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .eq('group_id', groupId)
       .order('record_date', { ascending: false })
       .order('submit_date', { ascending: false })
+      .order('id', { ascending: true })
       .range(from, to)
     return applyTrackFilters(trackQuery)
   })

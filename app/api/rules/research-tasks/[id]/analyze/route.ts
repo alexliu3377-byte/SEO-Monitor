@@ -36,17 +36,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .eq('site_id', site.id).gte('snapshot_date', date_start).lte('snapshot_date', date_end).order('snapshot_date'),
     fetchAllRows<{ stat_date: string; type: string }>((from, to) =>
       service.from('rank_changes').select('stat_date, type')
-        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end).range(from, to)),
+        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end)
+        .order('id', { ascending: true }).range(from, to)),
     // 排名成效直接用 site_keyword_ranks（keyword+具体第几名+搜索量），跳过
     // "是不是新增页面"这层归因——那需要 raw_keywords.source_url 匹配，多数
     // 竞品站点还没配文章链接选择器，这条路径本来就走不通。
     fetchAllRows<{ keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number }>((from, to) =>
       service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume')
         .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
-        .order('stat_date', { ascending: false }).range(from, to)),
+        .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)),
     fetchAllRows<{ content_date: string | null; content_type: string }>((from, to) =>
       service.from('raw_keywords').select('content_date, content_type')
-        .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end).range(from, to)),
+        .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end)
+        .order('id', { ascending: true }).range(from, to)),
   ])
 
   const weight = (weightRows ?? []) as { record_date: string; pc_weight: number; mobile_weight: number }[]

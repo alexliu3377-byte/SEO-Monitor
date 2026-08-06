@@ -8,6 +8,15 @@
 // 要翻两三百次，串行等下来单次请求就能拖到几分钟，在 serverless 函数超时
 // 前根本跑不完。没给 countHint 时退化成顺序翻页（单站点研究任务这种量级
 // 小的场景，省一次额外的 count 查询）。
+//
+// ⚠️ 调用方的 buildQuery 必须在 .range() 之前加一个能唯一确定顺序的 .order()
+// （比如按主键 id 排序），不能不排序就直接 .range()——2026-08-06 实测：同一个
+// 查询不排序、连续 range(0,2999) 调两次，返回的3000行里有2457行是不一样的。
+// Postgres 在没有 ORDER BY 时不保证跨请求顺序稳定，range() 分页翻页翻到一半
+// 换了行序，会导致有些行两页都拿到（重复），有些行两页都漏掉（丢失）——而且
+// 不会报错，算出来的聚合结果会悄悄错（这次就是这样测出一个关键词的 volume
+// 算错了才发现）。只按业务需要排的列（比如 stat_date）如果有重复值，同样
+// 不够，还要再加一层按 id 排序兜底去重复。
 export async function fetchAllRows<T>(
   buildQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>,
   opts: { pageSize?: number; countHint?: number } = {}

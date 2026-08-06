@@ -132,6 +132,59 @@ LANGUAGE sql STABLE AS $$
   GROUP BY keyword
 $$;
 
+-- 规则中心·月度趋势下钻——聚合放在SQL里做（不像最初实现那样把整月几十万行
+-- rank_changes 拉到 Node 里再聚合，2026-08-06 实测一个月81万行光拉数据+分页
+-- 就要将近30秒）。以下三个函数配合 monthly_trend_cache 表使用：过去的月份
+-- （非当月）算完一次就存进缓存表，之后同一个月直接读缓存，不用重算；只有
+-- 还在变动的当月每次都会重新调这几个函数（现在很快，不再是瓶颈）。
+CREATE INDEX IF NOT EXISTS idx_rank_changes_stat_date ON rank_changes(stat_date);
+
+CREATE OR REPLACE FUNCTION monthly_rank_change_top(p_start date, p_end date, p_type text, p_limit int DEFAULT 100)
+RETURNS TABLE(keyword text, volume bigint, domains text[])
+LANGUAGE sql STABLE AS $$
+  SELECT rc.keyword, MAX(rc.volume)::bigint AS volume, ARRAY_AGG(DISTINCT s.domain) AS domains
+  FROM rank_changes rc
+  JOIN sites s ON s.id = rc.site_id
+  WHERE rc.stat_date >= p_start AND rc.stat_date <= p_end AND rc.type = p_type
+  GROUP BY rc.keyword
+  ORDER BY volume DESC
+  LIMIT p_limit
+$$;
+
+CREATE OR REPLACE FUNCTION monthly_continuous_trend(p_start date, p_end date, p_limit int DEFAULT 100)
+RETURNS TABLE(keyword text, domain text, type text, volume bigint, streak bigint, dates date[])
+LANGUAGE sql STABLE AS $$
+  SELECT rc.keyword, s.domain, rc.type, MAX(rc.volume)::bigint AS volume,
+    COUNT(DISTINCT rc.stat_date)::bigint AS streak,
+    ARRAY_AGG(DISTINCT rc.stat_date ORDER BY rc.stat_date) AS dates
+  FROM rank_changes rc
+  JOIN sites s ON s.id = rc.site_id
+  WHERE rc.stat_date >= p_start AND rc.stat_date <= p_end AND rc.type IN ('rankup', 'rankdown')
+  GROUP BY rc.keyword, rc.site_id, s.domain, rc.type
+  HAVING COUNT(DISTINCT rc.stat_date) >= 2
+  ORDER BY streak DESC, volume DESC
+  LIMIT p_limit
+$$;
+
+CREATE OR REPLACE FUNCTION monthly_new_keyword_top(p_start date, p_end date, p_content_type text, p_limit int DEFAULT 50)
+RETURNS TABLE(keyword text, volume bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT rk.keyword, COALESCE(MAX(kv.volume), 0)::bigint AS volume
+  FROM (SELECT DISTINCT keyword FROM raw_keywords WHERE content_date >= p_start AND content_date <= p_end AND content_type = p_content_type) rk
+  LEFT JOIN keyword_volume kv ON kv.keyword = rk.keyword
+  GROUP BY rk.keyword
+  ORDER BY volume DESC
+  LIMIT p_limit
+$$;
+
+-- 月度趋势下钻结果缓存——月份是主键，已经关闭的月份（不是当月）算完一次就
+-- 写进来，下次同一个月直接读这张表，不重新聚合。
+CREATE TABLE IF NOT EXISTS monthly_trend_cache (
+  month       TEXT PRIMARY KEY,
+  payload     JSONB NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- get_hot_rank_words 含 rank_days（涨排次数 = 不同日期数）
 -- DROP FUNCTION get_hot_rank_words(text);
 -- CREATE FUNCTION public.get_hot_rank_words(p_since text)

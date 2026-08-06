@@ -49,7 +49,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .eq('site_id', site.id).gte('snapshot_date', date_start).lte('snapshot_date', date_end).order('snapshot_date'),
     fetchAllRows<{ stat_date: string; keyword: string; type: string; volume: number }>((from, to) =>
       service.from('rank_changes').select('stat_date, keyword, type, volume')
-        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end).range(from, to)),
+        .eq('site_id', site.id).gte('stat_date', date_start).lte('stat_date', date_end)
+        .order('id', { ascending: true }).range(from, to)),
     // "排名"模式（has_rank_title）数据——keyword+具体第几名+URL+搜索量都在这张表，
     // 不需要像自己站点成效追踪那样去匹配 raw_keywords.source_url 找"是不是新增
     // 的页面"：竞品这边直接看"这个词现在排第几、搜索量多少"就够评分了，跳过
@@ -58,7 +59,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     fetchAllRows<{ keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number; url: string | null }>((from, to) =>
       service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume, url')
         .eq('site_id', site.id).eq('platform', 'mobile').gte('stat_date', date_start).lte('stat_date', date_end)
-        .order('stat_date', { ascending: false }).range(from, to)),
+        .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)),
     service.from('raw_keywords').select('content_date, content_type')
       .eq('site_id', site.id).gte('content_date', date_start).lte('content_date', date_end),
   ])
