@@ -1158,6 +1158,8 @@ function DomainListModal({ title, domains, weights, onClose }: { title: string; 
 function MonthlyTrendTab() {
   const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
   const [loading, setLoading] = useState(true)
+  const [chartYear, setChartYear] = useState('')
+  const [filterYear, setFilterYear] = useState('')
   const [drillMonth, setDrillMonth] = useState<string | null>(null)
   const [drillData, setDrillData] = useState<MonthlyDrillData | null>(null)
   const [drillLoading, setDrillLoading] = useState(false)
@@ -1166,6 +1168,16 @@ function MonthlyTrendTab() {
   useEffect(() => {
     fetch('/api/rules/monthly-trend').then(r => r.json()).then(d => setMonths(d.months ?? [])).finally(() => setLoading(false))
   }, [])
+
+  // 数据一到手默认选最新年份+自动打开最新月份，不用用户手动点
+  useEffect(() => {
+    if (months.length === 0) return
+    const latestYear = months[months.length - 1].month.slice(0, 4)
+    setChartYear(latestYear)
+    setFilterYear(latestYear)
+    openDrill(months[months.length - 1].month)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [months])
 
   function openDrill(month: string) {
     setDrillMonth(month)
@@ -1181,9 +1193,11 @@ function MonthlyTrendTab() {
     setDomainModal({ title, domains })
   }
 
-  const maxCount = Math.max(1, ...months.map(m => m.app + m.game))
-
   if (loading) return <Spinner />
+
+  const years = Array.from(new Set(months.map(m => m.month.slice(0, 4))))
+  const chartMonths = months.filter(m => m.month.startsWith(chartYear))
+  const filterMonths = months.filter(m => m.month.startsWith(filterYear))
 
   return (
     <div>
@@ -1191,23 +1205,68 @@ function MonthlyTrendTab() {
       {months.length === 0 ? (
         <p className="text-sm text-gray-300 text-center py-10">暂无数据</p>
       ) : (
-        <div className="space-y-2 mb-6">
-          {months.map(m => (
-            <button key={m.month} onClick={() => openDrill(m.month)}
-              className={`w-full text-left px-4 py-2.5 rounded-lg border transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50/40' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium text-gray-800">{m.month}</span>
-                <span className="text-xs text-gray-400">
-                  {m.app + m.game === 0 ? '应用 0% · 游戏 0%' : `应用 ${Math.round(m.app / (m.app + m.game) * 100)}% · 游戏 ${Math.round(m.game / (m.app + m.game) * 100)}%`}
-                </span>
+        <>
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-4">
+            <div className="flex items-center justify-between mb-5">
+              <span className="text-sm font-semibold text-gray-700">类目占比</span>
+              <select value={chartYear} onChange={e => setChartYear(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            {chartMonths.length === 0 ? (
+              <p className="text-sm text-gray-300 text-center py-10">{chartYear}年暂无数据</p>
+            ) : (
+              <div className="flex items-end gap-6 overflow-x-auto px-1">
+                {chartMonths.map(m => {
+                  const total = m.app + m.game
+                  const appPct = total === 0 ? 0 : Math.round(m.app / total * 100)
+                  const gamePct = total === 0 ? 0 : 100 - appPct
+                  return (
+                    <div key={m.month} className="flex flex-col items-center gap-2 flex-shrink-0">
+                      <div className="flex items-end gap-1.5 h-32">
+                        <div className="flex flex-col items-center justify-end h-full">
+                          {appPct > 0 && <span className="text-[11px] text-sky-600 font-medium mb-1">{appPct}%</span>}
+                          <div className="w-6 bg-sky-500 rounded-t transition-all" style={{ height: `${appPct}%` }} />
+                        </div>
+                        <div className="flex flex-col items-center justify-end h-full">
+                          {gamePct > 0 && <span className="text-[11px] text-violet-600 font-medium mb-1">{gamePct}%</span>}
+                          <div className="w-6 bg-violet-500 rounded-t transition-all" style={{ height: `${gamePct}%` }} />
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-500">{parseInt(m.month.slice(5), 10)}月</span>
+                    </div>
+                  )
+                })}
               </div>
-              <div className="flex h-2 rounded-full overflow-hidden bg-gray-100">
-                <div className="bg-blue-400" style={{ width: `${(m.app / maxCount) * 100}%` }} />
-                <div className="bg-purple-400" style={{ width: `${(m.game / maxCount) * 100}%` }} />
+            )}
+            <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-50">
+              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" />应用</span>
+              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-violet-500 inline-block" />游戏</span>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            {filterMonths.length === 0 ? (
+              <p className="text-sm text-gray-300 py-4">{filterYear}年暂无数据</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {filterMonths.map(m => (
+                  <button key={m.month} onClick={() => openDrill(m.month)}
+                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+                    {parseInt(m.month.slice(5), 10)}月
+                  </button>
+                ))}
               </div>
-            </button>
-          ))}
-        </div>
+            )}
+          </div>
+        </>
       )}
 
       {drillMonth && (drillLoading || !drillData ? <Spinner /> : (
