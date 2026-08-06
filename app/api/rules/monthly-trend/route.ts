@@ -31,11 +31,13 @@ function currentMonthCN(): string {
 
 interface DrillPayload {
   month: string
-  app: { keyword: string; contentType: string; volume: number }[]
-  game: { keyword: string; contentType: string; volume: number }[]
+  app: { keyword: string; contentType: string; volume: number; domains: string[] }[]
+  game: { keyword: string; contentType: string; volume: number; domains: string[] }[]
   rankup: { keyword: string; type: string; volume: number; domains: string[] }[]
   rankdown: { keyword: string; type: string; volume: number; domains: string[] }[]
   continuousTrend: { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }[]
+  volumeRising: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
+  volumeFalling: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
 }
 
 // 全站（不分站点）按月汇总 raw_keywords 的应用/游戏新增数量，用来发现"哪个月
@@ -68,31 +70,38 @@ export async function GET(req: Request) {
       if (cached?.payload) return NextResponse.json(cached.payload as DrillPayload)
     }
 
-    // 三个 rank_changes 聚合（rankup/rankdown/continuousTrend）单独跑都要 7-9 秒，
-    // 2026-08-06 实测用 Promise.all 一起并发跑会互相抢数据库资源，三个全部因为
-    // "canceling statement due to statement timeout" 失败、悄悄返回空数组（查询
-    // 报错但如果没检查 error 字段就会被 `?? []` 吞掉，页面看起来"这个月没有涨跌词"
-    // 但其实是查询失败，不是真的没数据）。改成串行跑重的三个，避免抢资源；
-    // 两个新增关键词的查询轻，还是并行跑没关系。
-    const [{ data: appRows, error: appErr }, { data: gameRows, error: gameErr }] = await Promise.all([
-      service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'app', p_limit: 50 }),
-      service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'game', p_limit: 50 }),
-    ])
+    // 每个聚合 RPC 单独跑都要几秒，2026-08-06 实测用 Promise.all 一起并发跑会
+    // 互相抢数据库资源，直接因为 "canceling statement due to statement timeout"
+    // 失败、悄悄返回空数组（查询报错但如果没检查 error 字段就会被 `?? []` 吞掉，
+    // 页面看起来"这个月没有涨跌词"但其实是查询失败，不是真的没数据）。全部
+    // 改成串行调用，宁可慢一点也不要相互抢导致超时；反正过去的月份缓存后
+    // 只会在第一次未命中时付这个代价。
+    const { data: appRows, error: appErr } = await service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'app', p_limit: 50 })
+    const { data: gameRows, error: gameErr } = await service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'game', p_limit: 50 })
     const { data: rankupRows, error: rankupErr } = await service.rpc('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankup', p_limit: 100 })
     const { data: rankdownRows, error: rankdownErr } = await service.rpc('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankdown', p_limit: 100 })
     const { data: continuousRows, error: continuousErr } = await service.rpc('monthly_continuous_trend', { p_start: start, p_end: end, p_limit: 100 })
+    // 搜索量变动跟分组任务"搜索量上涨"同一个数据源（keyword_volume），up/down
+    // 一起查一次，前端按正负拆成两栏——见 supabase/schema.sql 里的注释。
+    const { data: volumeChangeRows, error: volumeChangeErr } = await service.rpc('monthly_volume_change_top', { p_start: start, p_end: end, p_limit: 300 })
 
-    const rpcError = appErr || gameErr || rankupErr || rankdownErr || continuousErr
+    const rpcError = appErr || gameErr || rankupErr || rankdownErr || continuousErr || volumeChangeErr
     if (rpcError) return NextResponse.json({ error: rpcError.message }, { status: 500 })
+
+    const volumeChangeList = (volumeChangeRows ?? []) as { keyword: string; volume: number; volume_change: number; domains: string[] }[]
+    const volumeRising = volumeChangeList.filter(r => r.volume_change > 0).sort((a, b) => b.volume_change - a.volume_change).slice(0, 100)
+    const volumeFalling = volumeChangeList.filter(r => r.volume_change < 0).sort((a, b) => a.volume_change - b.volume_change).slice(0, 100)
 
     const payload: DrillPayload = {
       month: drillMonth,
-      app: (appRows ?? []).map((r: { keyword: string; volume: number }) => ({ keyword: r.keyword, contentType: 'app', volume: r.volume })),
-      game: (gameRows ?? []).map((r: { keyword: string; volume: number }) => ({ keyword: r.keyword, contentType: 'game', volume: r.volume })),
+      app: (appRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, contentType: 'app', volume: r.volume, domains: r.domains })),
+      game: (gameRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, contentType: 'game', volume: r.volume, domains: r.domains })),
       rankup: (rankupRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, type: 'rankup', volume: r.volume, domains: r.domains })),
       rankdown: (rankdownRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, type: 'rankdown', volume: r.volume, domains: r.domains })),
       continuousTrend: (continuousRows ?? []).map((r: { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }) =>
         ({ keyword: r.keyword, domain: r.domain, type: r.type, volume: r.volume, streak: r.streak, dates: r.dates })),
+      volumeRising: volumeRising.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
+      volumeFalling: volumeFalling.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
     }
 
     if (isClosedMonth) {

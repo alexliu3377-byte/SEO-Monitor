@@ -166,16 +166,68 @@ LANGUAGE sql STABLE AS $$
   LIMIT p_limit
 $$;
 
+-- 2026-08-06 加 domains——用户要"热门新增词"也能点"查看"知道是哪些站贡献的，
+-- 跟涨跌词一样。先按关键词把 raw_keywords 聚成"哪些站有过这个词"（不用先
+-- DISTINCT keyword 再关联了，因为要保留 site_id 才能算 domains），再单独去
+-- 关联 keyword_volume 拿搜索量——分两段避免 keyword_volume 的多行历史把
+-- 中间结果行数搞爆。返回类型变了（多了 domains），CREATE OR REPLACE 换不了
+-- 返回列，必须先 DROP。
+DROP FUNCTION IF EXISTS monthly_new_keyword_top(date, date, text, integer);
 CREATE OR REPLACE FUNCTION monthly_new_keyword_top(p_start date, p_end date, p_content_type text, p_limit int DEFAULT 50)
-RETURNS TABLE(keyword text, volume bigint)
+RETURNS TABLE(keyword text, volume bigint, domains text[])
 LANGUAGE sql STABLE AS $$
-  SELECT rk.keyword, COALESCE(MAX(kv.volume), 0)::bigint AS volume
-  FROM (SELECT DISTINCT keyword FROM raw_keywords WHERE content_date >= p_start AND content_date <= p_end AND content_type = p_content_type) rk
-  LEFT JOIN keyword_volume kv ON kv.keyword = rk.keyword
-  GROUP BY rk.keyword
+  WITH kw AS (
+    SELECT rk.keyword, ARRAY_AGG(DISTINCT s.domain) AS domains
+    FROM raw_keywords rk
+    JOIN sites s ON s.id = rk.site_id
+    WHERE rk.content_date >= p_start AND rk.content_date <= p_end AND rk.content_type = p_content_type
+    GROUP BY rk.keyword
+  )
+  SELECT kw.keyword, COALESCE(MAX(kv.volume), 0)::bigint AS volume, kw.domains
+  FROM kw
+  LEFT JOIN keyword_volume kv ON kv.keyword = kw.keyword
+  GROUP BY kw.keyword, kw.domains
   ORDER BY volume DESC
   LIMIT p_limit
 $$;
+
+-- 搜索量变动——跟分组任务"搜索量上涨"tab同一个数据源（keyword_volume 只存
+-- 每个关键词当前一行，volume_change 是相对上次抓取的变化量），范围限定在
+-- "这个月 rank_changes 里出现过的关键词"（不是全局所有关键词，否则跟这个月
+-- 没关系的词也会混进来）。up/down 一起返回（避免再扫一次 rank_changes），
+-- 按变化幅度绝对值排序取前 p_limit 条，前端再按正负拆成两栏。
+-- 2026-08-06：一开始写成"先 DISTINCT keyword+site_id 出一个月的关键词全集，
+-- 再关联 sites 算 domains"两段式CTE，实测比其它三个同样扫 rank_changes 整月
+-- 的RPC明显慢，单独跑都会 statement timeout——多一次 DISTINCT 排序/去重的
+-- 代价比想象中大。改成跟其它RPC一样的单阶段写法（JOIN 完直接 GROUP BY 一次
+-- 出 domains），标准 hash aggregate 一次搞定，不再单独 DISTINCT。
+CREATE OR REPLACE FUNCTION monthly_volume_change_top(p_start date, p_end date, p_limit int DEFAULT 300)
+RETURNS TABLE(keyword text, volume bigint, volume_change bigint, domains text[])
+LANGUAGE sql STABLE AS $$
+  WITH kw_domains AS (
+    SELECT rc.keyword, ARRAY_AGG(DISTINCT s.domain) AS domains
+    FROM rank_changes rc
+    JOIN sites s ON s.id = rc.site_id
+    WHERE rc.stat_date >= p_start AND rc.stat_date <= p_end
+    GROUP BY rc.keyword
+  )
+  SELECT kv.keyword, kv.volume::bigint, kv.volume_change::bigint, kd.domains
+  FROM keyword_volume kv
+  JOIN kw_domains kd ON kd.keyword = kv.keyword
+  WHERE kv.volume_change != 0
+  ORDER BY ABS(kv.volume_change) DESC
+  LIMIT p_limit
+$$;
+
+-- 这四个月度趋势RPC整月扫 rank_changes/raw_keywords，正常都要跑7-10秒，
+-- 卡在这个项目默认 statement_timeout（约8-9秒）的边缘——2026-08-06 实测
+-- monthly_volume_change_top 好几次直接因为超时失败。这几个函数本来就是
+-- 人工点开月度趋势某个月才会触发一次的重查询，不是高频接口，单独给它们
+-- 放宽超时到30秒（只影响这四个函数，不改全局/其它查询的超时）。
+ALTER FUNCTION monthly_rank_change_top(date, date, text, integer) SET statement_timeout = '30s';
+ALTER FUNCTION monthly_continuous_trend(date, date, integer) SET statement_timeout = '30s';
+ALTER FUNCTION monthly_new_keyword_top(date, date, text, integer) SET statement_timeout = '30s';
+ALTER FUNCTION monthly_volume_change_top(date, date, integer) SET statement_timeout = '30s';
 
 -- 月度趋势下钻结果缓存——月份是主键，已经关闭的月份（不是当月）算完一次就
 -- 写进来，下次同一个月直接读这张表，不重新聚合。

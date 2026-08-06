@@ -1113,13 +1113,15 @@ function RuleListTab({ canEdit, isSuper, allSites }: { canEdit: boolean; isSuper
 // ══════════════════════════════ 月度趋势 ══════════════════════════════
 
 interface MonthlyTrendPoint { month: string; app: number; game: number }
-interface MonthlyDrillItem { keyword: string; contentType: string; volume: number }
+interface MonthlyDrillItem { keyword: string; contentType: string; volume: number; domains: string[] }
 interface MonthlyRankChangeItem { keyword: string; type: string; volume: number; domains: string[] }
 interface MonthlyStreakItem { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }
+interface MonthlyVolumeChangeItem { keyword: string; volume: number; volumeChange: number; domains: string[] }
 interface MonthlyDrillData {
   app: MonthlyDrillItem[]; game: MonthlyDrillItem[]
   rankup: MonthlyRankChangeItem[]; rankdown: MonthlyRankChangeItem[]
   continuousTrend: MonthlyStreakItem[]
+  volumeRising: MonthlyVolumeChangeItem[]; volumeFalling: MonthlyVolumeChangeItem[]
 }
 
 function DomainListModal({ title, domains, onClose }: { title: string; domains: string[]; onClose: () => void }) {
@@ -1158,7 +1160,12 @@ function MonthlyTrendTab() {
     setDrillData(null)
     fetch(`/api/rules/monthly-trend?month=${month}`).then(r => r.json()).then(d => setDrillData({
       app: d.app ?? [], game: d.game ?? [], rankup: d.rankup ?? [], rankdown: d.rankdown ?? [], continuousTrend: d.continuousTrend ?? [],
+      volumeRising: d.volumeRising ?? [], volumeFalling: d.volumeFalling ?? [],
     })).finally(() => setDrillLoading(false))
+  }
+
+  function openDomainModal(title: string, domains: string[]) {
+    setDomainModal({ title, domains })
   }
 
   const maxCount = Math.max(1, ...months.map(m => m.app + m.game))
@@ -1201,7 +1208,11 @@ function MonthlyTrendTab() {
                   {drillData.app.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.app.map(i => (
                     <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
                       <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{i.volume.toLocaleString()}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1212,7 +1223,11 @@ function MonthlyTrendTab() {
                   {drillData.game.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.game.map(i => (
                     <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
                       <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <span className="text-xs text-gray-400 flex-shrink-0 ml-2">{i.volume.toLocaleString()}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1233,7 +1248,7 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => setDomainModal({ title: `${i.keyword} · 涨入`, domains: i.domains })}
+                        <button onClick={() => openDomainModal(`${i.keyword} · 涨入`, i.domains)}
                           className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
                       </div>
                     </div>
@@ -1248,7 +1263,45 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => setDomainModal({ title: `${i.keyword} · 跌出`, domains: i.domains })}
+                        <button onClick={() => openDomainModal(`${i.keyword} · 跌出`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 搜索量变动（跟这个月涨跌词有关联的关键词，现在的搜索需求走势）</span>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">上涨</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.volumeRising.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeRising.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-green-600 ml-1">+{i.volumeChange.toLocaleString()}</span></span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量上涨`, i.domains)}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">下跌</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.volumeFalling.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeFalling.map(i => (
+                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-red-500 ml-1">{i.volumeChange.toLocaleString()}</span></span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量下跌`, i.domains)}
                           className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
                       </div>
                     </div>
@@ -1262,25 +1315,38 @@ function MonthlyTrendTab() {
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
               <span className="text-sm font-semibold text-gray-700">{drillMonth} 排名连续涨跌（同一个词在同一个站，这个月连续多天同向变化）</span>
             </div>
-            {drillData.continuousTrend.length === 0 ? (
-              <p className="text-sm text-gray-300 text-center py-8">这个月没有连续涨跌的词</p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
-                {drillData.continuousTrend.map((i, idx) => (
-                  <div key={idx} className="px-4 py-2 flex items-center justify-between text-sm">
-                    <div className="min-w-0 flex-1">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium mr-1.5 ${i.type === 'rankup' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
-                        {i.type === 'rankup' ? '涨' : '跌'}
-                      </span>
-                      <span className="text-gray-700">{i.keyword}</span>
-                      <span className="text-xs text-gray-400 ml-2">连续{i.streak}天 · 搜索量{i.volume.toLocaleString()}</span>
+            <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div>
+                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">连续上涨</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.continuousTrend.filter(i => i.type === 'rankup').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankup').map((i, idx) => (
+                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · ${i.domain}`, [`${i.domain}（${i.dates.join('、')}）`])}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                      </div>
                     </div>
-                    <button onClick={() => setDomainModal({ title: `${i.keyword} · ${i.domain}`, domains: [`${i.domain}（${i.dates.join('、')}）`] })}
-                      className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 flex-shrink-0 ml-2">{i.domain}</button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            )}
+              <div>
+                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">连续下跌</p>
+                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+                  {drillData.continuousTrend.filter(i => i.type === 'rankdown').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankdown').map((i, idx) => (
+                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate">{i.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
+                        <button onClick={() => openDomainModal(`${i.keyword} · ${i.domain}`, [`${i.domain}（${i.dates.join('、')}）`])}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       ))}
