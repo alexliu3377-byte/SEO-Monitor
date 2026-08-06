@@ -187,7 +187,10 @@ LANGUAGE sql STABLE AS $$
   FROM kw
   LEFT JOIN keyword_volume kv ON kv.keyword = kw.keyword
   GROUP BY kw.keyword, kw.domains
-  ORDER BY volume DESC
+  -- "热门"新增词按有多少个站独立新增了这个词排（多个站不约而同都在加同一个词，
+  -- 才是真正的"趋势"信号；搜索量高但只有一个站在做，说明不了"大家都在跟这个"）。
+  -- 搜索量当第二排序，同样站数的词再比谁的搜索需求更大。
+  ORDER BY ARRAY_LENGTH(kw.domains, 1) DESC, volume DESC
   LIMIT p_limit
 $$;
 
