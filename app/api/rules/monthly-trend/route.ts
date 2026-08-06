@@ -38,6 +38,7 @@ interface DrillPayload {
   continuousTrend: { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }[]
   volumeRising: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
   volumeFalling: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
+  domainWeights: Record<string, { pc: number; mobile: number }>
 }
 
 // 全站（不分站点）按月汇总 raw_keywords 的应用/游戏新增数量，用来发现"哪个月
@@ -68,6 +69,23 @@ export async function GET(req: Request) {
     if (isClosedMonth) {
       const { data: cached } = await service.from('monthly_trend_cache').select('payload').eq('month', drillMonth).maybeSingle()
       if (cached?.payload) return NextResponse.json(cached.payload as DrillPayload)
+    }
+
+    // 站点PC/M权重——给"查看"弹窗里的域名标注权重用，跟分组任务详情弹窗同一个
+    // 展示方式（domain + "PC{x} · M{y}"）。取每个站点最近30天里最新一条
+    // weight_history 记录，按 record_date 升序遍历、后面的覆盖前面的，最后
+    // 留下的就是最新值。
+    const since30 = new Date(Date.now() + 8 * 3600000 - 30 * 86400000).toISOString().slice(0, 10)
+    const [{ data: sitesForWeight }, { data: weightRows }] = await Promise.all([
+      service.from('sites').select('id, domain'),
+      service.from('weight_history').select('site_id, pc_weight, mobile_weight, record_date')
+        .gte('record_date', since30).order('record_date', { ascending: true }),
+    ])
+    const domainOfSite = new Map<string, string>((sitesForWeight ?? []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
+    const domainWeights: Record<string, { pc: number; mobile: number }> = {}
+    for (const r of (weightRows ?? []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
+      const domain = domainOfSite.get(r.site_id)
+      if (domain) domainWeights[domain] = { pc: r.pc_weight, mobile: r.mobile_weight }
     }
 
     // 每个聚合 RPC 单独跑都要几秒，2026-08-06 实测用 Promise.all 一起并发跑会
@@ -102,6 +120,7 @@ export async function GET(req: Request) {
         ({ keyword: r.keyword, domain: r.domain, type: r.type, volume: r.volume, streak: r.streak, dates: r.dates })),
       volumeRising: volumeRising.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
       volumeFalling: volumeFalling.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
+      domainWeights,
     }
 
     if (isClosedMonth) {

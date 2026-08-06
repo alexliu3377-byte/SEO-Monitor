@@ -1122,9 +1122,12 @@ interface MonthlyDrillData {
   rankup: MonthlyRankChangeItem[]; rankdown: MonthlyRankChangeItem[]
   continuousTrend: MonthlyStreakItem[]
   volumeRising: MonthlyVolumeChangeItem[]; volumeFalling: MonthlyVolumeChangeItem[]
+  domainWeights: Record<string, { pc: number; mobile: number }>
 }
 
-function DomainListModal({ title, domains, onClose }: { title: string; domains: string[]; onClose: () => void }) {
+// 跟分组任务详情弹窗（app/(dashboard)/task-groups/page.tsx 的"共新增词"/"竞品涨
+// 排名"面板）同一个展示方式——域名下面带一行 PC/M权重，不是单纯罗列域名。
+function DomainListModal({ title, domains, weights, onClose }: { title: string; domains: string[]; weights: Record<string, { pc: number; mobile: number }>; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
@@ -1134,8 +1137,18 @@ function DomainListModal({ title, domains, onClose }: { title: string; domains: 
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
-        <div className="px-5 py-3 max-h-64 overflow-y-auto space-y-1.5">
-          {domains.map(d => <p key={d} className="text-sm text-gray-700">{d}</p>)}
+        <div className="px-5 py-3 max-h-64 overflow-y-auto flex flex-wrap gap-1.5">
+          {domains.map(d => {
+            const w = weights[d]
+            return (
+              <span key={d} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-2 py-1 text-gray-700">
+                <span className="flex flex-col leading-tight">
+                  <span>{d}</span>
+                  {w && <span className="text-[10px] text-gray-400">PC{w.pc} · M{w.mobile}</span>}
+                </span>
+              </span>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -1160,7 +1173,7 @@ function MonthlyTrendTab() {
     setDrillData(null)
     fetch(`/api/rules/monthly-trend?month=${month}`).then(r => r.json()).then(d => setDrillData({
       app: d.app ?? [], game: d.game ?? [], rankup: d.rankup ?? [], rankdown: d.rankdown ?? [], continuousTrend: d.continuousTrend ?? [],
-      volumeRising: d.volumeRising ?? [], volumeFalling: d.volumeFalling ?? [],
+      volumeRising: d.volumeRising ?? [], volumeFalling: d.volumeFalling ?? [], domainWeights: d.domainWeights ?? {},
     })).finally(() => setDrillLoading(false))
   }
 
@@ -1184,7 +1197,9 @@ function MonthlyTrendTab() {
               className={`w-full text-left px-4 py-2.5 rounded-lg border transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50/40' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-sm font-medium text-gray-800">{m.month}</span>
-                <span className="text-xs text-gray-400">应用 {m.app} · 游戏 {m.game}</span>
+                <span className="text-xs text-gray-400">
+                  {m.app + m.game === 0 ? '应用 0% · 游戏 0%' : `应用 ${Math.round(m.app / (m.app + m.game) * 100)}% · 游戏 ${Math.round(m.game / (m.app + m.game) * 100)}%`}
+                </span>
               </div>
               <div className="flex h-2 rounded-full overflow-hidden bg-gray-100">
                 <div className="bg-blue-400" style={{ width: `${(m.app / maxCount) * 100}%` }} />
@@ -1324,7 +1339,7 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · ${i.domain}`, [`${i.domain}（${i.dates.join('、')}）`])}
+                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
                           className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
                       </div>
                     </div>
@@ -1339,7 +1354,7 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · ${i.domain}`, [`${i.domain}（${i.dates.join('、')}）`])}
+                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
                           className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
                       </div>
                     </div>
@@ -1351,7 +1366,7 @@ function MonthlyTrendTab() {
         </div>
       ))}
 
-      {domainModal && <DomainListModal title={domainModal.title} domains={domainModal.domains} onClose={() => setDomainModal(null)} />}
+      {domainModal && <DomainListModal title={domainModal.title} domains={domainModal.domains} weights={drillData?.domainWeights ?? {}} onClose={() => setDomainModal(null)} />}
     </div>
   )
 }
