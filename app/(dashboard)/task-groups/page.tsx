@@ -673,7 +673,10 @@ export default function TaskGroupsPage() {
   async function loadSiteRankdown() {
     if (!activeGroup || siteRankdownGroupId === activeGroup.id || siteRankdownLoading) return
     const ownDomains = activeGroup.site_domains
-    if (ownDomains.length === 0) { setSiteRankdownGroupId(activeGroup.id); return }
+    // 之前这里domains为空就直接return，没清空siteRankdownData——切到一个没配
+    // 自己站点的分组时，屏幕上会一直留着上一个分组的"跌词更新"数据没消失，
+    // 看起来像两个分组数据串了（2026-08-06 用户反馈排查出的根因）。
+    if (ownDomains.length === 0) { setSiteRankdownData([]); setSiteRankdownGroupId(activeGroup.id); return }
     setSiteRankdownLoading(true)
     try {
       const supabase = getBrowserClient()
@@ -697,6 +700,8 @@ export default function TaskGroupsPage() {
         setSiteRankdownData(rows)
         // Default date = most recent stat_date in data
         if (rows.length > 0) setRankdownDate(prev => prev || rows[0].stat_date)
+      } else {
+        setSiteRankdownData([])
       }
       setSiteRankdownGroupId(activeGroup.id)
       setRdPage(0)
@@ -706,7 +711,7 @@ export default function TaskGroupsPage() {
   async function loadSiteRankup() {
     if (!activeGroup || siteRankupGroupId === activeGroup.id || siteRankupLoading) return
     const ownDomains = activeGroup.site_domains
-    if (ownDomains.length === 0) { setSiteRankupGroupId(activeGroup.id); return }
+    if (ownDomains.length === 0) { setSiteRankupData([]); setSiteRankupGroupId(activeGroup.id); return }
     setSiteRankupLoading(true)
     try {
       const supabase = getBrowserClient()
@@ -728,6 +733,8 @@ export default function TaskGroupsPage() {
           .limit(3000)
         const rows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
         setSiteRankupData(rows)
+      } else {
+        setSiteRankupData([])
       }
       setSiteRankupGroupId(activeGroup.id)
       setRdPage(0)
