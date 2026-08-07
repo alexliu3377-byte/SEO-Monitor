@@ -3,6 +3,7 @@ import { activityStart, activityEnd } from '../lib/activity-log'
 import { fetchSiteResearchSummary } from '../lib/site-research-summary'
 import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
+import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
 import { callGeminiJSON } from '../lib/gemini'
 
 // 研究报告——GitHub Actions 直接跑（不经过 Vercel）。周报/月报/年报共用这一套
@@ -211,8 +212,20 @@ async function runStage2(reportId: string) {
   const sitesConsidered = (sites ?? []).length
 
   // 竞品成效——读 competitor_tracking_records（has_rank_title=true 的竞品站点
-  // 每天自动被追踪），不单独占一次 Stage1 AI 调用，原始数据直接留到 Stage2 一起喂。
-  const competitorSummary = await fetchCompetitorEffectivenessSummary(supabase, periodStart, periodEnd)
+  // 每天自动被追踪，已排除自己的站点），不单独占一次 Stage1 AI 调用，原始数据
+  // 直接留到 Stage2 一起喂。
+  // 自己站点成效——2026-08-07 用户要求单独拆一段，不要跟竞品混在一起，换回
+  // 之前用过的分组任务（task_groups/site_tracking_records）追踪机制。
+  const [competitorSummary, groups] = await Promise.all([
+    fetchCompetitorEffectivenessSummary(supabase, periodStart, periodEnd),
+    supabase.from('task_groups').select('id, name').then((r: { data: { id: string; name: string }[] | null }) => r.data ?? []),
+  ])
+  const ownSummaries = await Promise.all(
+    groups.map(async (g: { id: string; name: string }) => ({
+      group_id: g.id, group_name: g.name,
+      ...(await fetchGroupEffectivenessSummary(supabase, g.id, periodStart, periodEnd)),
+    }))
+  )
 
   // 大环境输入——这段时间 environment_segments_daily + environment_daily 全部行，
   // 存进 environment_input 做历史快照（不依赖以后这两张表算法有没有变过）。
@@ -228,6 +241,7 @@ async function runStage2(reportId: string) {
 
   await supabase.from('research_reports').update({
     competitor_effectiveness: competitorSummary,
+    own_effectiveness: ownSummaries,
     environment_input: environmentInput,
     sites_considered: sitesConsidered,
     sites_analyzed: analyzedCount,
@@ -254,9 +268,15 @@ async function runStage2(reportId: string) {
     ? `有效${competitorSummary.effective} / 追踪中${competitorSummary.tracking} / 无效${competitorSummary.invalid}\n表现最好的竞品词：${competitorSummary.topClaims.slice(0, 10).map(c => `${c.domain}的"${c.keyword}"(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}`
     : '（这段时间没有竞品成效数据）'
 
+  const ownText = ownSummaries.length > 0 && ownSummaries.some(g => g.topClaims.length > 0)
+    ? ownSummaries.map(g =>
+        `【${g.group_name}】获取排名${g.ranked} / 获取收录${g.indexed} / 追踪中${g.tracking} / 无效${g.invalid}\n表现最好的词：${g.topClaims.slice(0, 10).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、') || '无'}`
+      ).join('\n\n')
+    : '（这段时间没有自己站点的成效数据）'
+
   const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : '这一年'
 
-  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入，请仔细阅读后写出三段报告。
+  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入，请仔细阅读后写出四段报告。
 
 【大环境·每日大盘】
 ${envDailyText}
@@ -267,22 +287,27 @@ ${envSegmentsText}
 【各站点AI分析（已经通读过每个站点完整原始数据后写的分析，不是原始数字）】
 ${siteAnalysesText}
 
-【竞品成效（has_rank_title 开启追踪的竞品站点，新发现内容是否涨排名/收录）】
+【自己站点成效（分组任务里组员提交内容的排名/收录追踪，不含竞品）】
+${ownText}
+
+【竞品成效（has_rank_title 开启追踪的竞品站点，新发现内容是否涨排名/收录，不含自己的站点）】
 ${competitorText}
 
-请写三段内容：
+请写四段内容，自己站点成效和竞品成效必须分开写，不要混在一起：
 1. environment：大环境${periodLabel}怎么样，哪些站点/分段持续变化值得注意（权重上涨要连续多天才算数，别把单日跳动当成真上涨）。如果数据平淡没有值得说的，直接说"大环境平稳，没有明显异动"，不要硬编内容。
-2. effectiveness：竞品成效情况，哪些竞品词/站点表现突出。没有可靠数据就说没有，不要编。
-3. conclusion：综合结论，尝试对表现突出的站点给出可能的原因假设（比如是不是季节效应、是不是某类内容验证有效），并指出如果有竞品成效数据支撑，是哪些具体关键词驱动的。没有把握的假设要说清楚"推测"，不要说得像确定的事实。
+2. ownEffectiveness：自己站点的成效情况，哪些组/哪些词表现突出。没有可靠数据就说没有，不要编。
+3. competitorEffectiveness：竞品成效情况，哪些竞品词/站点表现突出。没有可靠数据就说没有，不要编。
+4. conclusion：综合结论，结合自己站点和竞品两边的数据对比，尝试对表现突出的站点给出可能的原因假设（比如是不是季节效应、是不是某类内容验证有效），并指出如果有成效数据支撑，是哪些具体关键词驱动的。没有把握的假设要说清楚"推测"，不要说得像确定的事实。
 
 以 JSON 格式返回，不要输出任何 JSON 外的文字：
 {
   "environment": "中文，300-600字",
-  "effectiveness": "中文，300-600字",
+  "ownEffectiveness": "中文，200-400字",
+  "competitorEffectiveness": "中文，200-400字",
   "conclusion": "中文，300-600字"
 }`
 
-  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<{ environment: string; effectiveness: string; conclusion: string }>(stage2Prompt, { maxOutputTokens: 8192 })
+  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<{ environment: string; ownEffectiveness: string; competitorEffectiveness: string; conclusion: string }>(stage2Prompt, { maxOutputTokens: 8192 })
 
   const durationMs = Date.now() - startedAt
 

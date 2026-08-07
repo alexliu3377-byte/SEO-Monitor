@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
 import SiteAZPicker, { type AZPickerSite } from '@/components/site-az-picker'
-import AddSiteModal from '@/components/add-site-modal'
 
 // ─── Shared ──────────────────────────────────────────────────────────────
 
@@ -86,7 +85,7 @@ function CompetitorsTab() {
   const [sites, setSites] = useState<CompetitorSite[]>([])
   const [loadingSites, setLoadingSites] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [showAddModal, setShowAddModal] = useState(false)
+  const [showManageModal, setShowManageModal] = useState(false)
 
   const [rows, setRows] = useState<TrackingRow[]>([])
   const [loadingRows, setLoadingRows] = useState(false)
@@ -106,18 +105,6 @@ function CompetitorsTab() {
     fetch(`/api/research/competitor-sites/${selectedId}/tracking`).then(r => r.json()).then(d => setRows(d.rows ?? [])).finally(() => setLoadingRows(false))
   }, [selectedId])
 
-  async function handleSiteSaved(savedSite?: { id: string; domain: string }) {
-    setShowAddModal(false)
-    if (savedSite) {
-      await fetch('/api/sites', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: savedSite.id, has_rank_title: true }),
-      })
-      loadSites()
-      setSelectedId(savedSite.id)
-    }
-  }
-
   const filteredRows = rows.filter(r => {
     if (kwFilter && !r.keyword.toLowerCase().includes(kwFilter.toLowerCase())) return false
     if (typeFilter && r.content_type !== typeFilter) return false
@@ -128,16 +115,16 @@ function CompetitorsTab() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只有开启"排名"追踪的站点才会出现在这里）</p>
-        <button onClick={() => setShowAddModal(true)}
+        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
+        <button onClick={() => setShowManageModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-          添加竞品站点
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          管理竞品站点
         </button>
       </div>
 
       {loadingSites ? <Spinner /> : sites.length === 0 ? (
-        <p className="text-sm text-gray-300 text-center py-8">还没有竞品站点，点右上角添加一个</p>
+        <p className="text-sm text-gray-300 text-center py-8">还没有竞品站点，点右上角"管理竞品站点"开启追踪</p>
       ) : (
         <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
       )}
@@ -212,9 +199,98 @@ function CompetitorsTab() {
         </div>
       )}
 
-      {showAddModal && (
-        <AddSiteModal onClose={() => setShowAddModal(false)} onSaved={handleSiteSaved} />
+      {showManageModal && (
+        <ManageCompetitorSitesModal
+          onClose={() => setShowManageModal(false)}
+          onSaved={() => { setShowManageModal(false); loadSites() }}
+        />
       )}
+    </div>
+  )
+}
+
+interface ManageSite { id: string; domain: string; name: string; has_rank_title: boolean }
+
+// 列出全部站点（不含自己的站点）让用户勾选哪些要当竞品追踪排名——用户明确说
+// 不需要重新填站点资料（域名/CSS选择器那些在"网站管理"里已经配过了），这里
+// 只是批量开关 has_rank_title，不是新建站点。
+function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [sites, setSites] = useState<ManageSite[]>([])
+  const [loading, setLoading] = useState(true)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/research/competitor-sites?all=true').then(r => r.json()).then(d => {
+      const list = (d.sites ?? []) as ManageSite[]
+      setSites(list)
+      setChecked(new Set(list.filter(s => s.has_rank_title).map(s => s.id)))
+    }).finally(() => setLoading(false))
+  }, [])
+
+  function toggle(id: string) {
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function save() {
+    setSaving(true)
+    try {
+      const changed = sites.filter(s => s.has_rank_title !== checked.has(s.id))
+      await Promise.all(changed.map(s =>
+        fetch('/api/sites', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: s.id, has_rank_title: checked.has(s.id) }),
+        })
+      ))
+      onSaved()
+    } finally { setSaving(false) }
+  }
+
+  const filtered = query.trim()
+    ? sites.filter(s => s.domain.toLowerCase().includes(query.toLowerCase()) || s.name.toLowerCase().includes(query.toLowerCase()))
+    : sites
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-800">管理竞品站点</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-6 py-3 border-b border-gray-100">
+          <input type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索域名或站点名…" autoFocus
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+          <p className="text-xs text-gray-400 mt-1.5">勾选的站点会开启"排名"追踪，每天自动统计新增内容的成效（不含你自己的站点）</p>
+        </div>
+        <div className="px-6 py-3 overflow-y-auto flex-1">
+          {loading ? <Spinner /> : filtered.length === 0 ? (
+            <p className="text-sm text-gray-300 text-center py-8">没有匹配的站点</p>
+          ) : (
+            <div className="space-y-0.5">
+              {filtered.map(s => (
+                <label key={s.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={checked.has(s.id)} onChange={() => toggle(s.id)} />
+                  {s.domain} <span className="text-xs text-gray-400">{s.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+          <button onClick={save} disabled={saving}
+            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -262,10 +338,29 @@ interface CompetitorEffectivenessSummary {
   topClaims: CompetitorEffectivenessClaim[]
 }
 
+interface OwnEffectivenessClaim {
+  keyword: string
+  url: string | null
+  rank_position: number | null
+  volume: number
+  score: number
+}
+
+interface OwnEffectivenessGroup {
+  group_id: string
+  group_name: string
+  ranked: number
+  indexed: number
+  tracking: number
+  invalid: number
+  topClaims: OwnEffectivenessClaim[]
+}
+
 interface ReportDetail extends ReportListItem {
   site_analyses: SiteAnalysisEntry[]
   competitor_effectiveness: CompetitorEffectivenessSummary | null
-  report_sections: { environment: string; effectiveness: string; conclusion: string } | null
+  own_effectiveness: OwnEffectivenessGroup[] | null
+  report_sections: { environment: string; ownEffectiveness: string; competitorEffectiveness: string; conclusion: string } | null
 }
 
 const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }> = {
@@ -346,8 +441,32 @@ function ReportDetailView({ reportId }: { reportId: string }) {
       {report.report_sections && (
         <div className="space-y-4">
           <ReportSectionCard title="大环境" color="sky" text={report.report_sections.environment} />
-          <ReportSectionCard title="成效" color="green" text={report.report_sections.effectiveness} />
+          <ReportSectionCard title="自己站点成效" color="blue" text={report.report_sections.ownEffectiveness} />
+          <ReportSectionCard title="竞品成效" color="green" text={report.report_sections.competitorEffectiveness} />
           <ReportSectionCard title="综合结论" color="violet" text={report.report_sections.conclusion} />
+        </div>
+      )}
+
+      {report.own_effectiveness && report.own_effectiveness.some(g => g.topClaims.length > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-semibold text-gray-700">自己站点成效明细</span>
+          </div>
+          <div className="space-y-3">
+            {report.own_effectiveness.map(g => (
+              <div key={g.group_id}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-gray-800">{g.group_name}</span>
+                  <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking} · 无效{g.invalid}</span>
+                </div>
+                {g.topClaims.length > 0 && (
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    {g.topClaims.slice(0, 8).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/分${c.score})`).join('、')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -398,9 +517,9 @@ function ReportDetailView({ reportId }: { reportId: string }) {
   )
 }
 
-function ReportSectionCard({ title, color, text }: { title: string; color: 'sky' | 'green' | 'violet'; text: string }) {
-  const borderMap = { sky: 'border-sky-200', green: 'border-green-200', violet: 'border-violet-200' }
-  const textMap = { sky: 'text-sky-700', green: 'text-green-700', violet: 'text-violet-700' }
+function ReportSectionCard({ title, color, text }: { title: string; color: 'sky' | 'blue' | 'green' | 'violet'; text: string }) {
+  const borderMap = { sky: 'border-sky-200', blue: 'border-blue-200', green: 'border-green-200', violet: 'border-violet-200' }
+  const textMap = { sky: 'text-sky-700', blue: 'text-blue-700', green: 'text-green-700', violet: 'text-violet-700' }
   return (
     <div className={`bg-white rounded-xl border ${borderMap[color]} p-5`}>
       <p className={`text-sm font-semibold mb-2 ${textMap[color]}`}>{title}</p>

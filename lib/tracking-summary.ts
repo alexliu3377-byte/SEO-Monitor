@@ -4,6 +4,9 @@
 // dedup/source-lookup/rank-match-lookup/scoring logic stays in exactly one
 // place instead of drifting between the two routes.
 
+import { computeOutcomeScore } from '@/lib/outcome-score'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
@@ -152,5 +155,73 @@ export function computeSourceEffectiveness(
   return Array.from(map.entries())
     .map(([source, s]) => ({ source, total: s.total, ranked: s.ranked, indexed: s.indexed }))
     .sort((a, b) => b.total - a.total)
+}
+
+export interface GroupEffectivenessClaim {
+  keyword: string
+  url: string | null
+  rank_position: number | null
+  volume: number
+  score: number
+}
+
+export interface GroupEffectivenessSummary {
+  ranked: number
+  indexed: number
+  tracking: number
+  invalid: number
+  topClaims: GroupEffectivenessClaim[]
+}
+
+// 研究中心报告（scripts/research-report.ts）"自己站点成效"用——2026-08-07
+// 从竞品成效里拆出来单独一段，不再混在一起。只有2个组、数据量小，不值得
+// 像单站点分析那样单独占一次 Gemini 调用（Stage 1），原始数据直接留到 Stage 2
+// 跟大环境/竞品成效一起喂给最终综合。逻辑复用 app/api/task-groups/[id]/outcomes/
+// route.ts 同一套 dedupe/scoring，只是不分页返回、不按成员筛选，只要一份汇总数字
+// + 得分最高的几条给 AI 参考。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchGroupEffectivenessSummary(service: any, groupId: string, dateStart: string, dateEnd: string): Promise<GroupEffectivenessSummary> {
+  const rows = await fetchAllRows<TrackRow & { keyword: string; page_url: string | null }>((from, to) =>
+    service.from('site_tracking_records')
+      .select('claim_id, user_id, keyword, page_url, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
+      .eq('group_id', groupId)
+      .gte('record_date', dateStart).lte('record_date', dateEnd)
+      .order('record_date', { ascending: false }).order('id', { ascending: true })
+      .range(from, to))
+
+  const deduped = dedupeByClaim(rows)
+
+  const ranked = deduped.filter(r => r.effectiveness === '获取排名').length
+  const indexed = deduped.filter(r => r.effectiveness === '获取收录').length
+  const tracking = deduped.filter(r => r.effectiveness === '追踪中').length
+  const invalid = deduped.filter(r => r.effectiveness === '无效').length
+
+  const topClaims = deduped
+    .map(r => {
+      const rankChange = (r.rank_position != null && r.prev_rank_position != null) ? r.prev_rank_position - r.rank_position : null
+      return {
+        keyword: r.keyword, url: r.page_url,
+        rank_position: r.rank_position, volume: r.rank_volume || 0,
+        score: computeOutcomeScore(r.rank_position, r.is_indexed || r.rank_position != null, rankChange, r.rank_volume),
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 15)
+
+  return { ranked, indexed, tracking, invalid, topClaims }
+}
+
+// 自己站点的域名集合——不是新建一套标记机制，直接复用"分组任务"页面已有的
+// task_groups.site_domains 字段（该页面自己就把它当"自己站点"用，见
+// app/(dashboard)/task-groups/page.tsx 的 `const ownDomains = activeGroup.site_domains`）。
+// 研究中心"竞品成效"tab 和竞品成效汇总都要排除这些域名，不能把自己的站点当竞品追踪。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchOwnSiteDomains(service: any): Promise<Set<string>> {
+  const { data } = await service.from('task_groups').select('site_domains')
+  const domains = new Set<string>()
+  for (const g of (data ?? []) as { site_domains: string[] | null }[]) {
+    for (const d of g.site_domains ?? []) domains.add(d)
+  }
+  return domains
 }
 
