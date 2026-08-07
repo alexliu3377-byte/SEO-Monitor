@@ -6,17 +6,8 @@
     "app/api/environment/daily-snapshot/route.ts": {
       "maxDuration": 60
     },
-    "app/api/rules/research-tasks/[id]/analyze/route.ts": {
-      "maxDuration": 60
-    },
-    "app/api/rules/research-tasks/[id]/route.ts": {
-      "maxDuration": 60
-    },
     "app/api/charts/monthly-trend/route.ts": {
       "maxDuration": 120
-    },
-    "app/api/rules/multi-site-reports/[id]/analyze/route.ts": {
-      "maxDuration": 300
     }
   }
 }
