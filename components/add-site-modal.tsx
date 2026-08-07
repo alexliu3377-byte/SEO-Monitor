@@ -38,7 +38,7 @@ interface PreviewRow {
 interface AddSiteModalProps {
   site?: Site | null
   onClose: () => void
-  onSaved: () => void
+  onSaved: (savedSite?: { id: string; domain: string }) => void
 }
 
 interface AiSelectorSuggestion {
@@ -299,7 +299,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '保存失败')
-      onSaved()
+      onSaved(data.site ? { id: data.site.id, domain: data.site.domain } : undefined)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '保存失败')
     } finally {

@@ -1,0 +1,122 @@
+name: Research Report
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'    # 周报：每周一 08:00 MYT
+    - cron: '0 0 1 * *'    # 月报：每月1号 08:00 MYT
+    - cron: '0 0 1 1 *'    # 年报：每年1月1号 08:00 MYT
+  workflow_dispatch:
+    inputs:
+      periodType:
+        description: 'week / month / year'
+        required: false
+        default: 'week'
+      periodStart:
+        description: '起始日期 YYYY-MM-DD（留空=按periodType自动算）'
+        required: false
+        default: ''
+      periodEnd:
+        description: '结束日期 YYYY-MM-DD（留空=按periodType自动算）'
+        required: false
+        default: ''
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      report_id: ${{ steps.init.outputs.report_id }}
+      matrix: ${{ steps.gen.outputs.matrix }}
+      total: ${{ steps.gen.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Determine period type
+        id: period
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.periodType }}" >> "$GITHUB_OUTPUT"
+          else
+            case "${{ github.event.schedule }}" in
+              '0 0 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
+              '0 0 1 * *') echo "type=month" >> "$GITHUB_OUTPUT" ;;
+              *) echo "type=week" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
+      - name: Init report row
+        id: init
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          OUTPUT=$(npx tsx scripts/research-report.ts --mode=init --period-type=${{ steps.period.outputs.type }} --period-start=${{ github.event.inputs.periodStart }} --period-end=${{ github.event.inputs.periodEnd }})
+          echo "$OUTPUT"
+          REPORT_ID=$(echo "$OUTPUT" | grep '^REPORT_ID=' | cut -d= -f2)
+          echo "report_id=${REPORT_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute shard matrix
+        id: gen
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # 每个分片最多10个站点——年报量级单站点可能要几十秒到一分多钟，
+          # 10站点/分片留足安全余量，不会接近单 job 6小时硬上限（2026-08-07
+          # 推算过 50 站点顺序跑一次年报要7+小时才定下要拆分片）。
+          SPG=10
+          COUNT=$(curl -sf \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/sites?select=id&is_enabled=eq.true" | \
+            python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          TOTAL=$(python3 -c "import math; print(max(1, math.ceil(${COUNT}/${SPG})))")
+          MATRIX=$(python3 -c "import json; print(json.dumps({'shard': list(range(${TOTAL}))}))")
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "站点数=${COUNT} 每片=${SPG} 分片数=${TOTAL}"
+
+  stage1:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false   # 一个分片失败不影响其它分片，finalize 阶段照样跑
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run stage1 shard
+        run: npx tsx scripts/research-report.ts --mode=stage1 --report-id=${{ needs.setup.outputs.report_id }} --shard=${{ matrix.shard }} --shard-total=${{ needs.setup.outputs.total }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  finalize:
+    needs: [setup, stage1]
+    if: always() && needs.setup.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run stage2 synthesis
+        run: npx tsx scripts/research-report.ts --mode=stage2 --report-id=${{ needs.setup.outputs.report_id }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
