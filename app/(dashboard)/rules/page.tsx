@@ -140,7 +140,7 @@ export default function RulesPage() {
     if (role === 'normal') router.replace('/task-groups')
   }, [role, router])
 
-  const [activeTab, setActiveTab] = useState<'research' | 'suggestions' | 'ruleList'>('research')
+  const [activeTab, setActiveTab] = useState<'research' | 'multiSite' | 'suggestions' | 'ruleList'>('research')
   const [allSites, setAllSites] = useState<SiteInfo[]>([])
 
   useEffect(() => {
@@ -161,6 +161,10 @@ export default function RulesPage() {
           className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'research' ? 'text-green-600 border-green-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
           站点研究
         </button>
+        <button onClick={() => setActiveTab('multiSite')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'multiSite' ? 'text-sky-600 border-sky-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+          多站点报告
+        </button>
         <button onClick={() => setActiveTab('suggestions')}
           className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'suggestions' ? 'text-amber-600 border-amber-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
           推荐研究
@@ -172,6 +176,7 @@ export default function RulesPage() {
       </div>
 
       {activeTab === 'research' && <ResearchTab allSites={allSites} />}
+      {activeTab === 'multiSite' && <MultiSiteReportsTab allSites={allSites} />}
       {activeTab === 'suggestions' && <SuggestionsTab allSites={allSites} onStartResearch={() => setActiveTab('research')} />}
       {activeTab === 'ruleList' && <RuleListTab canEdit={canEdit} isSuper={role === 'super'} allSites={allSites} />}
     </div>
@@ -654,6 +659,292 @@ function PromoteRuleModal({ taskId, candidate, onClose, onDone, promoting, setPr
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ══════════════════════════════ 多站点报告 ══════════════════════════════
+
+interface MultiSiteReport {
+  id: string
+  site_ids: string[]
+  domains: string[]
+  date_start: string
+  date_end: string
+  status: 'in_progress' | 'completed'
+  created_at: string
+  site_digests?: SiteDigest[] | null
+  cross_site_synthesis?: string | null
+}
+
+interface SiteDigest {
+  domain: string
+  name: string
+  hasRankData: boolean
+  hasRankTitle: boolean
+  weightTrend: string
+  indexTrend: string
+  totalRankup: number
+  totalRankdown: number
+  totalNewApp: number
+  totalNewGame: number
+  topKeywordsCount: number
+  topKeywords: string[]
+}
+
+function MultiSiteReportsTab({ allSites }: { allSites: SiteInfo[] }) {
+  const [reports, setReports] = useState<MultiSiteReport[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showNewModal, setShowNewModal] = useState(false)
+
+  function loadReports() {
+    setLoading(true)
+    fetch('/api/rules/multi-site-reports').then(r => r.json()).then(d => setReports(d.reports ?? [])).finally(() => setLoading(false))
+  }
+  useEffect(loadReports, [])
+
+  return (
+    <div className="grid grid-cols-[280px_1fr] gap-5">
+      <div>
+        <button onClick={() => setShowNewModal(true)}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-sky-500 text-white text-sm font-medium rounded-lg hover:bg-sky-600 transition-colors mb-3">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+          新建多站点报告
+        </button>
+        {loading ? <Spinner /> : reports.length === 0 ? (
+          <p className="text-xs text-gray-300 text-center py-8">还没有多站点报告</p>
+        ) : (
+          <div className="space-y-1.5">
+            {reports.map(r => (
+              <button key={r.id} onClick={() => setSelectedId(r.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${selectedId === r.id ? 'border-sky-400 bg-sky-50/60' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-800">{r.domains.length}个站点</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1 ${r.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                    {r.status === 'completed' ? '已完成' : '进行中'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5 truncate">{r.domains.slice(0, 3).join('、')}{r.domains.length > 3 ? '…' : ''}</p>
+                <p className="text-[11px] text-gray-400">{r.date_start} ~ {r.date_end}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        {selectedId ? (
+          <MultiSiteReportDetailView reportId={selectedId} onChanged={loadReports} />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-300">
+            <svg className="w-12 h-12 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <span className="text-sm">左边选一个报告，或者新建一个</span>
+          </div>
+        )}
+      </div>
+
+      {showNewModal && (
+        <NewMultiSiteReportModal allSites={allSites} onClose={() => setShowNewModal(false)}
+          onCreated={(id) => { setShowNewModal(false); loadReports(); setSelectedId(id) }} />
+      )}
+    </div>
+  )
+}
+
+function NewMultiSiteReportModal({ allSites, onClose, onCreated }: { allSites: SiteInfo[]; onClose: () => void; onCreated: (id: string) => void }) {
+  const [siteQ, setSiteQ] = useState('')
+  const [siteIds, setSiteIds] = useState<string[]>([])
+  const [dateStart, setDateStart] = useState(daysAgoMY(30))
+  const [dateEnd, setDateEnd] = useState(todayMY())
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const filteredSites = siteQ.trim() ? allSites.filter(s => s.domain.includes(siteQ) || s.name.toLowerCase().includes(siteQ.toLowerCase())) : allSites
+
+  function toggleSite(id: string) {
+    setSiteIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : (prev.length >= 10 ? prev : [...prev, id]))
+  }
+
+  async function create() {
+    if (siteIds.length < 2) { setErr('至少选2个站点'); return }
+    setSaving(true); setErr('')
+    try {
+      const res = await fetch('/api/rules/multi-site-reports', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_ids: siteIds, date_start: dateStart, date_end: dateEnd }),
+      })
+      const d = await res.json()
+      if (!res.ok) { setErr(d.error || '创建失败'); return }
+      onCreated(d.report.id)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-800">新建多站点报告</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-6 py-4 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">站点（2-10个）</label>
+            {siteIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {siteIds.map(id => {
+                  const s = allSites.find(x => x.id === id)
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs bg-sky-50 text-sky-700 rounded px-2 py-0.5">
+                      {s?.domain}<button onClick={() => toggleSite(id)} className="text-sky-300 hover:text-red-500">×</button>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+            <input type="text" value={siteQ} onChange={e => setSiteQ(e.target.value)} placeholder="搜索域名…" autoFocus
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-sky-400 text-gray-700" />
+            <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-lg bg-gray-50 p-1.5 space-y-0.5">
+              {filteredSites.slice(0, 50).map(s => (
+                <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white text-sm text-gray-700 transition-colors cursor-pointer">
+                  <input type="checkbox" checked={siteIds.includes(s.id)} onChange={() => toggleSite(s.id)} />
+                  {s.domain} <span className="text-xs text-gray-400">{s.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">时间范围</label>
+            <div className="flex items-center gap-1.5 mb-2">
+              {[30, 60, 90].map(n => (
+                <button key={n} onClick={() => { setDateStart(daysAgoMY(n)); setDateEnd(todayMY()) }}
+                  className="text-xs px-2.5 py-1 rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">近{n}天</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 text-gray-700" />
+              <span className="text-gray-300">~</span>
+              <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} max={todayMY()}
+                className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 text-gray-700" />
+            </div>
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+          <button onClick={create} disabled={saving || siteIds.length < 2}
+            className="px-4 py-2 text-sm font-medium bg-sky-500 text-white rounded-lg hover:bg-sky-600 disabled:opacity-50 transition-colors">
+            {saving ? '创建中…' : '创建'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MultiSiteReportDetailView({ reportId, onChanged }: { reportId: string; onChanged: () => void }) {
+  const [report, setReport] = useState<MultiSiteReport | null>(null)
+  const [sites, setSites] = useState<{ id: string; domain: string; name: string; has_rank_data: boolean; has_rank_title: boolean }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [analyzing, setAnalyzing] = useState(false)
+
+  function load() {
+    setLoading(true)
+    fetch(`/api/rules/multi-site-reports/${reportId}`).then(r => r.json()).then(d => {
+      setReport(d.report)
+      setSites(d.sites ?? [])
+    }).finally(() => setLoading(false))
+  }
+  useEffect(load, [reportId])
+
+  async function runAnalysis() {
+    setAnalyzing(true)
+    try {
+      const res = await fetch(`/api/rules/multi-site-reports/${reportId}/analyze`, { method: 'POST' })
+      const d = await res.json()
+      if (res.ok) setReport(prev => prev ? { ...prev, site_digests: d.site_digests, cross_site_synthesis: d.cross_site_synthesis } : prev)
+      else alert(d.error || 'AI 分析失败')
+    } finally { setAnalyzing(false) }
+  }
+
+  async function markComplete() {
+    await fetch(`/api/rules/multi-site-reports/${reportId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'complete' }),
+    })
+    load(); onChanged()
+  }
+
+  if (loading || !report) return <Spinner />
+
+  const unreliableSites = sites.filter(s => !s.has_rank_data && !s.has_rank_title)
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">{report.domains.join('、')}</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{report.date_start} ~ {report.date_end}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {report.status === 'in_progress' && (
+            <button onClick={markComplete} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">标记完成</button>
+          )}
+          <span className={`text-xs px-2.5 py-1 rounded-full ${report.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+            {report.status === 'completed' ? '已完成' : '进行中'}
+          </span>
+        </div>
+      </div>
+
+      {unreliableSites.length > 0 && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          {unreliableSites.map(s => s.domain).join('、')} 这段时间没开涨跌/排名抓取，排名相关数据会缺失（权重/收录/新增内容不受影响）
+        </p>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-semibold text-gray-700">跨站点综合分析</span>
+          <button onClick={runAnalysis} disabled={analyzing}
+            className="text-xs px-3 py-1.5 rounded-lg bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50 transition-colors">
+            {analyzing ? '分析中…' : report.cross_site_synthesis ? '重新分析' : '开始AI分析'}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mb-3">读的是每个站点的完整明细，不是压缩摘要——站点越多、时间范围越长，跑得越慢，几分钟内属于正常，别中途刷新页面</p>
+        {report.cross_site_synthesis ? (
+          <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{report.cross_site_synthesis}</p>
+        ) : (
+          <p className="text-sm text-gray-300 text-center py-6">还没有分析，点右上角开始</p>
+        )}
+      </div>
+
+      {report.site_digests && report.site_digests.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+            <span className="text-sm font-semibold text-gray-700">各站点摘要</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {report.site_digests.map(d => (
+              <div key={d.domain} className="px-4 py-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-gray-800">{d.domain}</span>
+                  <span className="text-xs text-gray-400">权重{d.weightTrend} · 收录{d.indexTrend}</span>
+                </div>
+                <p className="text-xs text-gray-500">
+                  涨{d.totalRankup}/跌{d.totalRankdown} · 新增应用{d.totalNewApp}/游戏{d.totalNewGame} · 排名词{d.topKeywordsCount}个
+                </p>
+                {d.topKeywords.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-1 truncate">{d.topKeywords.join('、')}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

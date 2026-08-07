@@ -14,6 +14,9 @@
     },
     "app/api/charts/monthly-trend/route.ts": {
       "maxDuration": 120
+    },
+    "app/api/rules/multi-site-reports/[id]/analyze/route.ts": {
+      "maxDuration": 300
     }
   }
 }
