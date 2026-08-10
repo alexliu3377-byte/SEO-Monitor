@@ -509,9 +509,12 @@ function ReportDetailView({ reportId }: { reportId: string }) {
                   )}
                   {note && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-1.5">{note}</p>}
                   {g.topClaims.length > 0 && (
-                    <p className="text-xs text-gray-500 leading-relaxed">
-                      {g.topClaims.slice(0, 8).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/分${c.score})`).join('、')}
-                    </p>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-0.5">本周发力最多的词（按评分，非搜索量）</p>
+                      <p className="text-xs text-gray-600 leading-relaxed">
+                        {g.topClaims.slice(0, 5).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、')}
+                      </p>
+                    </div>
                   )}
                 </div>
               )
@@ -535,9 +538,12 @@ function ReportDetailView({ reportId }: { reportId: string }) {
           )}
           {competitorNote && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-2">{competitorNote}</p>}
           {report.competitor_effectiveness.topClaims.length > 0 && (
-            <p className="text-xs text-gray-500 leading-relaxed">
-              {report.competitor_effectiveness.topClaims.slice(0, 10).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/分${c.score})`).join('、')}
-            </p>
+            <div>
+              <p className="text-xs text-gray-400 mb-0.5">本周发力最多的词（按评分，非搜索量）</p>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                {report.competitor_effectiveness.topClaims.slice(0, 5).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}
+              </p>
+            </div>
           )}
         </div>
       )}
