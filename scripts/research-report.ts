@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { activityStart, activityEnd } from '../lib/activity-log'
-import { fetchSiteResearchSummary } from '../lib/site-research-summary'
+import { fetchSiteResearchSummary, type SiteResearchSummary } from '../lib/site-research-summary'
 import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
+import { computeWeightTiers } from '../lib/weight-tiers'
 import { callGeminiJSON } from '../lib/gemini'
 
 // 研究报告——GitHub Actions 直接跑（不经过 Vercel）。周报/月报/年报共用这一套
@@ -72,6 +73,20 @@ interface ReportRow {
   period_type: PeriodType
   period_start: string
   period_end: string
+}
+
+// 各站点分析页面要展示的结构化数字（权重/收录/移动IP）——2026-08-10 用户
+// 要求先摆数字再看AI的简短说明，不用AI在文字里重复这些数字。summary 里
+// 已经有这段时间的 weightTrend/indexTrend 全量数据，顺手算，不用再查一次。
+function computeSiteStats(summary: SiteResearchSummary) {
+  const lastWeight = summary.weightTrend[summary.weightTrend.length - 1]
+  const avg = (vals: number[]) => vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+  return {
+    pc_weight: lastWeight?.pc_weight ?? null,
+    mobile_weight: lastWeight?.mobile_weight ?? null,
+    avg_index_count: avg(summary.indexTrend.map(i => i.index_count)),
+    avg_mobile_ip: avg(summary.weightTrend.map(w => ((w.mobile_ip ?? 0) + (w.mobile_ip_max ?? 0)) / 2)),
+  }
 }
 
 async function loadReport(reportId: string): Promise<ReportRow> {
@@ -144,6 +159,7 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
       const summary = await fetchSiteResearchSummary(supabase, site.id, report.period_start, report.period_end)
       const hasData = summary.weightTrend.length > 0 || summary.indexTrend.length > 0 ||
         summary.rankChangeTrend.length > 0 || summary.newKeywordsTrend.length > 0 || summary.effectivenessRows.length > 0
+      const stats = computeSiteStats(summary)
 
       if (!hasData) {
         await supabase.from('research_report_sites').upsert({
@@ -159,7 +175,7 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
         if (result) {
           await supabase.from('research_report_sites').upsert({
             report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-            skipped: false, analysis: result.analysis,
+            skipped: false, analysis: result.analysis, ...stats,
           }, { onConflict: 'report_id,site_id' })
           okCount++
           console.log(`[stage1] ${site.domain} 分析完成`)
@@ -167,7 +183,7 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
           geminiFailCount++
           await supabase.from('research_report_sites').upsert({
             report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-            skipped: false, error: error || 'AI 分析失败',
+            skipped: false, error: error || 'AI 分析失败', ...stats,
           }, { onConflict: 'report_id,site_id' })
           console.log(`[stage1] ${site.domain} 分析失败: ${error}`)
         }
@@ -191,6 +207,55 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
       ok: okCount, skip: skipCount, fail: geminiFailCount, durationMs,
       summary: `分片${shard}/${shardTotal}，${siteList.length}站点，${geminiCallCount}次AI调用，${geminiFailCount}次失败`,
     })
+  }
+}
+
+// 整体 + 大/中/小站 的权重/收录结构化数字——从 period_end 往前最多找7天，
+// 拿到有 weight_history 数据的那一天做快照（正常情况 period_end 当天/前一天
+// 就有数据，往前找只是给"这段时间刚好抓取有缺口"兜个底）。
+async function computeEnvironmentStats(periodEnd: string) {
+  let asOfDate = periodEnd
+  let weightRows: { site_id: string; pc_weight: number | null; mobile_weight: number | null }[] = []
+  for (let i = 0; i < 7; i++) {
+    const { data } = await supabase.from('weight_history')
+      .select('site_id, pc_weight, mobile_weight').eq('record_date', asOfDate)
+    if (data && data.length > 0) { weightRows = data; break }
+    asOfDate = new Date(new Date(asOfDate + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
+  }
+  if (weightRows.length === 0) return null
+
+  const { data: indexRows } = await supabase.from('index_snapshots')
+    .select('site_id, index_count').eq('snapshot_date', asOfDate)
+  const indexBySite = new Map<string, number>((indexRows ?? []).map((r: { site_id: string; index_count: number }) => [r.site_id, r.index_count]))
+
+  const tiers = computeWeightTiers(weightRows)
+  const round1 = (n: number) => Math.round(n * 10) / 10
+
+  function statsFor(siteIds: string[]) {
+    const pcVals: number[] = []; const mVals: number[] = []; const idxVals: number[] = []
+    for (const id of siteIds) {
+      const w = weightRows.find(r => r.site_id === id)
+      if (w?.pc_weight != null) pcVals.push(w.pc_weight)
+      if (w?.mobile_weight != null) mVals.push(w.mobile_weight)
+      const idx = indexBySite.get(id)
+      if (idx != null) idxVals.push(idx)
+    }
+    const avg = (vals: number[]) => vals.length > 0 ? round1(vals.reduce((a, b) => a + b, 0) / vals.length) : null
+    return {
+      siteCount: siteIds.length,
+      pcWeight: avg(pcVals), mobileWeight: avg(mVals),
+      indexCount: idxVals.length > 0 ? Math.round(idxVals.reduce((a, b) => a + b, 0) / idxVals.length) : null,
+    }
+  }
+
+  const allSiteIds = weightRows.map(r => r.site_id)
+  const tierGroups: Record<string, string[]> = { 大站: [], 中站: [], 小站: [] }
+  for (const [siteId, tier] of Array.from(tiers)) tierGroups[tier].push(siteId)
+
+  return {
+    asOfDate,
+    overall: statsFor(allSiteIds),
+    tiers: { 大站: statsFor(tierGroups.大站), 中站: statsFor(tierGroups.中站), 小站: statsFor(tierGroups.小站) },
   }
 }
 
@@ -235,6 +300,12 @@ async function runStage2(reportId: string) {
   ])
   const environmentInput = { daily: envDaily ?? [], segments: envSegments ?? [] }
 
+  // 大环境结构化数字——2026-08-10 用户要求先摆整体+大/中/小站的权重/收录数字，
+  // AI只写简短说明，不用在文字里复述这些数字。取 period_end 当天（或往前找
+  // 最近一天有数据的）weight_history + index_snapshots 现算，跟AI分析完全
+  // 独立、代码直接算好存库。
+  const environmentStats = await computeEnvironmentStats(periodEnd)
+
   const analyzedCount = siteAnalyses.filter(s => !s.skipped && s.analysis).length
   const skippedCount = siteAnalyses.filter(s => s.skipped).length
   const failedCount = siteAnalyses.filter(s => !s.skipped && !s.analysis).length
@@ -243,6 +314,7 @@ async function runStage2(reportId: string) {
     competitor_effectiveness: competitorSummary,
     own_effectiveness: ownSummaries,
     environment_input: environmentInput,
+    environment_stats: environmentStats,
     sites_considered: sitesConsidered,
     sites_analyzed: analyzedCount,
     sites_skipped: skippedCount,
@@ -250,7 +322,10 @@ async function runStage2(reportId: string) {
     gemini_fail_count: failedCount,
   }).eq('id', reportId)
 
-  // Stage 2：一次调用综合全部输入。
+  // Stage 2：一次调用综合全部输入。2026-08-10 起结构化数字（大环境/成效breakdown）
+  // 都已经代码算好、直接存库展示，AI 不用在文字里复述这些数字，只写简短点评——
+  // prompt 里把这些数字格式化成文本给AI参考，明确要求"数字已经摆在页面上了，
+  // 只需要点重点，不要逐条复述"。
   const envDailyText = (envDaily ?? []).map((d: { date: string; avg_index_change_pct: number | null; total_rankup: number; total_rankdown: number; is_school_holiday: boolean; is_holiday: boolean; crawl_anomaly: boolean }) =>
     `${d.date}${d.is_school_holiday ? '(学生假期)' : ''}${d.is_holiday ? '(法定节假日)' : ''}${d.crawl_anomaly ? '(疑似漏抓)' : ''}:收录中位数变化${d.avg_index_change_pct ?? '无数据'}%/涨${d.total_rankup}跌${d.total_rankdown}`
   ).join('；') || '无数据'
@@ -259,24 +334,40 @@ async function runStage2(reportId: string) {
     `${s.date} [${s.dimension}=${s.segment}] ${s.site_count}站:变化${s.avg_index_change_pct ?? '无'}%(偏离大盘${s.deviation_pct ?? '无'}个百分点)${s.is_anomaly ? '⚠异常' : ''}`
   ).join('\n') || '无数据'
 
+  const envStatsText = environmentStats
+    ? `截至${environmentStats.asOfDate}：整体 PC权重${environmentStats.overall.pcWeight ?? '无'}/移动权重${environmentStats.overall.mobileWeight ?? '无'}/平均收录${environmentStats.overall.indexCount ?? '无'}；` +
+      (['大站', '中站', '小站'] as const).map(t => {
+        const s = environmentStats.tiers[t]
+        return `${t}(${s.siteCount}个)：PC权重${s.pcWeight ?? '无'}/移动权重${s.mobileWeight ?? '无'}/平均收录${s.indexCount ?? '无'}`
+      }).join('；')
+    : '无数据'
+
   const siteAnalysesText = siteAnalyses
     .filter(s => !s.skipped && s.analysis)
     .map(s => `【${s.domain}（${s.name}）】\n${s.analysis}`)
     .join('\n\n') || '（这段时间没有站点产出有效分析）'
 
   const competitorText = competitorSummary.topClaims.length > 0
-    ? `有效${competitorSummary.effective} / 追踪中${competitorSummary.tracking} / 无效${competitorSummary.invalid}\n表现最好的竞品词：${competitorSummary.topClaims.slice(0, 10).map(c => `${c.domain}的"${c.keyword}"(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}`
+    ? `有效${competitorSummary.effective} / 追踪中${competitorSummary.tracking} / 无效${competitorSummary.invalid}；内容类型：游戏${competitorSummary.contentBreakdown.游戏} / 应用${competitorSummary.contentBreakdown.应用}\n表现最好的竞品词：${competitorSummary.topClaims.slice(0, 10).map(c => `${c.domain}的"${c.keyword}"(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}`
     : '（这段时间没有竞品成效数据）'
 
-  const ownText = ownSummaries.length > 0 && ownSummaries.some(g => g.topClaims.length > 0)
-    ? ownSummaries.map(g =>
-        `【${g.group_name}】获取排名${g.ranked} / 获取收录${g.indexed} / 追踪中${g.tracking} / 无效${g.invalid}\n表现最好的词：${g.topClaims.slice(0, 10).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、') || '无'}`
-      ).join('\n\n')
-    : '（这段时间没有自己站点的成效数据）'
+  const ownTextByGroup = new Map<string, string>()
+  for (const g of ownSummaries) {
+    ownTextByGroup.set(g.group_name, g.topClaims.length > 0
+      ? `获取排名${g.ranked} / 获取收录${g.indexed} / 追踪中${g.tracking} / 无效${g.invalid}；内容类型（获取排名的词）：游戏${g.contentBreakdown.游戏} / 应用${g.contentBreakdown.应用} / 专题${g.contentBreakdown.专题} / 资讯${g.contentBreakdown.资讯}\n表现最好的词：${g.topClaims.slice(0, 10).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、') || '无'}`
+      : '（这段时间没有成效数据）')
+  }
+  const ownText = ownSummaries.length > 0
+    ? ownSummaries.map(g => `【${g.group_name}】${ownTextByGroup.get(g.group_name)}`).join('\n\n')
+    : '（没有分组任务数据）'
 
   const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : '这一年'
+  const groupNamesForSchema = ownSummaries.map(g => `"${g.group_name}": "..."`).join(', ')
 
-  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入，请仔细阅读后写出四段报告。
+  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：
+
+【大环境·整体+大/中/小站权重收录】
+${envStatsText}
 
 【大环境·每日大盘】
 ${envDailyText}
@@ -287,27 +378,27 @@ ${envSegmentsText}
 【各站点AI分析（已经通读过每个站点完整原始数据后写的分析，不是原始数字）】
 ${siteAnalysesText}
 
-【自己站点成效（分组任务里组员提交内容的排名/收录追踪，不含竞品）】
+【自己站点成效（分组任务里组员提交内容的排名/收录追踪，不含竞品，按内容类型——游戏/应用/专题/资讯——分类，看得出是什么内容带来收益）】
 ${ownText}
 
 【竞品成效（has_rank_title 开启追踪的竞品站点，新发现内容是否涨排名/收录，不含自己的站点）】
 ${competitorText}
 
-请写四段内容，自己站点成效和竞品成效必须分开写，不要混在一起：
-1. environment：大环境${periodLabel}怎么样，哪些站点/分段持续变化值得注意（权重上涨要连续多天才算数，别把单日跳动当成真上涨）。如果数据平淡没有值得说的，直接说"大环境平稳，没有明显异动"，不要硬编内容。
-2. ownEffectiveness：自己站点的成效情况，哪些组/哪些词表现突出。没有可靠数据就说没有，不要编。
-3. competitorEffectiveness：竞品成效情况，哪些竞品词/站点表现突出。没有可靠数据就说没有，不要编。
-4. conclusion：综合结论，结合自己站点和竞品两边的数据对比，尝试对表现突出的站点给出可能的原因假设（比如是不是季节效应、是不是某类内容验证有效），并指出如果有成效数据支撑，是哪些具体关键词驱动的。没有把握的假设要说清楚"推测"，不要说得像确定的事实。
+请写以下几段内容，自己站点成效和竞品成效必须分开写，不要混在一起：
+1. environmentNote：大环境${periodLabel}怎么样，哪个档位/分段的表现跟大盘不一样值得注意（权重上涨要连续多天才算数，别把单日跳动当成真上涨）。数据平淡就直接说"大环境平稳，没有明显异动"，不要硬编。
+2. ownGroupNotes：**对象**，key是每个分组的名字（${groupNamesForSchema}），value是这个组的简短说明——重点说清楚这个组的收益主要是什么类型内容（游戏/应用/专题/资讯）带来的，没有可靠数据就说没有。
+3. competitorNote：竞品成效情况，哪些竞品词/站点表现突出，游戏还是应用类内容更有效。没有可靠数据就说没有。
+4. conclusion：综合结论——具体点出哪些站点因为什么词搜索量上升带来了收益、对比自己站点成效与竞品成效谁更好、指出这段时间"没有做到什么"所以没拿到更好的成绩。没把握的假设要说清楚"推测"，不要说得像确定的事实。可以比其它几段稍长一点，因为要做归因对比。
 
 以 JSON 格式返回，不要输出任何 JSON 外的文字：
 {
-  "environment": "中文，300-600字",
-  "ownEffectiveness": "中文，200-400字",
-  "competitorEffectiveness": "中文，200-400字",
-  "conclusion": "中文，300-600字"
+  "environmentNote": "中文，100-200字",
+  "ownGroupNotes": { ${groupNamesForSchema || '"组名": "..."'} },
+  "competitorNote": "中文，100-200字",
+  "conclusion": "中文，200-350字"
 }`
 
-  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<{ environment: string; ownEffectiveness: string; competitorEffectiveness: string; conclusion: string }>(stage2Prompt, { maxOutputTokens: 8192 })
+  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<{ environmentNote: string; ownGroupNotes: Record<string, string>; competitorNote: string; conclusion: string }>(stage2Prompt, { maxOutputTokens: 8192 })
 
   const durationMs = Date.now() - startedAt
 

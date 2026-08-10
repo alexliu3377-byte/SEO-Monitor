@@ -20,18 +20,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 已经带出来的旧版 JSONB 列）还有真实数据，做个兜底不然老报告会显示"没有站点分析"。
   const { data: siteRows } = await service
     .from('research_report_sites')
-    .select('site_id, domain, name, skipped, skip_reason, analysis, error')
+    .select('site_id, domain, name, skipped, skip_reason, analysis, error, pc_weight, mobile_weight, avg_index_count, avg_mobile_ip')
     .eq('report_id', id)
   if (siteRows && siteRows.length > 0) report.site_analyses = siteRows
 
   // 附上"各站点分析"里每个站点的最新权重——SiteAZPicker 的名牌要带PC/M权重
-  // （用户点名要求），不用另外发一次请求。
-  const siteIds = ((report.site_analyses ?? []) as { site_id: string }[]).map(s => s.site_id)
+  // （用户点名要求），不用另外发一次请求。2026-08-10 起 research_report_sites
+  // 自己就带 pc_weight/mobile_weight 了（Stage1 顺手存的），这里改成只给"老
+  // 报告"（那4个新列是null，改版之前生成的）兜底查一次 weight_history，新报告
+  // 不用再查。
+  const staleSiteIds = ((report.site_analyses ?? []) as { site_id: string; pc_weight: number | null; mobile_weight: number | null }[])
+    .filter(s => s.pc_weight == null && s.mobile_weight == null).map(s => s.site_id)
   const siteWeights: Record<string, { pc: number; mobile: number }> = {}
-  if (siteIds.length > 0) {
+  if (staleSiteIds.length > 0) {
     const { data: weightRows } = await service
       .from('weight_history').select('site_id, record_date, pc_weight, mobile_weight')
-      .in('site_id', siteIds).order('record_date', { ascending: true })
+      .in('site_id', staleSiteIds).order('record_date', { ascending: true })
     for (const w of (weightRows ?? []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
       siteWeights[w.site_id] = { pc: w.pc_weight, mobile: w.mobile_weight }
     }

@@ -17,6 +17,11 @@ export interface CompetitorEffectivenessSummary {
   tracking: number
   invalid: number
   topClaims: CompetitorEffectivenessClaim[]
+  // 2026-08-10：跟自己站点那边的 contentBreakdown 对应，但这边不用走
+  // classifyContentCategory 猜——competitor_tracking_records.content_type
+  // 抓取时就已经是 game/app 了（复制自 raw_keywords），只有两类，直接数
+  // effectiveness='有效'（真正拿到效果）的条数。
+  contentBreakdown: { 游戏: number; 应用: number }
 }
 
 // 研究报告（scripts/research-report.ts）"竞品成效"部分的数据源——读
@@ -56,6 +61,13 @@ export async function fetchCompetitorEffectivenessSummary(service: any, dateStar
   const tracking = rows.filter(r => r.effectiveness === '追踪中').length
   const invalid = rows.filter(r => r.effectiveness === '无效').length
 
+  const contentBreakdown = { 游戏: 0, 应用: 0 }
+  for (const r of rows) {
+    if (r.effectiveness !== '有效') continue
+    if (r.content_type === 'game') contentBreakdown.游戏++
+    else contentBreakdown.应用++
+  }
+
   const topClaims = rows
     .filter(r => r.rank_position != null)
     .map(r => ({
@@ -70,5 +82,5 @@ export async function fetchCompetitorEffectivenessSummary(service: any, dateStar
     .sort((a, b) => b.score - a.score)
     .slice(0, 15)
 
-  return { effective, tracking, invalid, topClaims }
+  return { effective, tracking, invalid, topClaims, contentBreakdown }
 }

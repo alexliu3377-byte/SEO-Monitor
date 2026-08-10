@@ -6,6 +6,7 @@
 
 import { computeOutcomeScore } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { classifyContentCategory, type ContentCategory } from '@/lib/content-category'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -171,6 +172,9 @@ export interface GroupEffectivenessSummary {
   tracking: number
   invalid: number
   topClaims: GroupEffectivenessClaim[]
+  // 2026-08-10：只数"获取排名"（真正拿到效果）的claim按内容类型分布，回答
+  // "这个月的收益主要是什么类型内容带来的"（用户明确要求）。
+  contentBreakdown: Record<ContentCategory, number>
 }
 
 // 研究中心报告（scripts/research-report.ts）"自己站点成效"用——2026-08-07
@@ -196,6 +200,12 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
   const tracking = deduped.filter(r => r.effectiveness === '追踪中').length
   const invalid = deduped.filter(r => r.effectiveness === '无效').length
 
+  const contentBreakdown: Record<ContentCategory, number> = { 游戏: 0, 应用: 0, 专题: 0, 资讯: 0 }
+  for (const r of deduped) {
+    if (r.effectiveness !== '获取排名') continue
+    contentBreakdown[classifyContentCategory(r.page_url, r.keyword)]++
+  }
+
   const topClaims = deduped
     .map(r => {
       const rankChange = (r.rank_position != null && r.prev_rank_position != null) ? r.prev_rank_position - r.rank_position : null
@@ -208,7 +218,7 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
     .sort((a, b) => b.score - a.score)
     .slice(0, 15)
 
-  return { ranked, indexed, tracking, invalid, topClaims }
+  return { ranked, indexed, tracking, invalid, topClaims, contentBreakdown }
 }
 
 // 自己站点的域名集合——2026-08-10 起改成读 sites.is_own_site（研究中心"管理

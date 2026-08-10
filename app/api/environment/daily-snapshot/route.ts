@@ -3,6 +3,7 @@ export const maxDuration = 60
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { computeWeightTiers } from '@/lib/weight-tiers'
 
 // 中国大陆法定节假日（不含调休）2025-2027
 // 更新方式：每年国务院通知发布后在此追加
@@ -174,13 +175,14 @@ async function handler(req: Request) {
     else c.app++
   }
 
-  const weightValues = Array.from(siteWeight.values()).sort((a, b) => a - b)
-  const p33 = weightValues[Math.floor(weightValues.length * 0.33)] ?? 0
-  const p66 = weightValues[Math.floor(weightValues.length * 0.66)] ?? 0
-  function weightTierOf(w: number): string {
-    if (w <= p33) return '低档'
-    if (w <= p66) return '中档'
-    return '高档'
+  // 33/66百分位分档算法抽到 lib/weight-tiers.ts 跟研究报告共用（2026-08-10），
+  // 这里的分段标签（高/中/低档）是这张表的历史存量格式，不跟着改名，只是
+  // 内部换成共用函数算，翻译一下标签名。
+  const weightTierMap = computeWeightTiers(weightRows)
+  const TIER_LABEL_LEGACY: Record<string, string> = { '小站': '低档', '中站': '中档', '大站': '高档' }
+  function weightTierOf(siteId: string): string | null {
+    const tier = weightTierMap.get(siteId)
+    return tier ? TIER_LABEL_LEGACY[tier] : null
   }
 
   function contentFocusOf(siteId: string): string | null {
@@ -261,9 +263,8 @@ async function handler(req: Request) {
 
   const weightGroups = new Map<string, string[]>()
   for (const siteId of Array.from(allSiteIds)) {
-    const w = siteWeight.get(siteId)
-    if (w == null) continue
-    const tier = weightTierOf(w)
+    const tier = weightTierOf(siteId)
+    if (tier == null) continue
     if (!weightGroups.has(tier)) weightGroups.set(tier, [])
     weightGroups.get(tier)!.push(siteId)
   }

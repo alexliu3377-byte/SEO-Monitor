@@ -342,6 +342,10 @@ interface SiteAnalysisEntry {
   skip_reason: string | null
   analysis: string | null
   error: string | null
+  pc_weight?: number | null
+  mobile_weight?: number | null
+  avg_index_count?: number | null
+  avg_mobile_ip?: number | null
 }
 
 interface CompetitorEffectivenessClaim {
@@ -359,6 +363,7 @@ interface CompetitorEffectivenessSummary {
   tracking: number
   invalid: number
   topClaims: CompetitorEffectivenessClaim[]
+  contentBreakdown?: { 游戏: number; 应用: number }
 }
 
 interface OwnEffectivenessClaim {
@@ -377,13 +382,36 @@ interface OwnEffectivenessGroup {
   tracking: number
   invalid: number
   topClaims: OwnEffectivenessClaim[]
+  contentBreakdown?: { 游戏: number; 应用: number; 专题: number; 资讯: number }
 }
 
+interface EnvironmentTierStats {
+  siteCount: number
+  pcWeight: number | null
+  mobileWeight: number | null
+  indexCount: number | null
+}
+
+interface EnvironmentStats {
+  asOfDate: string
+  overall: EnvironmentTierStats
+  tiers: { 大站: EnvironmentTierStats; 中站: EnvironmentTierStats; 小站: EnvironmentTierStats }
+}
+
+// report_sections 2026-08-10 起改成短字段+按组说明（environmentNote/ownGroupNotes/
+// competitorNote），旧报告还是老的四个长字段（environment/ownEffectiveness/
+// competitorEffectiveness）——两套字段都保留在类型里，渲染时优先取新字段、
+// 没有再退回旧字段，老报告不会显示空白。conclusion 两版字段名一直相同不用兼容。
 interface ReportDetail extends ReportListItem {
   site_analyses: SiteAnalysisEntry[]
   competitor_effectiveness: CompetitorEffectivenessSummary | null
   own_effectiveness: OwnEffectivenessGroup[] | null
-  report_sections: { environment: string; ownEffectiveness: string; competitorEffectiveness: string; conclusion: string } | null
+  environment_stats: EnvironmentStats | null
+  report_sections: {
+    environmentNote?: string; ownGroupNotes?: Record<string, string>; competitorNote?: string
+    environment?: string; ownEffectiveness?: string; competitorEffectiveness?: string
+    conclusion: string
+  } | null
 }
 
 const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }> = {
@@ -451,9 +479,19 @@ function ReportDetailView({ reportId }: { reportId: string }) {
   const failedSites = report.site_analyses.filter(s => !s.skipped && !s.analysis)
   const azSites: AZPickerSite[] = analyzedSites.map(s => ({
     id: s.site_id, domain: s.domain, name: s.name,
-    pcWeight: siteWeights[s.site_id]?.pc ?? null, mobileWeight: siteWeights[s.site_id]?.mobile ?? null,
+    pcWeight: s.pc_weight ?? siteWeights[s.site_id]?.pc ?? null,
+    mobileWeight: s.mobile_weight ?? siteWeights[s.site_id]?.mobile ?? null,
   }))
   const expandedSite = analyzedSites.find(s => s.site_id === expandedSiteId) ?? null
+
+  const sections = report.report_sections
+  const envNote = sections?.environmentNote ?? sections?.environment ?? null
+  const competitorNote = sections?.competitorNote ?? sections?.competitorEffectiveness ?? null
+  // 老报告只有一段不分组的 ownEffectiveness 文字——只有一个组时可以直接当那个组的说明用；
+  // 多个组时没法知道旧文字对应哪个组，宁可不显示也不要显示错组。
+  const ownNoteFor = (groupName: string) =>
+    sections?.ownGroupNotes?.[groupName] ??
+    (report.own_effectiveness?.length === 1 ? sections?.ownEffectiveness : undefined) ?? null
 
   return (
     <div className="space-y-5">
@@ -461,51 +499,74 @@ function ReportDetailView({ reportId }: { reportId: string }) {
         <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{report.error}</p>
       )}
 
-      {report.report_sections && (
-        <div className="space-y-4">
-          <ReportSectionCard title="大环境" color="sky" text={report.report_sections.environment} />
-          <ReportSectionCard title="自己站点成效" color="blue" text={report.report_sections.ownEffectiveness} />
-          <ReportSectionCard title="竞品成效" color="green" text={report.report_sections.competitorEffectiveness} />
-          <ReportSectionCard title="综合结论" color="violet" text={report.report_sections.conclusion} />
+      {(report.environment_stats || envNote) && (
+        <div className="bg-white rounded-xl border border-sky-200 p-5">
+          <p className="text-sm font-semibold mb-3 text-sky-700">大环境</p>
+          {report.environment_stats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+              <EnvStatCard label="整体" stats={report.environment_stats.overall} />
+              <EnvStatCard label="大站" stats={report.environment_stats.tiers.大站} />
+              <EnvStatCard label="中站" stats={report.environment_stats.tiers.中站} />
+              <EnvStatCard label="小站" stats={report.environment_stats.tiers.小站} />
+            </div>
+          )}
+          {envNote && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{envNote}</p>}
         </div>
       )}
 
-      {report.own_effectiveness && report.own_effectiveness.some(g => g.topClaims.length > 0) && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-gray-700">自己站点成效明细</span>
-          </div>
-          <div className="space-y-3">
-            {report.own_effectiveness.map(g => (
-              <div key={g.group_id}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-gray-800">{g.group_name}</span>
-                  <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking} · 无效{g.invalid}</span>
+      {report.own_effectiveness && report.own_effectiveness.length > 0 && (
+        <div className="bg-white rounded-xl border border-blue-200 p-5">
+          <p className="text-sm font-semibold mb-3 text-blue-700">自己站点成效</p>
+          <div className="space-y-4">
+            {report.own_effectiveness.map((g, i) => {
+              const note = ownNoteFor(g.group_name)
+              return (
+                <div key={g.group_id} className={i > 0 ? 'pt-4 border-t border-gray-100' : ''}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-gray-800">{g.group_name}</span>
+                    <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking} · 无效{g.invalid}</span>
+                  </div>
+                  {g.contentBreakdown && (
+                    <p className="text-xs text-gray-400 mb-1.5">
+                      游戏{g.contentBreakdown.游戏} · 应用{g.contentBreakdown.应用} · 专题{g.contentBreakdown.专题} · 资讯{g.contentBreakdown.资讯}
+                    </p>
+                  )}
+                  {note && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-1.5">{note}</p>}
+                  {g.topClaims.length > 0 && (
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      {g.topClaims.slice(0, 8).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/分${c.score})`).join('、')}
+                    </p>
+                  )}
                 </div>
-                {g.topClaims.length > 0 && (
-                  <p className="text-xs text-gray-500 leading-relaxed">
-                    {g.topClaims.slice(0, 8).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/分${c.score})`).join('、')}
-                  </p>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
 
-      {report.competitor_effectiveness && report.competitor_effectiveness.topClaims.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-gray-700">竞品成效明细</span>
+      {report.competitor_effectiveness && (
+        <div className="bg-white rounded-xl border border-green-200 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-green-700">竞品成效</span>
             <span className="text-xs text-gray-400">
               有效{report.competitor_effectiveness.effective} · 追踪中{report.competitor_effectiveness.tracking} · 无效{report.competitor_effectiveness.invalid}
             </span>
           </div>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            {report.competitor_effectiveness.topClaims.slice(0, 10).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/分${c.score})`).join('、')}
-          </p>
+          {report.competitor_effectiveness.contentBreakdown && (
+            <p className="text-xs text-gray-400 mb-2">
+              游戏{report.competitor_effectiveness.contentBreakdown.游戏} · 应用{report.competitor_effectiveness.contentBreakdown.应用}
+            </p>
+          )}
+          {competitorNote && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-2">{competitorNote}</p>}
+          {report.competitor_effectiveness.topClaims.length > 0 && (
+            <p className="text-xs text-gray-500 leading-relaxed">
+              {report.competitor_effectiveness.topClaims.slice(0, 10).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/分${c.score})`).join('、')}
+            </p>
+          )}
         </div>
       )}
+
+      {sections?.conclusion && <ReportSectionCard title="综合结论" color="violet" text={sections.conclusion} />}
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-3">
@@ -520,6 +581,13 @@ function ReportDetailView({ reportId }: { reportId: string }) {
             {expandedSite && (
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <p className="text-sm font-medium text-gray-800 mb-1.5">{expandedSite.domain}（{expandedSite.name}）</p>
+                {(expandedSite.pc_weight != null || expandedSite.mobile_weight != null || expandedSite.avg_index_count != null || expandedSite.avg_mobile_ip != null) && (
+                  <p className="text-xs text-gray-400 mb-2">
+                    权重 PC{expandedSite.pc_weight ?? '—'} · M{expandedSite.mobile_weight ?? '—'}
+                    　收录均值{expandedSite.avg_index_count != null ? Math.round(expandedSite.avg_index_count).toLocaleString() : '—'}
+                    　移动IP均值{expandedSite.avg_mobile_ip != null ? Math.round(expandedSite.avg_mobile_ip).toLocaleString() : '—'}
+                  </p>
+                )}
                 <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{expandedSite.analysis}</p>
               </div>
             )}
@@ -536,6 +604,16 @@ function ReportDetailView({ reportId }: { reportId: string }) {
           </div>
         </details>
       )}
+    </div>
+  )
+}
+
+function EnvStatCard({ label, stats }: { label: string; stats: EnvironmentTierStats }) {
+  return (
+    <div className="bg-gray-50 rounded-lg p-3">
+      <p className="text-xs text-gray-400 mb-1">{label}{label !== '整体' ? `（${stats.siteCount}）` : ''}</p>
+      <p className="text-sm text-gray-700">PC{stats.pcWeight ?? '—'} · M{stats.mobileWeight ?? '—'}</p>
+      <p className="text-xs text-gray-500">收录{stats.indexCount != null ? stats.indexCount.toLocaleString() : '—'}</p>
     </div>
   )
 }
