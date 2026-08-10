@@ -2,9 +2,12 @@ name: Research Report
 
 on:
   schedule:
-    - cron: '0 0 * * 1'    # 周报：每周一 08:00 MYT
-    - cron: '0 0 1 * *'    # 月报：每月1号 08:00 MYT
-    - cron: '0 0 1 1 *'    # 年报：每年1月1号 08:00 MYT
+    # 分钟故意不设整点——GitHub 官方文档提示整点是 schedule 排队高峰，容易延迟/
+    # 漏跑（2026-08-10 真实遇到：这个 workflow 头一次该触发的周一 08:00 MYT
+    # 硬是拖到 09:28 MYT 才跑，晚了将近1.5小时），错开到第10分钟降低风险。
+    - cron: '10 0 * * 1'   # 周报：每周一 08:10 MYT
+    - cron: '10 0 1 * *'   # 月报：每月1号 08:10 MYT
+    - cron: '10 0 1 1 *'   # 年报：每年1月1号 08:10 MYT
   workflow_dispatch:
     inputs:
       periodType:
@@ -43,8 +46,8 @@ jobs:
             echo "type=${{ github.event.inputs.periodType }}" >> "$GITHUB_OUTPUT"
           else
             case "${{ github.event.schedule }}" in
-              '0 0 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
-              '0 0 1 * *') echo "type=month" >> "$GITHUB_OUTPUT" ;;
+              '10 0 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
+              '10 0 1 * *') echo "type=month" >> "$GITHUB_OUTPUT" ;;
               *) echo "type=week" >> "$GITHUB_OUTPUT" ;;
             esac
           fi
