@@ -38,7 +38,7 @@ const NAV_ADMIN: { id: string; label: string }[] = [
   { id: 'admin-sites', label: '网站管理' },
   { id: 'admin-crawl-log', label: '抓取日志' },
   { id: 'admin-home', label: '首页快报' },
-  { id: 'admin-rules', label: '规则中心' },
+  { id: 'admin-rules', label: '研究中心' },
 ]
 
 function Section({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
@@ -364,10 +364,16 @@ export default function GuidePage() {
                 </div>
               </Section>
 
-              <Section id="admin-rules" className="bg-white rounded-xl border border-dashed border-violet-200 p-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-800">规则中心</h3>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-500 border border-violet-200">开发中</span>
+              <Section id="admin-rules" className="bg-white rounded-xl border border-violet-200 p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-800">研究中心</h3>
+                  <ExtLink href="/research">打开研究中心</ExtLink>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">4个tab：竞品成效 / 研究周报 / 研究月报 / 研究年报，全部是自动产出，没有需要手动点"开始分析"的入口。</p>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>· <b className="text-gray-700">竞品成效</b>：展示 has_rank_title（网站管理里的"排名"开关）开启的竞品站点，每天自动追踪的新增内容有没有涨排名/收录，A-Z卡片选站点+搜索框；不含自己的站点（按"分组任务"页面里配的"自己站点"字段自动排除）。右上角"管理竞品站点"可以批量勾选要追踪哪些站点，不是新建站点——域名/CSS选择器还是要去网站管理配。</p>
+                  <p>· <b className="text-gray-700">研究周报/月报/年报</b>：GitHub Actions 定时自动生成（周报每周一、月报每月1号、年报每年1月1号），AI 通读每个站点这段时间的完整原始数据写分析，再综合成大环境/自己站点成效/竞品成效/综合结论四段报告。顶部横排选期数，"各站点分析"里同样是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
+                  <p>· <b className="text-gray-700">"成效"为什么分两段</b>：自己站点成效来自"分组任务"里组员提交内容的排名/收录追踪；竞品成效来自竞品站点自动追踪，两边数据来源完全不同，报告里刻意不混在一起写。</p>
                 </div>
               </Section>
             </div>
