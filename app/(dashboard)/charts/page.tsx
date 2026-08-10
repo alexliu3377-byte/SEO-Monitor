@@ -101,7 +101,8 @@ function MoreButton({ total, shown, onClick }: { total: number; shown: number; o
 interface MonthlyTrendPoint { month: string; app: number; game: number }
 interface MonthlyDrillItem { keyword: string; contentType: string; volume: number; domains: string[] }
 interface MonthlyRankChangeItem { keyword: string; type: string; volume: number; domains: string[] }
-interface MonthlyStreakItem { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }
+interface StreakSite { domain: string; streak: number; volume: number; dates: string[] }
+interface MonthlyStreakItem { keyword: string; type: string; volume: number; streak: number; siteCount: number; sites: StreakSite[] }
 interface MonthlyVolumeChangeItem { keyword: string; volume: number; volumeChange: number; domains: string[] }
 interface MonthlyDrillData {
   app: MonthlyDrillItem[]; game: MonthlyDrillItem[]
@@ -141,6 +142,34 @@ function DomainListModal({ title, domains, weights, onClose }: { title: string; 
   )
 }
 
+// 排名连续涨跌"查看"——同一个词可能跨多个站点都在连续涨/跌，展示前5名
+// 站点各自连续了多少天，而不是像 DomainListModal 那样只罗列域名。
+function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string; siteCount: number; sites: StreakSite[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="px-5 py-3 max-h-72 overflow-y-auto divide-y divide-gray-50">
+          {sites.map(s => (
+            <div key={s.domain} className="py-2 flex items-center justify-between text-sm">
+              <span className="text-gray-700 truncate">{s.domain}</span>
+              <span className="text-xs text-gray-400 flex-shrink-0 ml-2">连续{s.streak}天 · {s.volume.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+        {siteCount > sites.length && (
+          <p className="px-5 py-2 text-[11px] text-gray-300 border-t border-gray-50">共{siteCount}个站点，只展示前{sites.length}名</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function MonthlyTrendTab() {
   const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
   const [loading, setLoading] = useState(true)
@@ -150,6 +179,7 @@ function MonthlyTrendTab() {
   const [drillData, setDrillData] = useState<MonthlyDrillData | null>(null)
   const [drillLoading, setDrillLoading] = useState(false)
   const [domainModal, setDomainModal] = useState<{ title: string; domains: string[] } | null>(null)
+  const [streakModal, setStreakModal] = useState<{ title: string; siteCount: number; sites: StreakSite[] } | null>(null)
 
   useEffect(() => {
     fetch('/api/charts/monthly-trend').then(r => r.json()).then(d => setMonths(d.months ?? [])).finally(() => setLoading(false))
@@ -373,7 +403,7 @@ function MonthlyTrendTab() {
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-              <span className="text-sm font-semibold text-gray-700">{drillMonth} 排名连续涨跌（同一个词在同一个站，这个月连续多天同向变化）</span>
+              <span className="text-sm font-semibold text-gray-700">{drillMonth} 排名连续涨跌（同一个词，这个月连续多天同向变化；多个站点都有的话，只展示连续天数最高的一个，"查看"里看各站明细）</span>
             </div>
             <div className="grid grid-cols-2 divide-x divide-gray-100">
               <div>
@@ -384,8 +414,8 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                        <button onClick={() => setStreakModal({ title: `${i.keyword} · 连续上涨`, siteCount: i.siteCount, sites: i.sites })}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.siteCount}站 查看</button>
                       </div>
                     </div>
                   ))}
@@ -399,8 +429,8 @@ function MonthlyTrendTab() {
                       <span className="text-gray-700 truncate">{i.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                         <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 连续${i.streak}天（${i.dates.join('、')}）`, [i.domain])}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">查看</button>
+                        <button onClick={() => setStreakModal({ title: `${i.keyword} · 连续下跌`, siteCount: i.siteCount, sites: i.sites })}
+                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.siteCount}站 查看</button>
                       </div>
                     </div>
                   ))}
@@ -412,6 +442,7 @@ function MonthlyTrendTab() {
       ))}
 
       {domainModal && <DomainListModal title={domainModal.title} domains={domainModal.domains} weights={drillData?.domainWeights ?? {}} onClose={() => setDomainModal(null)} />}
+      {streakModal && <StreakSitesModal title={streakModal.title} siteCount={streakModal.siteCount} sites={streakModal.sites} onClose={() => setStreakModal(null)} />}
     </div>
   )
 }

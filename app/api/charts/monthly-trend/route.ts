@@ -35,7 +35,7 @@ interface DrillPayload {
   game: { keyword: string; contentType: string; volume: number; domains: string[] }[]
   rankup: { keyword: string; type: string; volume: number; domains: string[] }[]
   rankdown: { keyword: string; type: string; volume: number; domains: string[] }[]
-  continuousTrend: { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }[]
+  continuousTrend: { keyword: string; type: string; volume: number; streak: number; siteCount: number; sites: { domain: string; streak: number; volume: number; dates: string[] }[] }[]
   volumeRising: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
   volumeFalling: { keyword: string; volume: number; volumeChange: number; domains: string[] }[]
   domainWeights: Record<string, { pc: number; mobile: number }>
@@ -119,8 +119,8 @@ export async function GET(req: Request) {
       game: (gameRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, contentType: 'game', volume: r.volume, domains: r.domains })),
       rankup: (rankupRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, type: 'rankup', volume: r.volume, domains: r.domains })),
       rankdown: (rankdownRows ?? []).map((r: { keyword: string; volume: number; domains: string[] }) => ({ keyword: r.keyword, type: 'rankdown', volume: r.volume, domains: r.domains })),
-      continuousTrend: (continuousRows ?? []).map((r: { keyword: string; domain: string; type: string; volume: number; streak: number; dates: string[] }) =>
-        ({ keyword: r.keyword, domain: r.domain, type: r.type, volume: r.volume, streak: r.streak, dates: r.dates })),
+      continuousTrend: (continuousRows ?? []).map((r: { keyword: string; type: string; volume: number; streak: number; site_count: number; sites: { domain: string; streak: number; volume: number; dates: string[] }[] }) =>
+        ({ keyword: r.keyword, type: r.type, volume: r.volume, streak: r.streak, siteCount: r.site_count, sites: r.sites })),
       volumeRising: volumeRising.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
       volumeFalling: volumeFalling.map(r => ({ keyword: r.keyword, volume: r.volume, volumeChange: r.volume_change, domains: r.domains })),
       domainWeights,

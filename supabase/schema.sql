@@ -151,17 +151,38 @@ LANGUAGE sql STABLE AS $$
   LIMIT p_limit
 $$;
 
+-- 2026-08-10：原本按(keyword,site_id,type)分组，同一个词在不同站点各出一行——
+-- 用户反馈同一个词跨站点重复出现在列表里很乱（比如"华为应用商店下载"在两个站
+-- 都连续涨，列表里会看到两条一模一样的）。改成只按(keyword,type)分组，展示
+-- 这个词在所有站点里最高的连续天数，"查看"时才展开前5名站点各自的连续天数
+-- （sites jsonb 数组），不是简单罗列域名。
+DROP FUNCTION IF EXISTS monthly_continuous_trend(date, date, integer);
 CREATE OR REPLACE FUNCTION monthly_continuous_trend(p_start date, p_end date, p_limit int DEFAULT 100)
-RETURNS TABLE(keyword text, domain text, type text, volume bigint, streak bigint, dates date[])
+RETURNS TABLE(keyword text, type text, volume bigint, streak bigint, site_count bigint, sites jsonb)
 LANGUAGE sql STABLE AS $$
-  SELECT rc.keyword, s.domain, rc.type, MAX(rc.volume)::bigint AS volume,
-    COUNT(DISTINCT rc.stat_date)::bigint AS streak,
-    ARRAY_AGG(DISTINCT rc.stat_date ORDER BY rc.stat_date) AS dates
-  FROM rank_changes rc
-  JOIN sites s ON s.id = rc.site_id
-  WHERE rc.stat_date >= p_start AND rc.stat_date <= p_end AND rc.type IN ('rankup', 'rankdown')
-  GROUP BY rc.keyword, rc.site_id, s.domain, rc.type
-  HAVING COUNT(DISTINCT rc.stat_date) >= 2
+  WITH per_site AS (
+    SELECT rc.keyword, rc.type, s.domain,
+      MAX(rc.volume)::bigint AS volume,
+      COUNT(DISTINCT rc.stat_date)::bigint AS streak,
+      ARRAY_AGG(DISTINCT rc.stat_date ORDER BY rc.stat_date) AS dates
+    FROM rank_changes rc
+    JOIN sites s ON s.id = rc.site_id
+    WHERE rc.stat_date >= p_start AND rc.stat_date <= p_end AND rc.type IN ('rankup', 'rankdown')
+    GROUP BY rc.keyword, rc.site_id, s.domain, rc.type
+    HAVING COUNT(DISTINCT rc.stat_date) >= 2
+  ),
+  ranked AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY keyword, type ORDER BY streak DESC, volume DESC) AS rn
+    FROM per_site
+  )
+  SELECT
+    keyword, type,
+    MAX(volume)::bigint AS volume,
+    MAX(streak)::bigint AS streak,
+    COUNT(*)::bigint AS site_count,
+    JSONB_AGG(JSONB_BUILD_OBJECT('domain', domain, 'streak', streak, 'volume', volume, 'dates', dates) ORDER BY streak DESC, volume DESC) FILTER (WHERE rn <= 5) AS sites
+  FROM ranked
+  GROUP BY keyword, type
   ORDER BY streak DESC, volume DESC
   LIMIT p_limit
 $$;
