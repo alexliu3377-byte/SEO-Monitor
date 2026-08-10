@@ -162,6 +162,47 @@ function parseEntryDateStr(dateStr: string | undefined): string | null {
   return null
 }
 
+// 找"标题元素所在容器"里匹配某个选择器的元素——文章链接/日期选择器都要
+// 先找到标题元素最近的 li/article/.item/tr/p/dd 祖先当"容器"，再在容器里
+// 找目标标签。2026-08-10 真实站点验证时发现两个问题：
+//
+// 1. 如果标题选择器本身选中的就是一个裸 <p>（标题文字直接放在没有 class
+//    的 <p> 里，没有其它元素包一层），closest() 会先命中元素自己（closest
+//    是"自己或祖先"，不是"祖先"），得到一个没有子元素的"容器"，导致链接/
+//    日期选择器不管填什么都找不到——命中的例子：52pk.com/6ll.com/
+//    dnkb.com.cn/duoteyx.com/kxdw.com/niucoo.cn/rzurl.com/shuajizhijia.net，
+//    标题选择器都是这种"结尾是裸p"的写法。修法：第一次找不到时再往上爬
+//    一层重试。
+// 2. 原来用 container.find(selector)：cheerio 的 find() 要求选择器整条
+//    链路都能在容器子树内部解析——如果用户填的选择器带着容器外层的祖先
+//    class（很常见，比如 ".gameinfo.tq1200 .info p:nth-child(4)"，
+//    ".gameinfo.tq1200" 在容器`<li>`外面），find() 会直接判定选择器不满
+//    足、返回空，即使容器内确实有匹配的元素。改成全局 $(selector) 选出来
+//    再过滤"是不是这个容器自己或容器的后代"，选择器就不用改写成相对路径。
+//
+// 两处改动都只在"原来找不到"的情况下才会产生不同结果，不会影响任何已经
+// 能正常抓到数据的站点配置。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function findInListContainer($: any, el: any, selector: string): any {
+  let container = $(el).closest('li, article, .item, tr, p, dd')
+  if (!container.length) container = $(el).closest('div').parent()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const withinContainer = (c: any): any => {
+    if (!c.length) return $(selector).filter(() => false)
+    const node = c.get(0)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return $(selector).filter((_: number, cand: any) => cand === node || $.contains(node, cand))
+  }
+
+  let found = withinContainer(container)
+  if (found.length === 0 && container.length > 0) {
+    const wider = container.parent().closest('li, article, .item, tr, p, dd')
+    if (wider.length && wider.get(0) !== container.get(0)) found = withinContainer(wider)
+  }
+  return found
+}
+
 export interface HtmlSource {
   url: string
   titleSelector: string
@@ -214,16 +255,12 @@ export async function fetchHtmlListPages(
           const defaultHref = $(el).attr('href') || $(el).closest('a').attr('href') || $(el).find('a').first().attr('href') || ''
           let href = defaultHref
           if (source.urlSelector) {
-            let container = $(el).closest('li, article, .item, tr, p, dd')
-            if (!container.length) container = $(el).closest('div').parent()
-            href = container.find(source.urlSelector).first().attr('href') || ''
+            href = findInListContainer($, el, source.urlSelector).first().attr('href') || ''
           }
           const fullUrl = href.startsWith('http') ? href : (href ? new URL(href, currentUrl!).href : '')
           let date: string | undefined
           if (source.dateSelector) {
-            let container = $(el).closest('li, article, .item, tr, p, dd')
-            if (!container.length) container = $(el).closest('div').parent()
-            const dateEl = container.find(source.dateSelector).first()
+            const dateEl = findInListContainer($, el, source.dateSelector).first()
             if (dateEl.length) date = dateEl.text().trim()
           }
           if (title) pageEntries.push({ title, date, url: fullUrl })
@@ -297,17 +334,13 @@ export async function fetchJsonHtmlPages(
         const title = $(el).text().trim()
         let href = $(el).attr('href') || ''
         if (urlSelector) {
-          let container = $(el).closest('li, article, .item, tr, p, dd')
-          if (!container.length) container = $(el).closest('div').parent()
-          href = container.find(urlSelector).first().attr('href') || href
+          href = findInListContainer($, el, urlSelector).first().attr('href') || href
         }
         const fullUrl = href.startsWith('http') ? href : (href ? new URL(href, origin).href : '')
 
         let date: string | undefined
         if (dateSelector) {
-          let container = $(el).closest('li, article, .item, tr, p, dd')
-          if (!container.length) container = $(el).closest('div').parent()
-          const dateEl = container.find(dateSelector).first()
+          const dateEl = findInListContainer($, el, dateSelector).first()
           if (dateEl.length) date = dateEl.text().trim()
         }
 
