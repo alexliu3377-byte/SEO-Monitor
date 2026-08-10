@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
 import SiteAZPicker, { type AZPickerSite } from '@/components/site-az-picker'
+import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
 
 // ─── Shared ──────────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ function CompetitorsTab() {
   const [effFilter, setEffFilter] = useState('')
   const [sortCol, setSortCol] = useState<SortableCol | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(0)
 
   function loadSites() {
     setLoadingSites(true)
@@ -129,6 +131,13 @@ function CompetitorsTab() {
     }
     return sortDir === 'asc' ? av - bv : bv - av
   })
+
+  // 页码钳到当前结果的合法范围内（切换站点/筛选/排序都会让结果变短，不然
+  // 会重现网站管理那边"页码指向结果范围外，表格空白"的同一个坑，见
+  // components/site-table.tsx 的同款修法）。
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE))
+  const clampedPage = Math.min(page, totalPages - 1)
+  const pagedRows = sortedRows.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE)
 
   function sortIcons(col: SortableCol) {
     const isAsc = sortCol === col && sortDir === 'asc'
@@ -183,6 +192,7 @@ function CompetitorsTab() {
           {loadingRows ? <Spinner /> : sortedRows.length === 0 ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的记录</p>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -201,7 +211,7 @@ function CompetitorsTab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {sortedRows.map((r, i) => {
+                  {pagedRows.map((r, i) => {
                     const st = EFFECTIVENESS_STYLE[r.effectiveness] ?? { bg: 'bg-gray-50', text: 'text-gray-500' }
                     return (
                       <tr key={i} className="text-gray-700">
@@ -226,6 +236,8 @@ function CompetitorsTab() {
                 </tbody>
               </table>
             </div>
+            <SimplePagination page={clampedPage} total={sortedRows.length} onChange={setPage} />
+            </>
           )}
         </div>
       )}
