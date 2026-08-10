@@ -84,7 +84,14 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
       : (s.has_rank_data ? 1 : 0)
     return sortDir === 'asc' ? valOf(a) - valOf(b) : valOf(b) - valOf(a)
   })
-  const paged = sortedDisplay.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  // page 是本组件内部状态，筛选/搜索导致父组件传入的 sites 变短时不会自动
+  // 归零——如果用户之前翻到了后面的页码，再搜出一个只有几条结果的小列表，
+  // 原来的页码会指向结果范围之外，slice 出来是空数组，表格直接一行都不
+  // 显示（而且 sorted.length 不为0，连"暂无网站"的兜底提示都不会出现，
+  // 表现就是搜索框显示"共N条"但表格完全空白）。渲染时钳到合法范围内。
+  const maxPage = Math.max(0, Math.ceil(sortedDisplay.length / PAGE_SIZE) - 1)
+  const clampedPage = Math.min(page, maxPage)
+  const paged = sortedDisplay.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE)
 
   const sortIcons = (col: 'isEnabled' | 'hasRankData' | 'hasRankTitle' | 'hasIndexPages') => {
     const isAsc = sortCol === col && sortDir === 'asc'
@@ -205,7 +212,7 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
         </tbody>
       </table>
     </div>
-    <SimplePagination page={page} total={sortedDisplay.length} onChange={setPage} />
+    <SimplePagination page={clampedPage} total={sortedDisplay.length} onChange={setPage} />
     </>
   )
 }
