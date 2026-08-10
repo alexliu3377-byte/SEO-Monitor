@@ -60,7 +60,7 @@ export default function ResearchPage() {
 
 // ══════════════════════════════ 竞品成效 ══════════════════════════════
 
-type CompetitorSite = AZPickerSite & { is_own_site: boolean }
+type CompetitorSite = AZPickerSite
 
 interface TrackingRow {
   operation_type: string | null
@@ -112,16 +112,10 @@ function CompetitorsTab() {
     return true
   })
 
-  // 自家站点（标了"自家"但也开了排名追踪）单独一个区块——跟"竞品站点"分开看，
-  // 不然容易误以为混进了竞品统计。汇总用的"竞品成效"报告数字不受影响，那边
-  // 独立在 fetchCompetitorEffectivenessSummary 里继续排除自家站点。
-  const competitorSites = sites.filter(s => !s.is_own_site)
-  const ownSites = sites.filter(s => s.is_own_site)
-
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">选一个站点查看排名追踪明细（只有开启"排名"追踪的站点才会出现在这里）</p>
+        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
         <button onClick={() => setShowManageModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -130,24 +124,9 @@ function CompetitorsTab() {
       </div>
 
       {loadingSites ? <Spinner /> : sites.length === 0 ? (
-        <p className="text-sm text-gray-300 text-center py-8">还没有开启排名追踪的站点，点右上角"管理竞品站点"开启</p>
+        <p className="text-sm text-gray-300 text-center py-8">还没有竞品站点，点右上角"管理竞品站点"开启追踪</p>
       ) : (
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs text-gray-400 mb-1.5">竞品站点</p>
-            {competitorSites.length === 0 ? (
-              <p className="text-sm text-gray-300 py-2">还没有竞品站点</p>
-            ) : (
-              <SiteAZPicker sites={competitorSites} selectedId={selectedId} onSelect={setSelectedId} />
-            )}
-          </div>
-          {ownSites.length > 0 && (
-            <div>
-              <p className="text-xs text-gray-400 mb-1.5">自家站点（不计入竞品成效统计，仅供查看排名追踪明细）</p>
-              <SiteAZPicker sites={ownSites} selectedId={selectedId} onSelect={setSelectedId} />
-            </div>
-          )}
-        </div>
+        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
       )}
 
       {selectedId && (
@@ -230,18 +209,16 @@ function CompetitorsTab() {
   )
 }
 
-interface ManageSite { id: string; domain: string; name: string; has_rank_title: boolean; is_own_site: boolean }
+interface ManageSite { id: string; domain: string; name: string; has_rank_title: boolean }
 
-// 列出全部站点（不含自己的站点）让用户勾选哪些要当竞品追踪排名——用户明确说
+// 列出全部站点（不含自己的站点，自己的站点由 task_groups.site_domains 自动
+// 识别，见 fetchOwnSiteDomains）让用户勾选哪些要当竞品追踪排名——用户明确说
 // 不需要重新填站点资料（域名/CSS选择器那些在"网站管理"里已经配过了），这里
 // 只是批量开关 has_rank_title，不是新建站点。
 function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [sites, setSites] = useState<ManageSite[]>([])
   const [loading, setLoading] = useState(true)
   const [checked, setChecked] = useState<Set<string>>(new Set())
-  // 站点id -> 是否自家（true=自家，false=竞品）。默认竞品——新站点/没手动
-  // 标过的站点一律先当竞品，用户要求"我可以自己选择，默认是竞品"。
-  const [ownMap, setOwnMap] = useState<Map<string, boolean>>(new Map())
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -250,7 +227,6 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
       const list = (d.sites ?? []) as ManageSite[]
       setSites(list)
       setChecked(new Set(list.filter(s => s.has_rank_title).map(s => s.id)))
-      setOwnMap(new Map(list.map(s => [s.id, s.is_own_site])))
     }).finally(() => setLoading(false))
   }, [])
 
@@ -262,23 +238,13 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
     })
   }
 
-  function setOwn(id: string, isOwn: boolean) {
-    setOwnMap(prev => new Map(prev).set(id, isOwn))
-  }
-
   async function save() {
     setSaving(true)
     try {
-      const rankTitleChanged = sites.filter(s => s.has_rank_title !== checked.has(s.id))
-      const ownChanged = sites.filter(s => s.is_own_site !== (ownMap.get(s.id) ?? false))
-      // 同一个站点两边都可能变，合并成一次PUT，不用为同一个站点发两次请求。
-      const changedIds = new Set([...rankTitleChanged.map(s => s.id), ...ownChanged.map(s => s.id)])
-      await Promise.all(Array.from(changedIds).map(id => {
-        const body: { id: string; has_rank_title?: boolean; is_own_site?: boolean } = { id }
-        if (rankTitleChanged.some(s => s.id === id)) body.has_rank_title = checked.has(id)
-        if (ownChanged.some(s => s.id === id)) body.is_own_site = ownMap.get(id) ?? false
-        return fetch('/api/sites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      }))
+      const changed = sites.filter(s => s.has_rank_title !== checked.has(s.id))
+      await Promise.all(changed.map(s =>
+        fetch('/api/sites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, has_rank_title: checked.has(s.id) }) })
+      ))
       onSaved()
     } finally { setSaving(false) }
   }
@@ -299,31 +265,20 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
         <div className="px-6 py-3 border-b border-gray-100">
           <input type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索域名或站点名…" autoFocus
             className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-          <p className="text-xs text-gray-400 mt-1.5">勾选的站点会开启"排名"追踪，每天自动统计新增内容的成效；每个站点可以单独标"自家"还是"竞品"（默认竞品），自家的站点不会算进竞品成效</p>
+          <p className="text-xs text-gray-400 mt-1.5">勾选的站点会开启"排名"追踪，每天自动统计新增内容的成效</p>
         </div>
         <div className="px-6 py-3 overflow-y-auto flex-1">
           {loading ? <Spinner /> : filtered.length === 0 ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的站点</p>
           ) : (
             <div className="space-y-0.5">
-              {filtered.map(s => {
-                const isOwn = ownMap.get(s.id) ?? false
-                return (
-                  <div key={s.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 text-sm text-gray-700">
-                    <label className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
-                      <input type="checkbox" checked={checked.has(s.id)} onChange={() => toggle(s.id)} />
-                      <span className="truncate">{s.domain}</span>
-                      <span className="text-xs text-gray-400 truncate">{s.name}</span>
-                    </label>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => setOwn(s.id, true)}
-                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${isOwn ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>自家</button>
-                      <button onClick={() => setOwn(s.id, false)}
-                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${!isOwn ? 'bg-gray-700 border-gray-700 text-white' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>竞品</button>
-                    </div>
-                  </div>
-                )
-              })}
+              {filtered.map(s => (
+                <label key={s.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={checked.has(s.id)} onChange={() => toggle(s.id)} />
+                  <span className="truncate">{s.domain}</span>
+                  <span className="text-xs text-gray-400 truncate">{s.name}</span>
+                </label>
+              ))}
             </div>
           )}
         </div>

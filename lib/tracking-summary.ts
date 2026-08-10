@@ -221,16 +221,18 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
   return { ranked, indexed, tracking, invalid, topClaims, contentBreakdown }
 }
 
-// 自己站点的域名集合——2026-08-10 起改成读 sites.is_own_site（研究中心"管理
-// 竞品站点"弹窗里用户自己勾选，默认竞品）。最初曾直接复用 task_groups.
-// site_domains（分组任务页面的"自己站点"字段），但那是给雷达/词库那类页面
-// 用的，跟"这个站点算不算竞品"是两个不完全相同的概念，用户要求能自己单独
-// 选择后改成独立字段（迁移时已经把当时 task_groups.site_domains 里的站点
-// 回填成 is_own_site=true，不会丢已有判断）。
+// 自己站点的域名集合——曾短暂改成 sites.is_own_site 手动逐站标记（研究中心
+// "管理竞品站点"弹窗里选"自家/竞品"），2026-08-10 当天用户又反悔改回来：
+// 手动标太麻烦，还是自动识别更好。复用 task_groups.site_domains（分组任务
+// 页面的"自己站点"字段，雷达/词库那类页面也在用同一个字段判断"自己站点"）。
 // 研究中心"竞品成效"tab 和竞品成效汇总都要排除这些域名，不能把自己的站点当竞品追踪。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchOwnSiteDomains(service: any): Promise<Set<string>> {
-  const { data } = await service.from('sites').select('domain').eq('is_own_site', true)
-  return new Set((data ?? []).map((s: { domain: string }) => s.domain))
+  const { data } = await service.from('task_groups').select('site_domains')
+  const domains = new Set<string>()
+  for (const g of (data ?? []) as { site_domains: string[] | null }[]) {
+    for (const d of g.site_domains ?? []) domains.add(d)
+  }
+  return domains
 }
 
