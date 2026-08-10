@@ -60,7 +60,7 @@ export default function ResearchPage() {
 
 // ══════════════════════════════ 竞品成效 ══════════════════════════════
 
-type CompetitorSite = AZPickerSite
+type CompetitorSite = AZPickerSite & { is_own_site: boolean }
 
 interface TrackingRow {
   operation_type: string | null
@@ -112,10 +112,16 @@ function CompetitorsTab() {
     return true
   })
 
+  // 自家站点（标了"自家"但也开了排名追踪）单独一个区块——跟"竞品站点"分开看，
+  // 不然容易误以为混进了竞品统计。汇总用的"竞品成效"报告数字不受影响，那边
+  // 独立在 fetchCompetitorEffectivenessSummary 里继续排除自家站点。
+  const competitorSites = sites.filter(s => !s.is_own_site)
+  const ownSites = sites.filter(s => s.is_own_site)
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
+        <p className="text-sm text-gray-400">选一个站点查看排名追踪明细（只有开启"排名"追踪的站点才会出现在这里）</p>
         <button onClick={() => setShowManageModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -124,9 +130,24 @@ function CompetitorsTab() {
       </div>
 
       {loadingSites ? <Spinner /> : sites.length === 0 ? (
-        <p className="text-sm text-gray-300 text-center py-8">还没有竞品站点，点右上角"管理竞品站点"开启追踪</p>
+        <p className="text-sm text-gray-300 text-center py-8">还没有开启排名追踪的站点，点右上角"管理竞品站点"开启</p>
       ) : (
-        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs text-gray-400 mb-1.5">竞品站点</p>
+            {competitorSites.length === 0 ? (
+              <p className="text-sm text-gray-300 py-2">还没有竞品站点</p>
+            ) : (
+              <SiteAZPicker sites={competitorSites} selectedId={selectedId} onSelect={setSelectedId} />
+            )}
+          </div>
+          {ownSites.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-1.5">自家站点（不计入竞品成效统计，仅供查看排名追踪明细）</p>
+              <SiteAZPicker sites={ownSites} selectedId={selectedId} onSelect={setSelectedId} />
+            </div>
+          )}
+        </div>
       )}
 
       {selectedId && (

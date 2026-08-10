@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { fetchOwnSiteDomains } from '@/lib/tracking-summary'
 
 async function requireAdmin() {
   const authClient = createClient()
@@ -15,29 +14,26 @@ async function requireAdmin() {
 
 // 竞品成效tab的站点选择器数据源——has_rank_title=true 的站点才会被
 // scripts/crawl.ts 的 runTracking() 每天追踪进 competitor_tracking_records。
-// 排除自己的站点（sites.is_own_site，见 lib/tracking-summary.ts 的
-// fetchOwnSiteDomains 注释）——自己的站点不该被当竞品统计。
+// 2026-08-10 起不再排除自己的站点——之前排除是为了不让自家站点混进"竞品
+// 成效"的汇总统计（那部分逻辑在 fetchCompetitorEffectivenessSummary，没
+// 动，继续排除），但用户反馈标了"自家"后勾选排名追踪却在tab里完全看不到，
+// 想看自己站点的排名追踪明细。现在两种站点都返回、带 is_own_site 供前端
+// 分成"竞品站点"/"自家站点"两个区块展示，浏览明细跟统计口径是两回事。
 //
-// ?all=true 时改成返回全部站点（含自己的站点，2026-08-10 起不再排除——
-// "管理竞品站点"弹窗本身就是用户手动标"这个站点是自家还是竞品"的地方，
-// 排除了反而没法在这里把一个站点标成自家），带上 has_rank_title 和
-// is_own_site 供前端预选中当前状态。
+// ?all=true 时返回全部站点（不管 has_rank_title 是否开启），供"管理竞品
+// 站点"弹窗勾选+标自家/竞品用。
 export async function GET(req: Request) {
   const ctx = await requireAdmin()
   if (ctx.error) return ctx.error
   const { service } = ctx
   const all = new URL(req.url).searchParams.get('all') === 'true'
 
-  const [ownDomains, sitesRes] = await Promise.all([
-    all ? Promise.resolve(new Set<string>()) : fetchOwnSiteDomains(service),
-    all
-      ? service.from('sites').select('id, domain, name, has_rank_title, is_own_site').order('domain')
-      : service.from('sites').select('id, domain, name').eq('has_rank_title', true).order('domain'),
-  ])
-  const { data: sitesRaw, error } = sitesRes
+  const { data: sitesRaw, error } = all
+    ? await service.from('sites').select('id, domain, name, has_rank_title, is_own_site').order('domain')
+    : await service.from('sites').select('id, domain, name, is_own_site').eq('has_rank_title', true).order('domain')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const sites = (sitesRaw ?? []).filter((s: { domain: string }) => !ownDomains.has(s.domain))
+  const sites = sitesRaw ?? []
 
   const siteIds = sites.map((s: { id: string }) => s.id)
   const weightMap = new Map<string, { pc: number; mobile: number }>()

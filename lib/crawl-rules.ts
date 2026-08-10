@@ -161,7 +161,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '竞品成效展示（研究中心）',
     badge: '纯展示，不新增抓取逻辑',
     items: [
-      { label: '数据来源', text: '/api/research/competitor-sites 和 [id]/tracking 两个只读接口，直接查 competitor_tracking_records（写入逻辑见上方"成效追踪"小节，这里不重复实现）——研究中心"竞品成效"tab 是这张表第一次有UI展示；站点列表排除自己的站点（同上方 fetchOwnSiteDomains 逻辑）' },
+      { label: '数据来源', text: '/api/research/competitor-sites 和 [id]/tracking 两个只读接口，直接查 competitor_tracking_records（写入逻辑见上方"成效追踪"小节，这里不重复实现）——研究中心"竞品成效"tab 是这张表第一次有UI展示。2026-08-10 起站点列表不再排除自己的站点——之前排除是为了不让自家站点混进汇总统计（那部分在 fetchCompetitorEffectivenessSummary，继续排除，不受影响），但用户反馈标了自家的站点开了排名追踪却完全看不到明细，改成页面按 is_own_site 分成"竞品站点"/"自家站点"两个区块展示，自家区块明确标注不计入竞品成效统计' },
       { label: '管理竞品站点', text: '研究中心"管理竞品站点"按钮列出全部站点（排除自己的站点，`?all=true` 查询参数），checkbox 预选中已经 has_rank_title=true 的站点；不是"新建站点"入口——域名/CSS选择器这些抓取配置已经在网站管理里配过了，这里只批量勾选/取消勾选，保存时对每个变化的站点调 PUT /api/sites 更新 has_rank_title' },
     ],
   },
