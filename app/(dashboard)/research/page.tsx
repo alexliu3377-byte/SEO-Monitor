@@ -75,6 +75,8 @@ interface TrackingRow {
   discovery_date: string
 }
 
+type SortableCol = 'search_volume' | 'rank_position' | 'rank_volume' | 'score' | 'content_date' | 'discovery_date'
+
 const EFFECTIVENESS_STYLE: Record<string, { bg: string; text: string }> = {
   '有效': { bg: 'bg-green-50', text: 'text-green-600' },
   '追踪中': { bg: 'bg-amber-50', text: 'text-amber-600' },
@@ -92,6 +94,8 @@ function CompetitorsTab() {
   const [kwFilter, setKwFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState<'' | 'app' | 'game'>('')
   const [effFilter, setEffFilter] = useState('')
+  const [sortCol, setSortCol] = useState<SortableCol | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   function loadSites() {
     setLoadingSites(true)
@@ -111,6 +115,33 @@ function CompetitorsTab() {
     if (effFilter && r.effectiveness !== effFilter) return false
     return true
   })
+
+  // 升降序排序——参考分组报告"成效追踪"的三角图标交互，但这边数据本来就是
+  // 一次性全量拉到客户端的（不像分组报告那边分页从服务端拉），直接客户端排序。
+  // null 值（没有排名/搜索量等）不管升序降序都排在最后，不然升序时会跑到最前面。
+  const sortedRows = sortCol === null ? filteredRows : [...filteredRows].sort((a, b) => {
+    const av = a[sortCol]; const bv = b[sortCol]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'string' || typeof bv === 'string') {
+      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
+    }
+    return sortDir === 'asc' ? av - bv : bv - av
+  })
+
+  function sortIcons(col: SortableCol) {
+    const isAsc = sortCol === col && sortDir === 'asc'
+    const isDesc = sortCol === col && sortDir === 'desc'
+    return (
+      <span className="inline-flex flex-col items-center gap-px select-none ml-0.5">
+        <svg onClick={() => { setSortCol(col); setSortDir('asc') }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
+          className={`cursor-pointer ${isAsc ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'}`}><path d="M4 0L8 5H0Z" /></svg>
+        <svg onClick={() => { setSortCol(col); setSortDir('desc') }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
+          className={`cursor-pointer ${isDesc ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'}`}><path d="M4 5L0 0H8Z" /></svg>
+      </span>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -149,7 +180,7 @@ function CompetitorsTab() {
             </select>
             <span className="text-xs text-gray-400 ml-auto">{filteredRows.length} 条</span>
           </div>
-          {loadingRows ? <Spinner /> : filteredRows.length === 0 ? (
+          {loadingRows ? <Spinner /> : sortedRows.length === 0 ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的记录</p>
           ) : (
             <div className="overflow-x-auto">
@@ -158,19 +189,19 @@ function CompetitorsTab() {
                   <tr className="text-xs text-gray-400 border-b border-gray-100">
                     <th className="text-left px-4 py-2 font-medium">操作</th>
                     <th className="text-left px-4 py-2 font-medium">关键词</th>
-                    <th className="text-right px-4 py-2 font-medium">搜索量</th>
+                    <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">搜索量{sortIcons('search_volume')}</span></th>
                     <th className="text-left px-4 py-2 font-medium">类型</th>
-                    <th className="text-right px-4 py-2 font-medium">排名</th>
+                    <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">排名{sortIcons('rank_position')}</span></th>
                     <th className="text-left px-4 py-2 font-medium">排名词</th>
-                    <th className="text-right px-4 py-2 font-medium">排名量</th>
+                    <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">排名量{sortIcons('rank_volume')}</span></th>
                     <th className="text-left px-4 py-2 font-medium">成效</th>
-                    <th className="text-right px-4 py-2 font-medium">得分</th>
-                    <th className="text-left px-4 py-2 font-medium">提交日期</th>
-                    <th className="text-left px-4 py-2 font-medium">记录日期</th>
+                    <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">得分{sortIcons('score')}</span></th>
+                    <th className="text-left px-4 py-2 font-medium"><span className="inline-flex items-center">提交日期{sortIcons('content_date')}</span></th>
+                    <th className="text-left px-4 py-2 font-medium"><span className="inline-flex items-center">记录日期{sortIcons('discovery_date')}</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredRows.map((r, i) => {
+                  {sortedRows.map((r, i) => {
                     const st = EFFECTIVENESS_STYLE[r.effectiveness] ?? { bg: 'bg-gray-50', text: 'text-gray-500' }
                     return (
                       <tr key={i} className="text-gray-700">
@@ -179,7 +210,7 @@ function CompetitorsTab() {
                         <td className="px-4 py-2 text-right text-xs">{r.search_volume?.toLocaleString() ?? '—'}</td>
                         <td className="px-4 py-2 text-xs">{r.content_type === 'game' ? '游戏' : r.content_type === 'app' ? '应用' : '—'}</td>
                         <td className="px-4 py-2 text-right text-xs">{r.rank_position ?? '—'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{r.keyword}</td>
+                        <td className="px-4 py-2">{r.keyword}</td>
                         <td className="px-4 py-2 text-right text-xs">{r.rank_volume?.toLocaleString() ?? '—'}</td>
                         <td className="px-4 py-2">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${st.bg} ${st.text}`}>{r.effectiveness}</span>
