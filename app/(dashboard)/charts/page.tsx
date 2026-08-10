@@ -142,7 +142,7 @@ function DomainListModal({ title, domains, weights, onClose }: { title: string; 
   )
 }
 
-// 排名连续涨跌"查看"——同一个词可能跨多个站点都在连续涨/跌，展示前5名
+// 排名连续涨跌"查看"——同一个词可能跨多个站点都在连续涨/跌，展示全部
 // 站点各自连续了多少天，而不是像 DomainListModal 那样只罗列域名。
 function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string; siteCount: number; sites: StreakSite[]; onClose: () => void }) {
   return (
@@ -150,6 +150,7 @@ function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string;
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
+          <span className="text-xs text-gray-400 flex-shrink-0 ml-2">共{siteCount}站</span>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
@@ -162,9 +163,6 @@ function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string;
             </div>
           ))}
         </div>
-        {siteCount > sites.length && (
-          <p className="px-5 py-2 text-[11px] text-gray-300 border-t border-gray-50">共{siteCount}个站点，只展示前{sites.length}名</p>
-        )}
       </div>
     </div>
   )
