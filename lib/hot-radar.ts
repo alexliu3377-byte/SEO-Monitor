@@ -1,6 +1,6 @@
 // 热词雷达（研究中心/分组任务共用）的聚合计算——2026-08-11 从 app/api/hot-radar/
 // route.ts 抽出来，原因见该文件同一天的改动：get_hot_new_words/get_hot_rank_words/
-// get_hot_streak_words 三个 RPC 要扫 rank_changes/site_rank_keywords 近30天全量
+// get_hot_streak_words 三个 RPC 要扫 rank_changes/site_keyword_ranks 近30天全量
 // 数据（永久保留、每天持续写入，跟这个项目已经踩过好几次的"表越长越大拖垮查询"
 // 是同一类问题），单次调用要2-8秒，用户反馈"每天打开都很慢"。改成定时任务算好
 // 存进 hot_radar_cache 表，读接口直接读缓存，不再每次现场算。

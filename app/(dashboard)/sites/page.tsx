@@ -31,7 +31,7 @@ interface Site {
 
 interface PendingToggle {
   site: Site
-  direction: 'to_site_rank_keywords' | 'to_rank_changes'
+  direction: 'to_site_keyword_ranks' | 'to_rank_changes'
   // after migration: the new field values to apply
   newRankData: boolean
   newRankTitle: boolean
@@ -160,7 +160,7 @@ export default function SitesPage() {
     const newVal = !site.has_rank_title
     // Turning ON 竞品追踪 while 排名 is active → offer migration
     if (newVal && site.has_rank_data) {
-      setPendingToggle({ site, direction: 'to_site_rank_keywords', newRankData: false, newRankTitle: true })
+      setPendingToggle({ site, direction: 'to_site_keyword_ranks', newRankData: false, newRankTitle: true })
       return
     }
     applyToggle(site, newVal ? false : site.has_rank_data, newVal).catch(err => alert(err.message))
@@ -297,12 +297,12 @@ export default function SitesPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <h3 className="font-semibold text-gray-900 mb-1">
-              {pendingToggle.direction === 'to_site_rank_keywords' ? '切换至排名模式' : '切换至涨跌模式'}
+              {pendingToggle.direction === 'to_site_keyword_ranks' ? '切换至排名模式' : '切换至涨跌模式'}
             </h3>
             <p className="text-sm text-gray-500 mb-4">
-              {pendingToggle.direction === 'to_site_rank_keywords'
-                ? `将 rank_changes 中 ${pendingToggle.site.domain} 的现有记录复制到竞品追踪表（新排名/标题字段为空，平台统一设为移动端）。`
-                : `将竞品追踪表中 ${pendingToggle.site.domain} 的移动端记录复制到 rank_changes。PC 端数据、新排名及标题字段将会丢弃。`
+              {pendingToggle.direction === 'to_site_keyword_ranks'
+                ? `将 rank_changes 中 ${pendingToggle.site.domain} 的现有记录复制到 site_keyword_ranks（排名/标题字段为空，平台统一设为移动端）。`
+                : `将 site_keyword_ranks 中 ${pendingToggle.site.domain} 的移动端记录复制到 rank_changes。PC 端数据、排名及标题字段将会丢弃。`
               }
             </p>
             {pendingToggle.direction === 'to_rank_changes' && (
