@@ -167,6 +167,18 @@ export const CRAWL_RULES: RuleSection[] = [
     ],
   },
   {
+    key: 'site-diagnostic',
+    title: '站点诊断（研究中心）',
+    badge: '按需触发，不是定时任务',
+    items: [
+      { label: '背景（2026-08-11 新增）', text: '之前研究中心的AI输出全是定时报告（周/月/年报），数字都是页面上结构化展示、AI只写100-200字短点评。这次是相反场景：用户主动挑一个站点、可以带一个具体问题（比如"要怎么安排两个组员重新维护这个闲置站点"），愿意多等一会换一份更完整的策略建议——所以这个功能的AI输出刻意不追求短，maxOutputTokens给到4096（周报单站点分析只给1024）' },
+      { label: '数据来源', text: '跟研究报告Stage1同一套：lib/site-research-summary.ts 的 fetchSiteResearchSummary() 拉这个站点近90天权重/收录/涨跌/新增关键词/排名成效全量明细（不压缩）；lib/environment-stats.ts 的 computeEnvironmentStats()（2026-08-11 从 scripts/research-report.ts 抽成共享函数，两边调同一份实现）算这个站点所属大/中/小档位 + 同档位站点均值对比；再查 task_groups.site_domains 找到关联这个站点的分组，对每个组调 lib/tracking-summary.ts 的 fetchGroupEffectivenessSummary() 拿组员实际提交/追踪成效——这一项是之前的报告都没用过的新维度，专门用来回答"这个站点有没有人在做、做得怎么样"这类问题' },
+      { label: 'Prompt', text: 'lib/site-diagnostic-prompt.ts，跟 buildSiteAnalysisPrompt（周报用）不是同一个文件——结构分现状评估/关键发现/具体建议三段，每条建议要求能看出是从哪条数据推出来的；如果用户填了问题就要求重点回答，没填就做通用诊断' },
+      { label: '写入表', text: 'site_diagnostics（每次诊断一行：site_id/question/result/created_by/created_at，永久保留，供页面回看历史诊断不用重新跑）；RLS已开启不配策略，浏览器端不直接查这张表，走 POST/GET /api/research/site-diagnostics 两个接口用 service role 读写' },
+      { label: '鉴权与超时', text: '两个接口都限 super/admin 角色；POST 单次会拉全量历史数据+跑一次Gemini，maxDuration=180秒（留够余量，实测真实f71.com数据约23秒完成）' },
+    ],
+  },
+  {
     key: 'environment-snapshot',
     title: '环境快照',
     badge: 'environment-snapshot.yml · GitHub Actions · 每日 07:15 MYT（cron 23:15 UTC）',
@@ -219,6 +231,7 @@ export const RETENTION = {
   site_tracking_rank_matches: '永久保留',
   research_reports: '永久保留',
   research_report_sites: '永久保留（随 research_reports 级联删除）',
+  site_diagnostics: '永久保留',
   activity_log: '7天（按 logged_at）',
   activity_site_log: '7天（随 activity_log 级联删除）',
 }

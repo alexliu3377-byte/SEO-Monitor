@@ -4,7 +4,7 @@ import { fetchSiteResearchSummary, type SiteResearchSummary } from '../lib/site-
 import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
-import { computeWeightTiers } from '../lib/weight-tiers'
+import { computeEnvironmentStats } from '../lib/environment-stats'
 import { callGeminiJSON } from '../lib/gemini'
 
 // 研究报告——GitHub Actions 直接跑（不经过 Vercel）。周报/月报/年报共用这一套
@@ -210,55 +210,6 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
   }
 }
 
-// 整体 + 大/中/小站 的权重/收录结构化数字——从 period_end 往前最多找7天，
-// 拿到有 weight_history 数据的那一天做快照（正常情况 period_end 当天/前一天
-// 就有数据，往前找只是给"这段时间刚好抓取有缺口"兜个底）。
-async function computeEnvironmentStats(periodEnd: string) {
-  let asOfDate = periodEnd
-  let weightRows: { site_id: string; pc_weight: number | null; mobile_weight: number | null }[] = []
-  for (let i = 0; i < 7; i++) {
-    const { data } = await supabase.from('weight_history')
-      .select('site_id, pc_weight, mobile_weight').eq('record_date', asOfDate)
-    if (data && data.length > 0) { weightRows = data; break }
-    asOfDate = new Date(new Date(asOfDate + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
-  }
-  if (weightRows.length === 0) return null
-
-  const { data: indexRows } = await supabase.from('index_snapshots')
-    .select('site_id, index_count').eq('snapshot_date', asOfDate)
-  const indexBySite = new Map<string, number>((indexRows ?? []).map((r: { site_id: string; index_count: number }) => [r.site_id, r.index_count]))
-
-  const tiers = computeWeightTiers(weightRows)
-  const round1 = (n: number) => Math.round(n * 10) / 10
-
-  function statsFor(siteIds: string[]) {
-    const pcVals: number[] = []; const mVals: number[] = []; const idxVals: number[] = []
-    for (const id of siteIds) {
-      const w = weightRows.find(r => r.site_id === id)
-      if (w?.pc_weight != null) pcVals.push(w.pc_weight)
-      if (w?.mobile_weight != null) mVals.push(w.mobile_weight)
-      const idx = indexBySite.get(id)
-      if (idx != null) idxVals.push(idx)
-    }
-    const avg = (vals: number[]) => vals.length > 0 ? round1(vals.reduce((a, b) => a + b, 0) / vals.length) : null
-    return {
-      siteCount: siteIds.length,
-      pcWeight: avg(pcVals), mobileWeight: avg(mVals),
-      indexCount: idxVals.length > 0 ? Math.round(idxVals.reduce((a, b) => a + b, 0) / idxVals.length) : null,
-    }
-  }
-
-  const allSiteIds = weightRows.map(r => r.site_id)
-  const tierGroups: Record<string, string[]> = { 大站: [], 中站: [], 小站: [] }
-  for (const [siteId, tier] of Array.from(tiers)) tierGroups[tier].push(siteId)
-
-  return {
-    asOfDate,
-    overall: statsFor(allSiteIds),
-    tiers: { 大站: statsFor(tierGroups.大站), 中站: statsFor(tierGroups.中站), 小站: statsFor(tierGroups.小站) },
-  }
-}
-
 // ── stage2：汇总所有分片结果 + 竞品成效 + 大环境，跑最终综合 ─────────────────
 
 async function runStage2(reportId: string) {
@@ -304,7 +255,13 @@ async function runStage2(reportId: string) {
   // AI只写简短说明，不用在文字里复述这些数字。取 period_end 当天（或往前找
   // 最近一天有数据的）weight_history + index_snapshots 现算，跟AI分析完全
   // 独立、代码直接算好存库。
-  const environmentStats = await computeEnvironmentStats(periodEnd)
+  const fullEnvironmentStats = await computeEnvironmentStats(supabase, periodEnd)
+  // 存库只要 asOfDate/overall/tiers 这三个字段（跟页面 EnvironmentStats 类型
+  // 对得上）——siteTiers 是个 Map，直接把整个对象丢给 .update() 会被
+  // JSON.stringify 悄悄序列化成 {}，不能囫囵存整个返回值。
+  const environmentStats = fullEnvironmentStats
+    ? { asOfDate: fullEnvironmentStats.asOfDate, overall: fullEnvironmentStats.overall, tiers: fullEnvironmentStats.tiers }
+    : null
 
   const analyzedCount = siteAnalyses.filter(s => !s.skipped && s.analysis).length
   const skippedCount = siteAnalyses.filter(s => s.skipped).length

@@ -16,10 +16,11 @@ function Spinner() {
   )
 }
 
-type TabKey = 'competitors' | 'week' | 'month' | 'year'
+type TabKey = 'competitors' | 'diagnostic' | 'week' | 'month' | 'year'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'competitors', label: '竞品成效' },
+  { key: 'diagnostic', label: '站点诊断' },
   { key: 'week', label: '研究周报' },
   { key: 'month', label: '研究月报' },
   { key: 'year', label: '研究年报' },
@@ -52,6 +53,7 @@ export default function ResearchPage() {
       </div>
 
       {activeTab === 'competitors' && <CompetitorsTab />}
+      {activeTab === 'diagnostic' && <SiteDiagnosticTab />}
       {activeTab === 'week' && <ReportTab key="week" periodType="week" />}
       {activeTab === 'month' && <ReportTab key="month" periodType="month" />}
       {activeTab === 'year' && <ReportTab key="year" periodType="year" />}
@@ -227,6 +229,115 @@ function CompetitorsTab() {
           onClose={() => setShowManageModal(false)}
           onSaved={() => { setShowManageModal(false); loadSites() }}
         />
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════ 站点诊断 ══════════════════════════════
+
+interface Diagnostic { id: string; question: string | null; result: string; created_at: string }
+
+// 用户主动选一个站点+可以带一个具体问题，AI读完整历史数据后写一份策略
+// 建议——跟周报/月报/年报刻意反着来（那边数字结构化+AI只写短点评，这边
+// 按需触发、用户愿意等，输出要完整详细）。2026-08-11 新增，用户接手一个
+// 闲置很久的站点要重新安排人手时提出的需求。
+function SiteDiagnosticTab() {
+  const [sites, setSites] = useState<AZPickerSite[]>([])
+  const [loadingSites, setLoadingSites] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [question, setQuestion] = useState('')
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<Diagnostic | null>(null)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [history, setHistory] = useState<Diagnostic[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoadingSites(true)
+    fetch('/api/sites').then(r => r.json()).then(d => {
+      const list = (d.sites ?? []) as { id: string; domain: string; name: string }[]
+      setSites(list.map(s => ({ id: s.id, domain: s.domain, name: s.name })).sort((a, b) => a.domain.localeCompare(b.domain)))
+    }).finally(() => setLoadingSites(false))
+  }, [])
+
+  useEffect(() => {
+    setResult(null)
+    setErrorMsg('')
+    setExpandedHistoryId(null)
+    setQuestion('')
+    if (!selectedId) { setHistory([]); return }
+    setLoadingHistory(true)
+    fetch(`/api/research/site-diagnostics?site_id=${selectedId}`).then(r => r.json()).then(d => setHistory(d.diagnostics ?? [])).finally(() => setLoadingHistory(false))
+  }, [selectedId])
+
+  async function runDiagnostic() {
+    if (!selectedId || running) return
+    setRunning(true); setErrorMsg(''); setResult(null)
+    try {
+      const res = await fetch('/api/research/site-diagnostics', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_id: selectedId, question: question.trim() || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setErrorMsg(data.error || '诊断失败'); return }
+      setResult(data)
+      setHistory(prev => [{ id: data.id, question: data.question, result: data.result, created_at: data.created_at }, ...prev])
+    } catch {
+      setErrorMsg('诊断失败（网络异常），请重试')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-gray-400">选一个站点，可以填一个具体问题（比如"要怎么安排人手"），AI会读这个站点近90天完整历史数据+大环境对比+分组任务团队现状，写一份策略建议。数据量大时可能要1-3分钟，请耐心等待。</p>
+
+      {loadingSites ? <Spinner /> : (
+        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
+      )}
+
+      {selectedId && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <textarea value={question} onChange={e => setQuestion(e.target.value)}
+            placeholder="你想问什么？（留空则做通用诊断）"
+            rows={3}
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+          <button onClick={runDiagnostic} disabled={running}
+            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+            {running ? 'AI正在读取历史数据，可能需要1-3分钟…' : '开始诊断'}
+          </button>
+          {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
+        </div>
+      )}
+
+      {result && (
+        <div className="bg-white rounded-xl border border-green-200 p-5">
+          <p className="text-sm font-semibold text-green-700 mb-2">诊断结果</p>
+          {result.question && <p className="text-xs text-gray-400 mb-2">问题：{result.question}</p>}
+          <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{result.result}</p>
+        </div>
+      )}
+
+      {selectedId && !loadingHistory && history.filter(h => h.id !== result?.id).length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <p className="text-sm font-semibold text-gray-700 mb-3">历史诊断记录</p>
+          <div className="space-y-2">
+            {history.filter(h => h.id !== result?.id).map(h => (
+              <div key={h.id} className="border-b border-gray-50 pb-2 last:border-0">
+                <button onClick={() => setExpandedHistoryId(prev => prev === h.id ? null : h.id)}
+                  className="w-full text-left text-xs text-gray-500 hover:text-gray-700">
+                  {h.created_at.slice(0, 16).replace('T', ' ')} {h.question ? `· ${h.question}` : '（通用诊断）'}
+                </button>
+                {expandedHistoryId === h.id && (
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mt-2">{h.result}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
