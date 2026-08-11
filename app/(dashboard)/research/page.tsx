@@ -609,18 +609,10 @@ function ReportDetailView({ reportId }: { reportId: string }) {
         <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{report.error}</p>
       )}
 
-      {(report.environment_stats || envNote) && (
+      {envNote && (
         <div className="bg-white rounded-xl border border-sky-200 p-5">
           <p className="text-sm font-semibold mb-3 text-sky-700">大环境</p>
-          {report.environment_stats && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-              <EnvStatCard label="整体" stats={report.environment_stats.overall} />
-              <EnvStatCard label="大站" stats={report.environment_stats.tiers.大站} />
-              <EnvStatCard label="中站" stats={report.environment_stats.tiers.中站} />
-              <EnvStatCard label="小站" stats={report.environment_stats.tiers.小站} />
-            </div>
-          )}
-          {envNote && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{envNote}</p>}
+          <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{envNote}</p>
         </div>
       )}
 
@@ -634,13 +626,8 @@ function ReportDetailView({ reportId }: { reportId: string }) {
                 <div key={g.group_id} className={i > 0 ? 'pt-4 border-t border-gray-100' : ''}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium text-gray-800">{g.group_name}</span>
-                    <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking} · 无效{g.invalid}</span>
+                    <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking}</span>
                   </div>
-                  {g.contentBreakdown && (
-                    <p className="text-xs text-gray-400 mb-1.5">
-                      游戏{g.contentBreakdown.游戏} · 应用{g.contentBreakdown.应用} · 专题{g.contentBreakdown.专题} · 资讯{g.contentBreakdown.资讯}
-                    </p>
-                  )}
                   {note && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-1.5">{note}</p>}
                   {g.topClaims.length > 0 && (
                     <div>
@@ -720,16 +707,6 @@ function ReportDetailView({ reportId }: { reportId: string }) {
           </div>
         </details>
       )}
-    </div>
-  )
-}
-
-function EnvStatCard({ label, stats }: { label: string; stats: EnvironmentTierStats }) {
-  return (
-    <div className="bg-gray-50 rounded-lg p-3">
-      <p className="text-xs text-gray-400 mb-1">{label}{label !== '整体' ? `（${stats.siteCount}）` : ''}</p>
-      <p className="text-sm text-gray-700">PC{stats.pcWeight ?? '—'} · M{stats.mobileWeight ?? '—'}</p>
-      <p className="text-xs text-gray-500">收录{stats.indexCount != null ? stats.indexCount.toLocaleString() : '—'}</p>
     </div>
   )
 }

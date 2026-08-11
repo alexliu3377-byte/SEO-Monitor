@@ -4,7 +4,6 @@ import { fetchSiteResearchSummary, type SiteResearchSummary } from '../lib/site-
 import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
-import { computeEnvironmentStats } from '../lib/environment-stats'
 import { callGeminiJSON } from '../lib/gemini'
 
 // 研究报告——GitHub Actions 直接跑（不经过 Vercel）。周报/月报/年报共用这一套
@@ -251,18 +250,6 @@ async function runStage2(reportId: string) {
   ])
   const environmentInput = { daily: envDaily ?? [], segments: envSegments ?? [] }
 
-  // 大环境结构化数字——2026-08-10 用户要求先摆整体+大/中/小站的权重/收录数字，
-  // AI只写简短说明，不用在文字里复述这些数字。取 period_end 当天（或往前找
-  // 最近一天有数据的）weight_history + index_snapshots 现算，跟AI分析完全
-  // 独立、代码直接算好存库。
-  const fullEnvironmentStats = await computeEnvironmentStats(supabase, periodEnd)
-  // 存库只要 asOfDate/overall/tiers 这三个字段（跟页面 EnvironmentStats 类型
-  // 对得上）——siteTiers 是个 Map，直接把整个对象丢给 .update() 会被
-  // JSON.stringify 悄悄序列化成 {}，不能囫囵存整个返回值。
-  const environmentStats = fullEnvironmentStats
-    ? { asOfDate: fullEnvironmentStats.asOfDate, overall: fullEnvironmentStats.overall, tiers: fullEnvironmentStats.tiers }
-    : null
-
   const analyzedCount = siteAnalyses.filter(s => !s.skipped && s.analysis).length
   const skippedCount = siteAnalyses.filter(s => s.skipped).length
   const failedCount = siteAnalyses.filter(s => !s.skipped && !s.analysis).length
@@ -271,7 +258,6 @@ async function runStage2(reportId: string) {
     competitor_effectiveness: competitorSummary,
     own_effectiveness: ownSummaries,
     environment_input: environmentInput,
-    environment_stats: environmentStats,
     sites_considered: sitesConsidered,
     sites_analyzed: analyzedCount,
     sites_skipped: skippedCount,
@@ -290,14 +276,6 @@ async function runStage2(reportId: string) {
   const envSegmentsText = (envSegments ?? []).map((s: { date: string; dimension: string; segment: string; site_count: number; avg_index_change_pct: number | null; deviation_pct: number | null; is_anomaly: boolean }) =>
     `${s.date} [${s.dimension}=${s.segment}] ${s.site_count}站:变化${s.avg_index_change_pct ?? '无'}%(偏离大盘${s.deviation_pct ?? '无'}个百分点)${s.is_anomaly ? '⚠异常' : ''}`
   ).join('\n') || '无数据'
-
-  const envStatsText = environmentStats
-    ? `截至${environmentStats.asOfDate}：整体 PC权重${environmentStats.overall.pcWeight ?? '无'}/移动权重${environmentStats.overall.mobileWeight ?? '无'}/平均收录${environmentStats.overall.indexCount ?? '无'}；` +
-      (['大站', '中站', '小站'] as const).map(t => {
-        const s = environmentStats.tiers[t]
-        return `${t}(${s.siteCount}个)：PC权重${s.pcWeight ?? '无'}/移动权重${s.mobileWeight ?? '无'}/平均收录${s.indexCount ?? '无'}`
-      }).join('；')
-    : '无数据'
 
   const siteAnalysesText = siteAnalyses
     .filter(s => !s.skipped && s.analysis)
@@ -321,10 +299,7 @@ async function runStage2(reportId: string) {
   const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : '这一年'
   const groupNamesForSchema = ownSummaries.map(g => `"${g.group_name}": "..."`).join(', ')
 
-  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：
-
-【大环境·整体+大/中/小站权重收录】
-${envStatsText}
+  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。除大环境这段外，页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文；大环境这段没有数字单独展示给用户看，需要你完整写清楚。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：
 
 【大环境·每日大盘】
 ${envDailyText}
@@ -342,14 +317,14 @@ ${ownText}
 ${competitorText}
 
 请写以下几段内容，自己站点成效和竞品成效必须分开写，不要混在一起：
-1. environmentNote：大环境${periodLabel}怎么样，哪个档位/分段的表现跟大盘不一样值得注意（权重上涨要连续多天才算数，别把单日跳动当成真上涨）。数据平淡就直接说"大环境平稳，没有明显异动"，不要硬编。
+1. environmentNote：完整写清楚${periodLabel}大环境情况——这段不像其它几段，页面不会单独展示数字，只有你这段文字，所以要把大盘的收录/涨跌趋势、各档位/内容侧重分段有没有明显偏离大盘讲清楚（权重上涨要连续多天才算数，别把单日跳动当成真上涨），可以写长一点、完整覆盖，不需要简短。数据平淡就直接说"大环境平稳，没有明显异动"，不要硬编。
 2. ownGroupNotes：**对象**，key是每个分组的名字（${groupNamesForSchema}），value是这个组的简短说明——重点说清楚这个组的收益主要是什么类型内容（游戏/应用/专题/资讯）带来的，没有可靠数据就说没有。
 3. competitorNote：竞品成效情况，哪些竞品词/站点表现突出，游戏还是应用类内容更有效。没有可靠数据就说没有。
 4. conclusion：综合结论——具体点出哪些站点因为什么词搜索量上升带来了收益、对比自己站点成效与竞品成效谁更好、指出这段时间"没有做到什么"所以没拿到更好的成绩。没把握的假设要说清楚"推测"，不要说得像确定的事实。可以比其它几段稍长一点，因为要做归因对比。
 
 以 JSON 格式返回，不要输出任何 JSON 外的文字：
 {
-  "environmentNote": "中文，100-200字",
+  "environmentNote": "中文，300-600字，完整说明大环境情况（页面不会展示数字，这段是唯一的说明来源）",
   "ownGroupNotes": { ${groupNamesForSchema || '"组名": "..."'} },
   "competitorNote": "中文，100-200字",
   "conclusion": "中文，200-350字"
