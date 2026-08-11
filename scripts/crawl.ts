@@ -330,6 +330,12 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
   // 新增）。
   if (isMainGroup) {
     await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-30))
+    // activity_log 一直文档写着"7天保留"（lib/crawl-rules.ts 的 RETENTION），但
+    // 实际清理代码只写在 app/api/cron/route.ts 里——那个路由只有用户点"重抓"
+    // 按钮时才会跑到，每天真正在跑的 GH Actions 主流程（这个脚本）从来没有
+    // 清理过，导致 activity_log 一直在攒（2026-08-11 真实验证过：查到最老的
+    // search 类型记录停在快一个月前，远超7天）。这里补上，保证每天都真的清一次。
+    await supabase.from('activity_log').delete().lt('logged_at', new Date(Date.now() - 7 * 86400000).toISOString())
   }
 
   const durationMs = Date.now() - stepStart
