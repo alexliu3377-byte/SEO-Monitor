@@ -148,11 +148,11 @@ function CompetitorsTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只展示已确认"有效"的词——追踪中/无效对这个页面没有参考价值，不再拉取；只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-gray-400 min-w-0">选一个竞品站点查看成效明细（只展示已确认"有效"的词——追踪中/无效对这个页面没有参考价值，不再拉取；只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
         <button onClick={() => setShowManageModal(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors flex-shrink-0 whitespace-nowrap">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           管理竞品站点
         </button>
       </div>
@@ -183,7 +183,7 @@ function CompetitorsTab() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-xs text-gray-400 border-b border-gray-100">
+                  <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
                     <th className="text-left px-4 py-2 font-medium">操作</th>
                     <th className="text-left px-4 py-2 font-medium">关键词</th>
                     <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">搜索量{sortIcons('search_volume')}</span></th>
@@ -199,18 +199,18 @@ function CompetitorsTab() {
                 <tbody className="divide-y divide-gray-50">
                   {pagedRows.map((r, i) => (
                     <tr key={i} className="text-gray-700">
-                      <td className="px-4 py-2 text-xs text-gray-500">{r.operation_type ?? '—'}</td>
-                      <td className="px-4 py-2">{r.keyword}</td>
-                      <td className="px-4 py-2 text-right text-xs">{r.search_volume?.toLocaleString() ?? '—'}</td>
-                      <td className="px-4 py-2 text-xs">{r.content_type === 'game' ? '游戏' : r.content_type === 'app' ? '应用' : '—'}</td>
-                      <td className="px-4 py-2 text-right text-xs">{r.rank_position ?? '—'}</td>
-                      <td className="px-4 py-2">{r.keyword}</td>
-                      <td className="px-4 py-2 text-right text-xs">{r.rank_volume?.toLocaleString() ?? '—'}</td>
-                      <td className={`px-4 py-2 text-right text-xs font-semibold ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
+                      <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{r.operation_type ?? '—'}</td>
+                      <td className="px-4 py-2 max-w-[200px]"><span className="block truncate" title={r.keyword}>{r.keyword}</span></td>
+                      <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{r.search_volume?.toLocaleString() ?? '—'}</td>
+                      <td className="px-4 py-2 text-xs whitespace-nowrap">{r.content_type === 'game' ? '游戏' : r.content_type === 'app' ? '应用' : '—'}</td>
+                      <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{r.rank_position ?? '—'}</td>
+                      <td className="px-4 py-2 max-w-[200px]"><span className="block truncate" title={r.keyword}>{r.keyword}</span></td>
+                      <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{r.rank_volume?.toLocaleString() ?? '—'}</td>
+                      <td className={`px-4 py-2 text-right text-xs font-semibold whitespace-nowrap ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
                         {r.score == null ? '—' : r.score.toFixed(1)}
                       </td>
-                      <td className="px-4 py-2 text-xs text-gray-400">{r.content_date ?? '—'}</td>
-                      <td className="px-4 py-2 text-xs text-gray-400">{r.discovery_date}</td>
+                      <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">{r.content_date ?? '—'}</td>
+                      <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">{r.discovery_date}</td>
                     </tr>
                   ))}
                 </tbody>
