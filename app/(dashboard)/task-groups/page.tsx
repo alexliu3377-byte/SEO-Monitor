@@ -966,6 +966,12 @@ export default function TaskGroupsPage() {
         setClaimedKeywords(prev => [...prev, data.keyword])
         setExpandedClaimIds(new Set<string>([data.keyword.id]))
         if (rightTab === 'distribute') loadDistributed()
+      } else {
+        // 409 已经在上面单独处理并 return 了，这里是其它失败（比如403）——
+        // 之前这个分支完全没处理，请求失败了界面上却什么反应都没有，
+        // 双击就跟没反应一样，2026-08-11 用户反馈排查出来的。
+        const data = await res.json().catch(() => ({}))
+        setClaimErrorMsg(data.error || '认领失败，请重试')
       }
     } catch {
       setClaimErrorMsg('认领失败（网络异常），请重试')

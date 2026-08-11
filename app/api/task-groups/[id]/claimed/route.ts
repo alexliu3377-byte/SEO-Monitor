@@ -101,14 +101,21 @@ export async function POST(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  // Verify caller is a member of this group
-  const { data: membership } = await service
-    .from('task_group_members')
-    .select('user_id')
-    .eq('group_id', groupId)
-    .eq('user_id', callerId)
-    .single()
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Verify caller is a member of this group — super/admin bypass this (2026-08-11
+  // 用户反馈：超管本人没被加进某个分组的成员列表时，双击认领会被这条检查
+  // 挡掉、前端又没处理403，表现就是"双击没反应"。超管/管理员本来就能看到
+  // 全部分组、能编辑任何组员的认领记录（见下面 PATCH 的 canEditOthers），
+  // 认领这个动作理应有同等权限，不需要先手动把自己加进成员列表）。
+  const callerRole = await getCallerRole(callerId)
+  if (callerRole !== 'super' && callerRole !== 'admin') {
+    const { data: membership } = await service
+      .from('task_group_members')
+      .select('user_id')
+      .eq('group_id', groupId)
+      .eq('user_id', callerId)
+      .single()
+    if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const claimedDate = getMY()
 
