@@ -162,6 +162,7 @@ export const CRAWL_RULES: RuleSection[] = [
     badge: '纯展示，不新增抓取逻辑',
     items: [
       { label: '数据来源', text: '/api/research/competitor-sites 和 [id]/tracking 两个只读接口，直接查 competitor_tracking_records（写入逻辑见上方"成效追踪"小节，这里不重复实现）——研究中心"竞品成效"tab 是这张表第一次有UI展示；站点列表排除自己的站点（fetchOwnSiteDomains，见上方"自己站点排除"）' },
+      { label: '[id]/tracking 去重+只看有效（2026-08-10）', text: 'competitor_tracking_records 按 site_id+keyword+discovery_date 唯一、永久保留，追踪窗口内每天都会 upsert 一行——之前这个接口直接把原始行全部返回，同一个词追踪几天就重复显示几次；已按 discovery_date 降序去重，每个词只保留最新一条。用户同时反馈"追踪中"（还没确认有没有效果）和"无效"（追踪满60天仍未见效）对这个页面没有参考价值、又担心表一直累积拖慢查询，改成数据库查询这一步就 `.eq(\'effectiveness\', \'有效\')` 过滤掉，不是前端默认隐藏——真正减少要拉取和去重的行数。这个过滤放在去重前是有意为之（挑出"这个词最近一次有效的记录"），不是 project_dedup_before_filter_bug 那种误把陈旧数据当成当前状态的坑。报告（周/月/年报）用的 fetchCompetitorEffectivenessSummary 汇总统计不受影响，仍然统计有效/追踪中/无效三种状态——这两处是不同的使用场景，没有一起改' },
       { label: '管理竞品站点', text: '研究中心"管理竞品站点"按钮列出全部站点（排除自己的站点，`?all=true` 查询参数），checkbox 预选中已经 has_rank_title=true 的站点；不是"新建站点"入口——域名/CSS选择器这些抓取配置已经在网站管理里配过了，这里只批量勾选/取消勾选，保存时对每个变化的站点调 PUT /api/sites 更新 has_rank_title。曾短暂加过逐站手动标"自家/竞品"的按钮，2026-08-10 当天用户反悔去掉了，改回纯自动识别' },
     ],
   },

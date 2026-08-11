@@ -63,6 +63,9 @@ export default function ResearchPage() {
 
 type CompetitorSite = AZPickerSite
 
+// effectiveness 字段2026-08-10起不再从接口返回——竞品追踪明细现在只拉
+// effectiveness='有效'的记录（见 tracking/route.ts 注释），这张表里每一行
+// 一定是"有效"，字段本身变成常量、没有展示价值，索性从响应里去掉。
 interface TrackingRow {
   operation_type: string | null
   keyword: string
@@ -70,19 +73,12 @@ interface TrackingRow {
   content_type: string | null
   rank_position: number | null
   rank_volume: number
-  effectiveness: string
   score: number | null
   content_date: string | null
   discovery_date: string
 }
 
 type SortableCol = 'search_volume' | 'rank_position' | 'rank_volume' | 'score' | 'content_date' | 'discovery_date'
-
-const EFFECTIVENESS_STYLE: Record<string, { bg: string; text: string }> = {
-  '有效': { bg: 'bg-green-50', text: 'text-green-600' },
-  '追踪中': { bg: 'bg-amber-50', text: 'text-amber-600' },
-  '无效': { bg: 'bg-gray-100', text: 'text-gray-500' },
-}
 
 function CompetitorsTab() {
   const [sites, setSites] = useState<CompetitorSite[]>([])
@@ -94,7 +90,6 @@ function CompetitorsTab() {
   const [loadingRows, setLoadingRows] = useState(false)
   const [kwFilter, setKwFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState<'' | 'app' | 'game'>('')
-  const [effFilter, setEffFilter] = useState('')
   const [sortCol, setSortCol] = useState<SortableCol | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
@@ -114,7 +109,6 @@ function CompetitorsTab() {
   const filteredRows = rows.filter(r => {
     if (kwFilter && !r.keyword.toLowerCase().includes(kwFilter.toLowerCase())) return false
     if (typeFilter && r.content_type !== typeFilter) return false
-    if (effFilter && r.effectiveness !== effFilter) return false
     return true
   })
 
@@ -155,7 +149,7 @@ function CompetitorsTab() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
+        <p className="text-sm text-gray-400">选一个竞品站点查看成效明细（只展示已确认"有效"的词——追踪中/无效对这个页面没有参考价值，不再拉取；只有开启"排名"追踪的站点才会出现在这里，不含你自己的站点）</p>
         <button onClick={() => setShowManageModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -180,13 +174,6 @@ function CompetitorsTab() {
               <option value="app">应用</option>
               <option value="game">游戏</option>
             </select>
-            <select value={effFilter} onChange={e => setEffFilter(e.target.value)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700">
-              <option value="">全部成效</option>
-              <option value="有效">有效</option>
-              <option value="追踪中">追踪中</option>
-              <option value="无效">无效</option>
-            </select>
             <span className="text-xs text-gray-400 ml-auto">{filteredRows.length} 条</span>
           </div>
           {loadingRows ? <Spinner /> : sortedRows.length === 0 ? (
@@ -204,35 +191,28 @@ function CompetitorsTab() {
                     <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">排名{sortIcons('rank_position')}</span></th>
                     <th className="text-left px-4 py-2 font-medium">排名词</th>
                     <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">排名量{sortIcons('rank_volume')}</span></th>
-                    <th className="text-left px-4 py-2 font-medium">成效</th>
                     <th className="text-right px-4 py-2 font-medium"><span className="inline-flex items-center justify-end">得分{sortIcons('score')}</span></th>
                     <th className="text-left px-4 py-2 font-medium"><span className="inline-flex items-center">提交日期{sortIcons('content_date')}</span></th>
                     <th className="text-left px-4 py-2 font-medium"><span className="inline-flex items-center">记录日期{sortIcons('discovery_date')}</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {pagedRows.map((r, i) => {
-                    const st = EFFECTIVENESS_STYLE[r.effectiveness] ?? { bg: 'bg-gray-50', text: 'text-gray-500' }
-                    return (
-                      <tr key={i} className="text-gray-700">
-                        <td className="px-4 py-2 text-xs text-gray-500">{r.operation_type ?? '—'}</td>
-                        <td className="px-4 py-2">{r.keyword}</td>
-                        <td className="px-4 py-2 text-right text-xs">{r.search_volume?.toLocaleString() ?? '—'}</td>
-                        <td className="px-4 py-2 text-xs">{r.content_type === 'game' ? '游戏' : r.content_type === 'app' ? '应用' : '—'}</td>
-                        <td className="px-4 py-2 text-right text-xs">{r.rank_position ?? '—'}</td>
-                        <td className="px-4 py-2">{r.keyword}</td>
-                        <td className="px-4 py-2 text-right text-xs">{r.rank_volume?.toLocaleString() ?? '—'}</td>
-                        <td className="px-4 py-2">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${st.bg} ${st.text}`}>{r.effectiveness}</span>
-                        </td>
-                        <td className={`px-4 py-2 text-right text-xs font-semibold ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
-                          {r.score == null ? '—' : r.score.toFixed(1)}
-                        </td>
-                        <td className="px-4 py-2 text-xs text-gray-400">{r.content_date ?? '—'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400">{r.discovery_date}</td>
-                      </tr>
-                    )
-                  })}
+                  {pagedRows.map((r, i) => (
+                    <tr key={i} className="text-gray-700">
+                      <td className="px-4 py-2 text-xs text-gray-500">{r.operation_type ?? '—'}</td>
+                      <td className="px-4 py-2">{r.keyword}</td>
+                      <td className="px-4 py-2 text-right text-xs">{r.search_volume?.toLocaleString() ?? '—'}</td>
+                      <td className="px-4 py-2 text-xs">{r.content_type === 'game' ? '游戏' : r.content_type === 'app' ? '应用' : '—'}</td>
+                      <td className="px-4 py-2 text-right text-xs">{r.rank_position ?? '—'}</td>
+                      <td className="px-4 py-2">{r.keyword}</td>
+                      <td className="px-4 py-2 text-right text-xs">{r.rank_volume?.toLocaleString() ?? '—'}</td>
+                      <td className={`px-4 py-2 text-right text-xs font-semibold ${r.score == null ? 'text-gray-300' : r.score > 0 ? 'text-green-600' : 'text-red-400'}`}>
+                        {r.score == null ? '—' : r.score.toFixed(1)}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-400">{r.content_date ?? '—'}</td>
+                      <td className="px-4 py-2 text-xs text-gray-400">{r.discovery_date}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
