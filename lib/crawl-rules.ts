@@ -180,6 +180,19 @@ export const CRAWL_RULES: RuleSection[] = [
     ],
   },
   {
+    key: 'hot-radar-cache',
+    title: '热词雷达缓存',
+    badge: 'hot-radar-cache.yml · GitHub Actions · 每日 08:00 MYT（cron 0 0 UTC）',
+    items: [
+      { label: '触发方式', text: 'GitHub Actions hot-radar-cache.yml（cron 0 0 * * * UTC = 08:00 MYT，在所有日常抓取/重试/环境快照都完成后运行），调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET）；也可 workflow_dispatch 手动触发' },
+      { label: '背景（2026-08-11 新增）', text: '热词雷达（研究中心/分组任务共用同一个 /api/hot-radar 接口）之前每次打开页面都现场跑 get_hot_new_words/get_hot_rank_words/get_hot_streak_words 三个 RPC，各自要扫 rank_changes/site_rank_keywords 近30天全量数据——这两张表永久保留、每天持续写入，随数据量增长单次调用要2-8秒，实测 get_hot_rank_words 通过真实 PostgREST 接口（8秒默认超时）会直接超时报错，页面表现为"暂无数据"（用户反馈"每天打开都很慢"）；已同时给 site_rank_keywords 补上覆盖索引（跟 rank_changes 那边已有的同款）、调大这三个函数的 work_mem/statement_timeout，但即使修好索引这类"扫全量近30天数据"的查询仍会随表继续增长而变慢，遂改成定时预算好+缓存' },
+      { label: '计算逻辑', text: 'lib/hot-radar.ts 的 computeHotRadarPayload()——原本写在 /api/hot-radar/route.ts 里的聚合逻辑原样抽出来，供读接口（缓存未命中兜底）和刷新接口共用同一份代码，不会出现两边逻辑长出差异' },
+      { label: '写入表', text: 'hot_radar_cache（单行，id 固定为 \'latest\'，upsert；字段 payload 存完整JSON结果，computed_at 记录算的时间）' },
+      { label: '读取方', text: '/api/hot-radar 直接读 hot_radar_cache 单行，不再现场跑三个RPC；缓存未命中时（比如刚上线还没跑过一次定时任务）现场算一次并顺手写回缓存，不会一直空着，但正常情况下一天只应该现场算这一次' },
+      { label: '真实3000行截断bug（同一天验证时发现）', text: '这三个RPC函数本身没有 LIMIT，真实未截断行数分别是 get_hot_new_words 9114行/get_hot_rank_words 27617行/get_hot_streak_words 109002行——但通过PostgREST调用（.rpc()）时被静默截到3000行，跟这个项目已经踩过好几次的".select()查询硬顶3000行"是同一个限制，只是这次发生在RPC调用上。而且原本的 ORDER BY 没有唯一列兜底（比如 site_count DESC 打平时顺序不确定），真要翻页会重复/漏行——参照 lib/supabase-paginate.ts 的教训改成在每个函数 ORDER BY 末尾追加 keyword（或 keyword+domain）确保确定性，同时给三个函数都加了显式 `LIMIT 2000`（在SQL层面就把结果控制在3000这个隐性上限以内，不依赖分页去够全量——这三个函数本来就是按相关性排序的"热词榜"，取前2000名对这个场景完全够用，不需要为了"拿全量"去承担多次翻页的额外查询成本）' },
+    ],
+  },
+  {
     key: 'search',
     title: '站点情报查询',
     badge: '类型：search · 触发方式：页面搜索',
