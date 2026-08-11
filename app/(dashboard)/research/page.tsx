@@ -534,6 +534,7 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
   const [reports, setReports] = useState<ReportListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [filterYear, setFilterYear] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -541,16 +542,35 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
       const list = (d.reports ?? []) as ReportListItem[]
       setReports(list)
       setSelectedId(list.length > 0 ? list[0].id : null)
+      setFilterYear(list.length > 0 ? list[0].period_start.slice(0, 4) : '')
     }).finally(() => setLoading(false))
   }, [periodType])
 
   if (loading) return <Spinner />
   if (reports.length === 0) return <p className="text-sm text-gray-300 text-center py-12">还没有报告</p>
 
+  // 周报/月报会越积越多，参照近期榜单"月度趋势"的做法先选年份再看这一年的
+  // 卡片，卡片行不会随时间无限变长；年报本身一年只多一张，不需要这层筛选。
+  const years = Array.from(new Set(reports.map(r => r.period_start.slice(0, 4)))).sort((a, b) => b.localeCompare(a))
+  const visibleReports = periodType === 'year' ? reports : reports.filter(r => r.period_start.startsWith(filterYear))
+
+  function changeYear(y: string) {
+    setFilterYear(y)
+    const first = reports.find(r => r.period_start.startsWith(y))
+    setSelectedId(first ? first.id : null)
+  }
+
   return (
     <div className="space-y-5">
+      {periodType !== 'year' && years.length > 1 && (
+        <select value={filterYear} onChange={e => changeYear(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+          {years.map(y => <option key={y} value={y}>{y}年</option>)}
+        </select>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        {reports.map(r => {
+        {visibleReports.map(r => {
           const st = STATUS_LABELS[r.status]
           return (
             <button key={r.id} onClick={() => setSelectedId(r.id)}
