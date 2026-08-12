@@ -5,7 +5,7 @@ import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
 import { computeOpportunityGaps } from '../lib/opportunity-gap'
-import { callGeminiJSON } from '../lib/gemini'
+import { callGeminiJSON, BULK_MODELS, QUALITY_MODELS } from '../lib/gemini'
 
 interface MomentumKeyword {
   keyword: string; cluster: string; category: string
@@ -178,7 +178,7 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
       } else {
         const prompt = buildSiteAnalysisPrompt(site, summary, report.period_start, report.period_end)
         geminiCallCount++
-        const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096 })
+        const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096, models: BULK_MODELS })
         if (result) {
           await supabase.from('research_report_sites').upsert({
             report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
@@ -372,7 +372,7 @@ ${opportunityGapsText}
     opportunityGaps: { cluster: string; category: string; keywordCount: number; totalVolume: number; priority: 'high' | 'medium' | 'low'; recommendation: string }[]
     conclusion: string
   }
-  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<Stage2Result>(stage2Prompt, { maxOutputTokens: 8192 })
+  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<Stage2Result>(stage2Prompt, { maxOutputTokens: 8192, models: QUALITY_MODELS })
 
   const durationMs = Date.now() - startedAt
 

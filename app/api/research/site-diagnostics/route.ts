@@ -7,7 +7,7 @@ import { computeEnvironmentStats } from '@/lib/environment-stats'
 import { fetchGroupEffectivenessSummary } from '@/lib/tracking-summary'
 import { computeOpportunityGaps } from '@/lib/opportunity-gap'
 import { buildSiteDiagnosticPrompt } from '@/lib/site-diagnostic-prompt'
-import { callGeminiJSON } from '@/lib/gemini'
+import { callGeminiJSON, QUALITY_MODELS } from '@/lib/gemini'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
   )
 
   const prompt = buildSiteDiagnosticPrompt(site, summary, dateStart, dateEnd, envStats, siteTier, groups, gapResult.gaps, question ?? null)
-  const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 4096 })
+  const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 4096, models: QUALITY_MODELS })
   if (!result) return NextResponse.json({ error: error || 'AI 诊断失败' }, { status: 500 })
 
   const { data: saved, error: saveErr } = await service
