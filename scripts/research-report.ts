@@ -4,7 +4,15 @@ import { fetchSiteResearchSummary, type SiteResearchSummary } from '../lib/site-
 import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
+import { computeOpportunityGaps } from '../lib/opportunity-gap'
 import { callGeminiJSON } from '../lib/gemini'
+
+interface MomentumKeyword {
+  keyword: string; cluster: string; category: string
+  rankPosition: number | null; rankChange: number | null; volume: number; volumeChange: number
+}
+interface Finding { observation: string; interpretation: string; confidence: 'high' | 'medium' | 'low' }
+interface Stage1Result { summary: string; momentumKeywords: MomentumKeyword[]; findings: Finding[] }
 
 // 研究报告——GitHub Actions 直接跑（不经过 Vercel）。周报/月报/年报共用这一套
 // 两段式AI逻辑，只是 periodStart/periodEnd 跨度不同。
@@ -170,11 +178,12 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
       } else {
         const prompt = buildSiteAnalysisPrompt(site, summary, report.period_start, report.period_end)
         geminiCallCount++
-        const { result, error } = await callGeminiJSON<{ analysis: string }>(prompt, { maxOutputTokens: 1024 })
+        const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096 })
         if (result) {
           await supabase.from('research_report_sites').upsert({
             report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-            skipped: false, analysis: result.analysis, ...stats,
+            skipped: false, analysis: result.summary,
+            momentum_keywords: result.momentumKeywords, findings: result.findings, ...stats,
           }, { onConflict: 'report_id,site_id' })
           okCount++
           console.log(`[stage1] ${site.domain} 分析完成`)
@@ -220,8 +229,8 @@ async function runStage2(reportId: string) {
   const startedAt = Date.now()
 
   const { data: siteRows } = await supabase.from('research_report_sites')
-    .select('site_id, domain, name, skipped, skip_reason, analysis, error').eq('report_id', reportId)
-  const siteAnalyses = (siteRows ?? []) as { site_id: string; domain: string; name: string; skipped: boolean; skip_reason: string | null; analysis: string | null; error: string | null }[]
+    .select('site_id, domain, name, skipped, skip_reason, analysis, error, momentum_keywords').eq('report_id', reportId)
+  const siteAnalyses = (siteRows ?? []) as { site_id: string; domain: string; name: string; skipped: boolean; skip_reason: string | null; analysis: string | null; error: string | null; momentum_keywords: MomentumKeyword[] | null }[]
 
   const { data: sites } = await supabase.from('sites').select('id').eq('is_enabled', true)
   const sitesConsidered = (sites ?? []).length
@@ -231,9 +240,10 @@ async function runStage2(reportId: string) {
   // 直接留到 Stage2 一起喂。
   // 自己站点成效——2026-08-07 用户要求单独拆一段，不要跟竞品混在一起，换回
   // 之前用过的分组任务（task_groups/site_tracking_records）追踪机制。
-  const [competitorSummary, groups] = await Promise.all([
+  const [competitorSummary, groups, opportunityGapResult] = await Promise.all([
     fetchCompetitorEffectivenessSummary(supabase, periodStart, periodEnd),
     supabase.from('task_groups').select('id, name').then((r: { data: { id: string; name: string }[] | null }) => r.data ?? []),
+    computeOpportunityGaps(supabase, periodStart, periodEnd),
   ])
   const ownSummaries = await Promise.all(
     groups.map(async (g: { id: string; name: string }) => ({
@@ -277,10 +287,30 @@ async function runStage2(reportId: string) {
     `${s.date} [${s.dimension}=${s.segment}] ${s.site_count}站:变化${s.avg_index_change_pct ?? '无'}%(偏离大盘${s.deviation_pct ?? '无'}个百分点)${s.is_anomaly ? '⚠异常' : ''}`
   ).join('\n') || '无数据'
 
+  // 2026-08-12 起除了 Stage1 的短summary，还把它算出来的发力词群一起喂给
+  // Stage2——之前只读一句压缩过的话，Stage2看不到具体是哪些词在动、动了多少，
+  // 没法真正做跨站综合判断。
   const siteAnalysesText = siteAnalyses
     .filter(s => !s.skipped && s.analysis)
-    .map(s => `【${s.domain}（${s.name}）】\n${s.analysis}`)
+    .map(s => {
+      const clusters = new Map<string, MomentumKeyword[]>()
+      for (const k of s.momentum_keywords ?? []) {
+        if (!clusters.has(k.cluster)) clusters.set(k.cluster, [])
+        clusters.get(k.cluster)!.push(k)
+      }
+      const clusterText = Array.from(clusters.entries())
+        .map(([cluster, kws]) => `【${cluster}】${kws.length}词，量${kws.reduce((a, k) => a + k.volume, 0)}，${kws[0]?.category ?? ''}`)
+        .join('；')
+      return `【${s.domain}（${s.name}）】\n${s.analysis}${clusterText ? `\n发力词群：${clusterText}` : ''}`
+    })
     .join('\n\n') || '（这段时间没有站点产出有效分析）'
+
+  const GAP_TEXT_CAP = 300
+  const opportunityGapsText = opportunityGapResult.gaps.length > 0
+    ? opportunityGapResult.gaps.slice(0, GAP_TEXT_CAP)
+      .map(k => `${k.keyword}(${k.domain}/第${k.rank_position}名/量${k.volume}/${k.content_type === 'game' ? '游戏' : '应用'}/发布于${k.content_date ?? '未知'})`)
+      .join('、') + (opportunityGapResult.gaps.length > GAP_TEXT_CAP ? `（只列了搜索量最高的${GAP_TEXT_CAP}个，实际共${opportunityGapResult.gaps.length}个）` : '')
+    : '（这期没有发现竞品明显领先但我方零覆盖的词）'
 
   const competitorText = competitorSummary.topClaims.length > 0
     ? `有效${competitorSummary.effective} / 追踪中${competitorSummary.tracking} / 无效${competitorSummary.invalid}；内容类型：游戏${competitorSummary.contentBreakdown.游戏} / 应用${competitorSummary.contentBreakdown.应用}\n表现最好的竞品词：${competitorSummary.topClaims.slice(0, 10).map(c => `${c.domain}的"${c.keyword}"(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}`
@@ -316,21 +346,33 @@ ${ownText}
 【竞品成效（has_rank_title 开启追踪的竞品站点，新发现内容是否涨排名/收录，不含自己的站点）】
 ${competitorText}
 
+【机会缺口——竞品这期真正拿到效果（effectiveness=有效），但我方历史上完全没做过的词（代码已经精确比对过，不是猜的），按搜索量从高到低】
+${opportunityGapsText}
+
 请写以下几段内容，自己站点成效和竞品成效必须分开写，不要混在一起：
 1. environmentNote：完整写清楚${periodLabel}大环境情况——这段不像其它几段，页面不会单独展示数字，只有你这段文字，所以要把大盘的收录/涨跌趋势、各档位/内容侧重分段有没有明显偏离大盘讲清楚（权重上涨要连续多天才算数，别把单日跳动当成真上涨），可以写长一点、完整覆盖，不需要简短。数据平淡就直接说"大环境平稳，没有明显异动"，不要硬编。
 2. ownGroupNotes：**对象**，key是每个分组的名字（${groupNamesForSchema}），value是这个组的简短说明——重点说清楚这个组的收益主要是什么类型内容（游戏/应用/专题/资讯）带来的，没有可靠数据就说没有。
 3. competitorNote：竞品成效情况，哪些竞品词/站点表现突出，游戏还是应用类内容更有效。没有可靠数据就说没有。
-4. conclusion：综合结论——具体点出哪些站点因为什么词搜索量上升带来了收益、对比自己站点成效与竞品成效谁更好、指出这段时间"没有做到什么"所以没拿到更好的成绩。没把握的假设要说清楚"推测"，不要说得像确定的事实。可以比其它几段稍长一点，因为要做归因对比。
+4. opportunityGaps：把「机会缺口」列表里的词按语义聚类成几个有意义的词群（自己起名字），每个词群给：这个词群里有多少个词、总搜索量大致多少（体现market signal强弱）、优先级判断（high/medium/low，结合搜索量大小+当前是否应季，比如暑假/寒假/开学这类时间点）、一句具体建议（补什么类型内容、为什么值得做）。列表为空就返回空数组，不要编——没有机会缺口是正常情况。
+5. conclusion：综合结论——具体点出哪些站点因为什么词搜索量上升带来了收益、对比自己站点成效与竞品成效谁更好、指出这段时间"没有做到什么"所以没拿到更好的成绩，可以呼应机会缺口里最值得优先做的1-2个词群。没把握的假设要说清楚"推测"，不要说得像确定的事实。可以比其它几段稍长一点，因为要做归因对比。
 
 以 JSON 格式返回，不要输出任何 JSON 外的文字：
 {
   "environmentNote": "中文，300-600字，完整说明大环境情况（页面不会展示数字，这段是唯一的说明来源）",
   "ownGroupNotes": { ${groupNamesForSchema || '"组名": "..."'} },
   "competitorNote": "中文，100-200字",
+  "opportunityGaps": [
+    { "cluster": "词群名", "category": "游戏|应用|专题|资讯", "keywordCount": 数字, "totalVolume": 数字, "priority": "high|medium|low", "recommendation": "一句具体建议" }
+  ],
   "conclusion": "中文，200-350字"
 }`
 
-  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<{ environmentNote: string; ownGroupNotes: Record<string, string>; competitorNote: string; conclusion: string }>(stage2Prompt, { maxOutputTokens: 8192 })
+  interface Stage2Result {
+    environmentNote: string; ownGroupNotes: Record<string, string>; competitorNote: string
+    opportunityGaps: { cluster: string; category: string; keywordCount: number; totalVolume: number; priority: 'high' | 'medium' | 'low'; recommendation: string }[]
+    conclusion: string
+  }
+  const { result: stage2Result, error: stage2Error } = await callGeminiJSON<Stage2Result>(stage2Prompt, { maxOutputTokens: 8192 })
 
   const durationMs = Date.now() - startedAt
 

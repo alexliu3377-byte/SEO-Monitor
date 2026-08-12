@@ -20,7 +20,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 已经带出来的旧版 JSONB 列）还有真实数据，做个兜底不然老报告会显示"没有站点分析"。
   const { data: siteRows } = await service
     .from('research_report_sites')
-    .select('site_id, domain, name, skipped, skip_reason, analysis, error, pc_weight, mobile_weight, avg_index_count, avg_mobile_ip')
+    .select('site_id, domain, name, skipped, skip_reason, analysis, error, pc_weight, mobile_weight, avg_index_count, avg_mobile_ip, momentum_keywords, findings')
     .eq('report_id', id)
   if (siteRows && siteRows.length > 0) report.site_analyses = siteRows
 

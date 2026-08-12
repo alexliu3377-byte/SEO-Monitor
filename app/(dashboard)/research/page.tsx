@@ -444,6 +444,12 @@ interface ReportListItem {
   error: string | null
 }
 
+interface MomentumKeyword {
+  keyword: string; cluster: string; category: string
+  rankPosition: number | null; rankChange: number | null; volume: number; volumeChange: number
+}
+interface SiteFinding { observation: string; interpretation: string; confidence: 'high' | 'medium' | 'low' }
+
 interface SiteAnalysisEntry {
   site_id: string
   domain: string
@@ -456,6 +462,8 @@ interface SiteAnalysisEntry {
   mobile_weight?: number | null
   avg_index_count?: number | null
   avg_mobile_ip?: number | null
+  momentum_keywords?: MomentumKeyword[] | null
+  findings?: SiteFinding[] | null
 }
 
 interface CompetitorEffectivenessClaim {
@@ -512,6 +520,11 @@ interface EnvironmentStats {
 // competitorNote），旧报告还是老的四个长字段（environment/ownEffectiveness/
 // competitorEffectiveness）——两套字段都保留在类型里，渲染时优先取新字段、
 // 没有再退回旧字段，老报告不会显示空白。conclusion 两版字段名一直相同不用兼容。
+interface OpportunityGap {
+  cluster: string; category: string; keywordCount: number; totalVolume: number
+  priority: 'high' | 'medium' | 'low'; recommendation: string
+}
+
 interface ReportDetail extends ReportListItem {
   site_analyses: SiteAnalysisEntry[]
   competitor_effectiveness: CompetitorEffectivenessSummary | null
@@ -520,6 +533,7 @@ interface ReportDetail extends ReportListItem {
   report_sections: {
     environmentNote?: string; ownGroupNotes?: Record<string, string>; competitorNote?: string
     environment?: string; ownEffectiveness?: string; competitorEffectiveness?: string
+    opportunityGaps?: OpportunityGap[]
     conclusion: string
   } | null
 }
@@ -529,6 +543,14 @@ const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }>
   completed: { label: '已完成', bg: 'bg-green-50', text: 'text-green-600' },
   failed:    { label: '失败',   bg: 'bg-red-50',   text: 'text-red-600' },
 }
+
+const PRIORITY_LABELS: Record<string, { label: string; bg: string; text: string }> = {
+  high:   { label: '高优先级', bg: 'bg-red-50',   text: 'text-red-600' },
+  medium: { label: '中优先级', bg: 'bg-amber-50', text: 'text-amber-600' },
+  low:    { label: '低优先级', bg: 'bg-gray-100',  text: 'text-gray-500' },
+}
+
+const CONFIDENCE_LABELS: Record<string, string> = { high: '高置信度', medium: '中置信度', low: '低置信度' }
 
 function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
   const [reports, setReports] = useState<ReportListItem[]>([])
@@ -722,6 +744,28 @@ function ReportDetailView({ reportId }: { reportId: string }) {
         </div>
       )}
 
+      {sections?.opportunityGaps && sections.opportunityGaps.length > 0 && (
+        <div className="bg-white rounded-xl border border-rose-200 p-5">
+          <p className="text-sm font-semibold mb-1 text-rose-700">机会缺口</p>
+          <p className="text-xs text-gray-400 mb-3">竞品这期真正拿到效果、但我方历史上完全没做过的词，已按词群聚合</p>
+          <div className="space-y-3">
+            {sections.opportunityGaps.map((g, i) => {
+              const p = PRIORITY_LABELS[g.priority] ?? PRIORITY_LABELS.low
+              return (
+                <div key={i} className="flex items-start gap-2">
+                  <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 mt-0.5 ${p.bg} ${p.text}`}>{p.label}</span>
+                  <div className="min-w-0">
+                    <span className="text-sm text-gray-800 font-medium">{g.cluster}</span>
+                    <span className="text-xs text-gray-400">　{g.category}·{g.keywordCount}词·量{g.totalVolume.toLocaleString()}</span>
+                    <p className="text-xs text-gray-600 mt-0.5">{g.recommendation}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {sections?.conclusion && <ReportSectionCard title="综合结论" color="violet" text={sections.conclusion} />}
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -745,6 +789,37 @@ function ReportDetailView({ reportId }: { reportId: string }) {
                   </p>
                 )}
                 <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{expandedSite.analysis}</p>
+
+                {expandedSite.momentum_keywords && expandedSite.momentum_keywords.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-50">
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">本期发力词群</p>
+                    {Array.from(new Set(expandedSite.momentum_keywords.map(k => k.cluster))).map(cluster => {
+                      const kws = expandedSite.momentum_keywords!.filter(k => k.cluster === cluster)
+                      return (
+                        <div key={cluster} className="mb-1.5 last:mb-0">
+                          <span className="text-xs text-gray-500">【{cluster}】</span>
+                          <span className="text-xs text-gray-600">
+                            {kws.map(k => `${k.keyword}(第${k.rankPosition ?? '未排名'}名${k.rankChange != null ? `/${k.rankChange > 0 ? '升' : k.rankChange < 0 ? '降' : '不变'}${Math.abs(k.rankChange)}` : '/新进榜'}/量${k.volume})`).join('、')}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {expandedSite.findings && expandedSite.findings.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-50">
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">关键发现</p>
+                    <div className="space-y-1.5">
+                      {expandedSite.findings.map((f, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <span className="text-[10px] text-gray-400 border border-gray-200 rounded px-1 flex-shrink-0 mt-0.5">{CONFIDENCE_LABELS[f.confidence] ?? f.confidence}</span>
+                          <p className="text-xs text-gray-600 leading-relaxed">{f.observation}——{f.interpretation}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>

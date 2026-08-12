@@ -221,6 +221,22 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
   return { ranked, indexed, tracking, invalid, topClaims, contentBreakdown }
 }
 
+// 研究报告"机会缺口"（scripts/research-report.ts Stage2）用——判断一个竞品
+// 赢下的词是不是我方"零覆盖"，要靠这份"我方历史上有没有做过这个词"的全量
+// 集合去比对，不能按周期限定（三个月前做过、现在还在排名的词依然算已覆盖，
+// 不该因为这期没提交就被误判成缺口）。site_tracking_records 永久保留、持续
+// 增长，超3000行会被 PostgREST 静默截断（这个项目已经踩过好几次同一个坑，
+// 见 project_supabase_row_limit_hard_cap），必须走 fetchAllRows 分页，不能
+// 直接 select()。只要 keyword 一列，量再大也很轻。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchOwnCoveredKeywordSet(service: any): Promise<Set<string>> {
+  const { count } = await service.from('site_tracking_records').select('id', { count: 'exact', head: true })
+  const rows = await fetchAllRows<{ keyword: string }>((from, to) =>
+    service.from('site_tracking_records').select('keyword').order('id', { ascending: true }).range(from, to),
+    { countHint: count ?? 0 })
+  return new Set(rows.map(r => r.keyword.trim()))
+}
+
 // 自己站点的域名集合——曾短暂改成 sites.is_own_site 手动逐站标记（研究中心
 // "管理竞品站点"弹窗里选"自家/竞品"），2026-08-10 当天用户又反悔改回来：
 // 手动标太麻烦，还是自动识别更好。复用 task_groups.site_domains（分组任务

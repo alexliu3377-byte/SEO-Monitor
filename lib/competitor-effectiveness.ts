@@ -84,3 +84,75 @@ export async function fetchCompetitorEffectivenessSummary(service: any, dateStar
 
   return { effective, tracking, invalid, topClaims, contentBreakdown }
 }
+
+export interface CompetitorWinningKeyword {
+  keyword: string
+  domain: string
+  content_type: string
+  rank_position: number
+  volume: number
+  content_date: string | null
+  source_url: string | null
+}
+
+const GAP_CANDIDATE_CAP = 300
+
+// 研究报告"机会缺口"（scripts/research-report.ts Stage2）用——竞品这段时间
+// 真正拿到效果（effectiveness='有效'，不是"追踪中"这种还没确认的）的词，排除
+// 自己的站点。跟 fetchCompetitorEffectivenessSummary 用的是同一份原始数据+
+// 同一套排除自己站点域名的逻辑，只是这里要 content_date/source_url（判断
+// "内容发布→排名跟上"的时间关系）而且不裁到15条——是否"我方零覆盖"这个事实
+// 判断要靠完整列表去跟 fetchOwnCoveredKeywordSet 的结果做差集，裁太狠会漏掉
+// 真正的缺口。
+// competitor_tracking_records 按 site_id+keyword+discovery_date 唯一，追踪
+// 窗口内会有多行——同一个词在周期内可能有好几条 discovery_date 不同的"有效"
+// 记录，必须按 site_id+keyword 去重只留最新一条，否则机会缺口列表会重复
+// 出现同一个词（这个坑 app/api/research/competitor-sites/[id]/tracking/route.ts
+// 已经踩过一次，这里是同一张表的同一个问题，做法照抄：按 discovery_date
+// 降序排，遇到的第一条就是最新的）。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchCompetitorWinningKeywords(service: any, dateStart: string, dateEnd: string): Promise<{ keywords: CompetitorWinningKeyword[]; totalCount: number }> {
+  const [allRows, ownDomains] = await Promise.all([
+    fetchAllRows<{
+      site_id: string; keyword: string; content_type: string | null
+      rank_position: number | null; rank_volume: number
+      content_date: string | null; source_url: string | null; discovery_date: string
+    }>((from, to) =>
+      service.from('competitor_tracking_records')
+        .select('site_id, keyword, content_type, rank_position, rank_volume, content_date, source_url, discovery_date')
+        .eq('effectiveness', '有效')
+        .gte('discovery_date', dateStart).lte('discovery_date', dateEnd)
+        .order('discovery_date', { ascending: false }).order('id', { ascending: true })
+        .range(from, to)),
+    fetchOwnSiteDomains(service),
+  ])
+
+  const siteIds = Array.from(new Set(allRows.map(r => r.site_id)))
+  const siteDomainMap = new Map<string, string>()
+  if (siteIds.length > 0) {
+    const { data: sites } = await service.from('sites').select('id, domain').in('id', siteIds)
+    for (const s of (sites ?? []) as { id: string; domain: string }[]) siteDomainMap.set(s.id, s.domain)
+  }
+
+  const seen = new Set<string>()
+  const keywords = allRows
+    .filter(r => !ownDomains.has(siteDomainMap.get(r.site_id) ?? '') && r.rank_position != null)
+    .filter(r => {
+      const dedupeKey = `${r.site_id}|${r.keyword}`
+      if (seen.has(dedupeKey)) return false
+      seen.add(dedupeKey)
+      return true
+    })
+    .map(r => ({
+      keyword: r.keyword,
+      domain: siteDomainMap.get(r.site_id) ?? r.site_id.slice(0, 8),
+      content_type: r.content_type ?? 'app',
+      rank_position: r.rank_position!,
+      volume: r.rank_volume || 0,
+      content_date: r.content_date,
+      source_url: r.source_url,
+    }))
+    .sort((a, b) => b.volume - a.volume)
+
+  return { keywords: keywords.slice(0, GAP_CANDIDATE_CAP), totalCount: keywords.length }
+}
