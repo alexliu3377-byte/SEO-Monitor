@@ -535,6 +535,7 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filterYear, setFilterYear] = useState('')
+  const [filterMonth, setFilterMonth] = useState('') // 只有 week tab 用——月报的pill本身就是"月"，不用再筛一层
 
   useEffect(() => {
     setLoading(true)
@@ -543,44 +544,76 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
       setReports(list)
       setSelectedId(list.length > 0 ? list[0].id : null)
       setFilterYear(list.length > 0 ? list[0].period_start.slice(0, 4) : '')
+      setFilterMonth(list.length > 0 ? list[0].period_start.slice(5, 7) : '')
     }).finally(() => setLoading(false))
   }, [periodType])
 
   if (loading) return <Spinner />
   if (reports.length === 0) return <p className="text-sm text-gray-300 text-center py-12">还没有报告</p>
 
-  // 周报/月报会越积越多，参照近期榜单"月度趋势"的做法先选年份再看这一年的
-  // 卡片，卡片行不会随时间无限变长；年报本身一年只多一张，不需要这层筛选。
+  // 周报/月报会越积越多，参照近期榜单"月度趋势"的做法先选年份（周报再多选一层
+  // 月份，因为一年52周直接铺一排还是太长）再看卡片，卡片行不会随时间无限变长；
+  // 年报本身一年只多一张，不需要这层筛选。年份/月份下拉一直显示——不要因为
+  // "目前数据只有一个年份/月份"就隐藏掉，隐藏会让人以为这个筛选功能没做。
   const years = Array.from(new Set(reports.map(r => r.period_start.slice(0, 4)))).sort((a, b) => b.localeCompare(a))
-  const visibleReports = periodType === 'year' ? reports : reports.filter(r => r.period_start.startsWith(filterYear))
+  const monthsInYear = Array.from(new Set(
+    reports.filter(r => r.period_start.startsWith(filterYear)).map(r => r.period_start.slice(5, 7))
+  )).sort((a, b) => b.localeCompare(a))
+
+  const visibleReports = periodType === 'year'
+    ? reports
+    : periodType === 'week'
+      ? reports.filter(r => r.period_start.startsWith(`${filterYear}-${filterMonth}`))
+      : reports.filter(r => r.period_start.startsWith(filterYear))
 
   function changeYear(y: string) {
     setFilterYear(y)
-    const first = reports.find(r => r.period_start.startsWith(y))
+    const monthsForY = Array.from(new Set(reports.filter(r => r.period_start.startsWith(y)).map(r => r.period_start.slice(5, 7)))).sort((a, b) => b.localeCompare(a))
+    const m = monthsForY[0] ?? ''
+    setFilterMonth(m)
+    const first = reports.find(r => r.period_start.startsWith(periodType === 'week' ? `${y}-${m}` : y))
+    setSelectedId(first ? first.id : null)
+  }
+
+  function changeMonth(m: string) {
+    setFilterMonth(m)
+    const first = reports.find(r => r.period_start.startsWith(`${filterYear}-${m}`))
     setSelectedId(first ? first.id : null)
   }
 
   return (
     <div className="space-y-5">
-      {periodType !== 'year' && years.length > 1 && (
-        <select value={filterYear} onChange={e => changeYear(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
-          {years.map(y => <option key={y} value={y}>{y}年</option>)}
-        </select>
+      {periodType !== 'year' && (
+        <div className="flex items-center gap-2">
+          <select value={filterYear} onChange={e => changeYear(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+            {years.map(y => <option key={y} value={y}>{y}年</option>)}
+          </select>
+          {periodType === 'week' && (
+            <select value={filterMonth} onChange={e => changeMonth(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
+              {monthsInYear.map(m => <option key={m} value={m}>{parseInt(m, 10)}月</option>)}
+            </select>
+          )}
+        </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {visibleReports.map(r => {
-          const st = STATUS_LABELS[r.status]
-          return (
-            <button key={r.id} onClick={() => setSelectedId(r.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-colors ${selectedId === r.id ? 'border-green-400 bg-green-50 text-green-700 font-medium' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-              {r.period_start} ~ {r.period_end}
-              <span className={`px-1.5 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
-            </button>
-          )
-        })}
-      </div>
+      {visibleReports.length === 0 ? (
+        <p className="text-sm text-gray-300 py-4">这段时间没有报告</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {visibleReports.map(r => {
+            const st = STATUS_LABELS[r.status]
+            return (
+              <button key={r.id} onClick={() => setSelectedId(r.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-colors ${selectedId === r.id ? 'border-green-400 bg-green-50 text-green-700 font-medium' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                {r.period_start} ~ {r.period_end}
+                <span className={`px-1.5 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {selectedId && <ReportDetailView reportId={selectedId} />}
     </div>
