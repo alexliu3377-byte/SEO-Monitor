@@ -2,12 +2,22 @@ import type { SiteResearchSummary } from '@/lib/site-research-summary'
 import type { EnvironmentStats } from '@/lib/environment-stats'
 import type { WeightTier } from '@/lib/weight-tiers'
 import type { GroupEffectivenessSummary } from '@/lib/tracking-summary'
+import type { GapKeyword } from '@/lib/opportunity-gap'
+import { classifyContentCategory } from '@/lib/content-category'
 
 // 研究中心"站点诊断"——用户主动选一个站点、可以带一个具体问题，AI读完整
 // 历史数据后写一份策略建议。2026-08-11 新增，跟同一批"结构化数字先行"的
 // 周报/月报/年报刻意反着来：那边是用户被动收到定时报告，要求AI只写
 // 100-200字点评、数字都摆在页面上；这边是用户主动发起、愿意等，就应该让
 // AI写得更完整、更有可执行性，不追求短。
+//
+// 2026-08-12 跟着研究报告v1一起补两处：① 排名词列表原本跟旧版 Stage1 一样
+// 把 prev_rank/volume_change 压成一个"🔥需求涨"布尔标记，现在原样暴露真实
+// 涨跌数字，AI能引用具体涨了多少名；② 接入 lib/opportunity-gap.ts 的机会
+// 缺口——这个功能本来就是回答"这个站该做什么"这类问题（比如f71.com怎么
+// 安排人手），机会缺口正是"市场在赢什么、我们没做什么"的直接依据。缺口是
+// portfolio-wide算出来的，不跟具体站点绑定，所以喂给AI后明确要求它自己
+// 判断哪些词群跟这个站的内容调性搭（不是无脑照单全收）。
 
 interface SiteConfig {
   domain: string
@@ -32,6 +42,7 @@ export function buildSiteDiagnosticPrompt(
   envStats: EnvironmentStats | null,
   siteTier: WeightTier | null,
   groups: GroupInfo[],
+  gaps: GapKeyword[],
   question: string | null
 ): string {
   const weightDaily = summary.weightTrend.map(w => `${w.record_date}:PC${w.pc_weight}/移动${w.mobile_weight}`).join('；') || '无数据'
@@ -42,8 +53,23 @@ export function buildSiteDiagnosticPrompt(
   const RANKED_CAP = 2000
   const rankedRows = summary.effectivenessRows.filter(r => r.score != null)
   const rankedList = rankedRows.slice(0, RANKED_CAP)
-    .map(r => `${r.keyword}(第${r.rank_position}名/量${r.volume}/分${r.score}${r.searchVolumeRising ? '/🔥需求涨' : ''})`).join('、')
+    .map(r => {
+      const rankDelta = r.rank_position != null && r.prev_rank != null ? r.prev_rank - r.rank_position : null
+      const rankPart = r.prev_rank == null ? '新进榜'
+        : rankDelta === 0 ? '排名不变'
+        : rankDelta! > 0 ? `较上期${r.prev_rank}名升${rankDelta}` : `较上期${r.prev_rank}名降${Math.abs(rankDelta!)}`
+      const vol = r.searchVolumeRising
+      const volPart = vol ? `，量${vol.volume}较上期${vol.prev_volume}涨${vol.volume_change}` : `，量${r.volume}`
+      const category = classifyContentCategory(r.url, r.keyword)
+      return `${r.keyword}(第${r.rank_position}名/${rankPart}${volPart}/分${r.score}/${category})`
+    }).join('、')
   const rankedTruncatedNote = rankedRows.length > RANKED_CAP ? `（只列了得分最高的${RANKED_CAP}个，实际共${rankedRows.length}个）` : ''
+
+  const GAP_CAP = 200
+  const gapsText = gaps.length > 0
+    ? gaps.slice(0, GAP_CAP).map(k => `${k.keyword}(${k.domain}/第${k.rank_position}名/量${k.volume}/${k.content_type === 'game' ? '游戏' : '应用'}/发布于${k.content_date ?? '未知'})`).join('、')
+      + (gaps.length > GAP_CAP ? `（只列了搜索量最高的${GAP_CAP}个，实际共${gaps.length}个）` : '')
+    : '（这段时间没有发现竞品明显领先但我方全公司零覆盖的词）'
 
   const tierStats = envStats && siteTier ? envStats.tiers[siteTier] : null
   const envText = envStats
@@ -82,9 +108,12 @@ ${rankChangeDaily}
 【新增关键词每日明细（应用/游戏，来自自动发现，不是组员提交）】
 ${newKwDaily}
 
-【排名关键词全量列表${rankedTruncatedNote}，按得分从高到低，括号内为排名/搜索量/得分，🔥表示这个词的搜索量本身同期也在涨】
+【排名关键词全量列表${rankedTruncatedNote}，括号内：当前排名/较上期排名变化（新进榜=之前没有排名数据）/当前搜索量（较上期有涨的话会标出涨了多少）/综合得分/内容分类】
 共${rankedRows.length}个排名中的词。
 ${rankedList || '无'}
+
+【市场机会参考——这段时间其它竞品站点真正拿到效果、但我方全公司历史上都没做过的词（不是专门针对这个站算的，是全公司层面的机会缺口，按搜索量从高到低）】
+${gapsText}
 
 【关联分组任务团队现状——组员实际提交内容的追踪结果，反映"有没有人在做、做得怎么样"】
 ${groupsText}
@@ -94,7 +123,7 @@ ${questionBlock}
 请按以下结构写（用中文，段落之间空一行）：
 1. 现状评估：这个站点目前处于什么状态（权重/收录趋势、有没有持续维护的迹象、跟同档位站点比怎么样）
 2. 关键发现：从数据里看出的具体信号（比如某类内容排名效果好/差、某个时间点开始明显停滞、团队提交跟实际效果的差距）
-3. 具体建议：接下来应该做什么，如果用户问了具体问题要在这里重点回答，建议要具体到"做什么/为什么/预期效果"，不要空泛
+3. 具体建议：接下来应该做什么，如果用户问了具体问题要在这里重点回答，建议要具体到"做什么/为什么/预期效果"，不要空泛。「市场机会参考」里的词是全公司层面算出来的，不是专门针对这个站——请自己判断哪些词的类型/风格跟这个站现有内容调性搭（参考排名关键词列表里的内容分类），只挑真正适合这个站去做的，不要不假思索照单全收；如果一个都不搭就明说"市场机会参考里没有明显适合这个站的方向"
 
 以 JSON 格式返回，不要输出任何 JSON 外的文字：
 {

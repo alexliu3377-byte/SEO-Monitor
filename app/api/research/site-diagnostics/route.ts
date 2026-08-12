@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchSiteResearchSummary } from '@/lib/site-research-summary'
 import { computeEnvironmentStats } from '@/lib/environment-stats'
 import { fetchGroupEffectivenessSummary } from '@/lib/tracking-summary'
+import { computeOpportunityGaps } from '@/lib/opportunity-gap'
 import { buildSiteDiagnosticPrompt } from '@/lib/site-diagnostic-prompt'
 import { callGeminiJSON } from '@/lib/gemini'
 
@@ -24,10 +25,12 @@ async function requireAdmin() {
 }
 
 // 研究中心"站点诊断"——用户选一个站点（可以带一个具体问题），读这个站点近
-// 90天完整历史数据 + 大环境档位对比 + 关联分组任务团队现状，一次性喂给
-// Gemini 写一份策略建议。2026-08-11 新增，用户接手一个闲置很久的站点
-// （f71.com）要重新安排人手时提出的需求——不是定时报告，是按需触发、
-// 用户愿意等（maxDuration 给到180秒），输出也不追求简短，要写得完整有据。
+// 90天完整历史数据 + 大环境档位对比 + 关联分组任务团队现状 + 机会缺口（2026-08-12
+// 接入 lib/opportunity-gap.ts，portfolio-wide算出来的、竞品赢但全公司零覆盖的
+// 词，AI自己判断哪些跟这个站的内容调性搭），一次性喂给 Gemini 写一份策略建议。
+// 2026-08-11 新增，用户接手一个闲置很久的站点（f71.com）要重新安排人手时提出
+// 的需求——不是定时报告，是按需触发、用户愿意等（maxDuration 给到180秒），
+// 输出也不追求简短，要写得完整有据。
 export async function POST(req: Request) {
   const ctx = await requireAdmin()
   if (ctx.error) return ctx.error
@@ -45,11 +48,12 @@ export async function POST(req: Request) {
   const dateEnd = getMY()
   const dateStart = getMY(-90)
 
-  const [summary, envStats, groupsRaw] = await Promise.all([
+  const [summary, envStats, groupsRaw, gapResult] = await Promise.all([
     fetchSiteResearchSummary(service, site_id, dateStart, dateEnd),
     computeEnvironmentStats(service, dateEnd),
     service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
       .then((r: { data: { id: string; name: string; site_domains: string[] }[] | null }) => r.data ?? []),
+    computeOpportunityGaps(service, dateStart, dateEnd),
   ])
 
   const siteTier = envStats?.siteTiers.get(site_id) ?? null
@@ -64,7 +68,7 @@ export async function POST(req: Request) {
     })
   )
 
-  const prompt = buildSiteDiagnosticPrompt(site, summary, dateStart, dateEnd, envStats, siteTier, groups, question ?? null)
+  const prompt = buildSiteDiagnosticPrompt(site, summary, dateStart, dateEnd, envStats, siteTier, groups, gapResult.gaps, question ?? null)
   const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 4096 })
   if (!result) return NextResponse.json({ error: error || 'AI 诊断失败' }, { status: 500 })
 
