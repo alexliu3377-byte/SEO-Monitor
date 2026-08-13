@@ -23,7 +23,7 @@ export async function GET() {
   const { data: cached } = await supabase.from('hot_radar_cache').select('payload').eq('id', 'latest').maybeSingle()
   if (cached?.payload) return NextResponse.json(cached.payload)
 
-  const payload = await computeHotRadarPayload(supabase)
+  const { payload } = await computeHotRadarPayload(supabase)
   await supabase.from('hot_radar_cache').upsert({ id: 'latest', payload, computed_at: new Date().toISOString() })
   return NextResponse.json(payload)
 }

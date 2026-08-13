@@ -21,20 +21,42 @@ export interface HotRadarPayload {
   volumeRisingWords: { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string; sites: string[]; rankTrend: 'up' | 'down' | 'both' | null }[]
 }
 
+export interface HotRadarComputeResult {
+  payload: HotRadarPayload
+  // 哪几块因为查询报错拿不到数据——2026-08-13 发现 get_hot_rank_words/
+  // get_hot_streak_words 单次就要跑约15秒，跟函数体里设的20秒 statement_timeout
+  // 余量很薄，真实负载稍高就会被 Postgres 中止报错；之前这里完全没检查
+  // RPC 调用的 error，直接 `(rankWordsRaw || [])` 把报错静默当成"这块本来
+  // 就没数据"，缓存被写成空数组覆盖掉上次的正常数据（用户反馈"资料又看不到
+  // 了"）。调用方（refresh/route.ts）看到这里非空时不能直接覆盖旧缓存。
+  failedSections: (keyof HotRadarPayload)[]
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function computeHotRadarPayload(supabase: any): Promise<HotRadarPayload> {
+async function rpcWithRetry(db: any, fn: string, args: Record<string, unknown>): Promise<{ data: unknown[] | null; error: { message: string } | null }> {
+  const first = await db.rpc(fn, args)
+  if (!first.error) return first
+  // 单次重试——目标查询本身耗时接近超时阈值，大概率是瞬时负载高，隔几秒
+  // 再跑一次经常就过了，不值得直接放弃。
+  await new Promise(r => setTimeout(r, 3000))
+  return db.rpc(fn, args)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function computeHotRadarPayload(supabase: any): Promise<HotRadarComputeResult> {
   const since = getMY(-30)
   const db = supabase
+  const failedSections: (keyof HotRadarPayload)[] = []
 
   const [
-    { data: newWordsRaw },
-    { data: rankWordsRaw },
-    { data: streakWordsRaw },
-    { data: volumeRisingRaw },
+    { data: newWordsRaw, error: newWordsErr },
+    { data: rankWordsRaw, error: rankWordsErr },
+    { data: streakWordsRaw, error: streakWordsErr },
+    { data: volumeRisingRaw, error: volErr },
   ] = await Promise.all([
-    db.rpc('get_hot_new_words',    { p_since: since }),
-    db.rpc('get_hot_rank_words',   { p_since: since }),
-    db.rpc('get_hot_streak_words', { p_since: since }),
+    rpcWithRetry(db, 'get_hot_new_words',    { p_since: since }),
+    rpcWithRetry(db, 'get_hot_rank_words',   { p_since: since }),
+    rpcWithRetry(db, 'get_hot_streak_words', { p_since: since }),
     db.from('keyword_volume')
       .select('keyword, volume, prev_volume, volume_change, stat_date')
       .gt('volume_change', 0)
@@ -42,6 +64,10 @@ export async function computeHotRadarPayload(supabase: any): Promise<HotRadarPay
       .order('volume_change', { ascending: false })
       .limit(500),
   ])
+  if (newWordsErr) { console.error('[hot-radar] get_hot_new_words 失败:', newWordsErr.message); failedSections.push('newWords') }
+  if (rankWordsErr) { console.error('[hot-radar] get_hot_rank_words 失败:', rankWordsErr.message); failedSections.push('rankWords') }
+  if (streakWordsErr) { console.error('[hot-radar] get_hot_streak_words 失败:', streakWordsErr.message); failedSections.push('streakWords') }
+  if (volErr) { console.error('[hot-radar] keyword_volume 查询失败:', volErr.message); failedSections.push('volumeRisingWords') }
 
   const toDate = (v: unknown) => v ? String(v).slice(0, 10) : ''
 
@@ -116,5 +142,5 @@ export async function computeHotRadarPayload(supabase: any): Promise<HotRadarPay
     }
   })
 
-  return { newWords, rankWords, streakWords, volumeRisingWords }
+  return { payload: { newWords, rankWords, streakWords, volumeRisingWords }, failedSections }
 }
