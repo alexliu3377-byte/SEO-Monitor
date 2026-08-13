@@ -173,6 +173,8 @@ export default function CompetitorDailyPage() {
   // 重新抓取
   const [rankCrawling, setRankCrawling] = useState(false)
   const [kwCrawling, setKwCrawling] = useState(false)
+  const [kwCrawlMsg, setKwCrawlMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [rankCrawlMsg, setRankCrawlMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   function getMalaysiaDate(offsetDays = 0) {
     return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -327,13 +329,24 @@ export default function CompetitorDailyPage() {
   async function triggerKwCrawl() {
     if (!selectedSite) return
     setKwCrawling(true)
+    setKwCrawlMsg(null)
     try {
-      await fetch('/api/trigger-crawl', {
+      const res = await fetch('/api/trigger-crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ site: selectedSite.domain, step: 'keywords' }),
       })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setKwCrawlMsg({ text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else {
+        const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === selectedSite.domain)
+        if (siteResult?.error) setKwCrawlMsg({ text: siteResult.error, ok: false })
+        else setKwCrawlMsg({ text: `抓取成功，新增${siteResult?.count ?? 0}条`, ok: true })
+      }
       await fetchKeywordsForDate(selectedSite, kwDate, kwTab)
+    } catch {
+      setKwCrawlMsg({ text: '请求失败，请检查网络', ok: false })
     } finally {
       setKwCrawling(false)
     }
@@ -465,15 +478,28 @@ export default function CompetitorDailyPage() {
   async function triggerRankCrawl() {
     if (!rankSite) return
     setRankCrawling(true)
+    setRankCrawlMsg(null)
     try {
       const step = rankSite.hasRankTitle ? 'rank-title' : 'rank'
-      await fetch('/api/trigger-crawl', {
+      const res = await fetch('/api/trigger-crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ site: rankSite.domain, step }),
       })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setRankCrawlMsg({ text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else {
+        const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === rankSite.domain)
+        if (siteResult?.error) setRankCrawlMsg({ text: siteResult.error, ok: false })
+        // rank-title 成功时 results 会带真实条数，plain rank 成功时接口不返回
+        // 条数（只有失败才会push进results）——没有条数信息时不要编一个"0条"出来
+        else setRankCrawlMsg({ text: siteResult?.count != null ? `抓取成功，${siteResult.count}条` : '抓取成功', ok: true })
+      }
       await fetchRankPage(rankSite, rankDate, rankType, 0, pageSize, true)
       setRankPage(0)
+    } catch {
+      setRankCrawlMsg({ text: '请求失败，请检查网络', ok: false })
     } finally {
       setRankCrawling(false)
     }
@@ -764,6 +790,11 @@ export default function CompetitorDailyPage() {
                 </button>
               </div>
             </div>
+            {kwCrawlMsg && (
+              <p className={`text-xs px-5 py-1.5 border-b border-gray-100 ${kwCrawlMsg.ok ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+                {kwCrawlMsg.text}
+              </p>
+            )}
             {/* Tabs */}
             <div className="flex border-b border-gray-200 px-5">
               {(['app', 'game'] as const).map((t) => {
@@ -927,6 +958,11 @@ export default function CompetitorDailyPage() {
                 </button>
               </div>
             </div>
+            {rankCrawlMsg && (
+              <p className={`text-xs px-5 py-1.5 border-b border-gray-100 ${rankCrawlMsg.ok ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+                {rankCrawlMsg.text}
+              </p>
+            )}
             {/* Tabs */}
             <div className="flex border-b border-gray-200 px-5">
               {(['rankup', 'rankdown'] as const).map((t) => {

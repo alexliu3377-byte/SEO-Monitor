@@ -50,6 +50,7 @@ export default function IndexMonitorPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedSite, setSelectedSite] = useState<IndexRow | null>(null)
   const [crawling, setCrawling] = useState<string | null>(null)
+  const [crawlMsg, setCrawlMsg] = useState<{ domain: string; text: string; ok: boolean } | null>(null)
   const [page, setPage] = useState(0)
   const [filterSite, setFilterSite] = useState('')
   const [filterFocus, setFilterFocus] = useState('')
@@ -66,13 +67,24 @@ export default function IndexMonitorPage() {
 
   async function triggerCrawl(domain: string) {
     setCrawling(domain)
+    setCrawlMsg(null)
     try {
-      await fetch('/api/trigger-crawl', {
+      const res = await fetch('/api/trigger-crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ site: domain, step: 'weight' }),
       })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setCrawlMsg({ domain, text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else {
+        const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === domain)
+        if (siteResult?.error) setCrawlMsg({ domain, text: siteResult.error, ok: false })
+        else setCrawlMsg({ domain, text: '抓取成功', ok: true })
+      }
       await loadData()
+    } catch {
+      setCrawlMsg({ domain, text: '请求失败，请检查网络', ok: false })
     } finally {
       setCrawling(null)
     }
@@ -225,6 +237,11 @@ export default function IndexMonitorPage() {
             </div>
             <span className="ml-auto text-xs text-gray-400">共 {visibleRows.length} 条</span>
           </div>
+          {crawlMsg && (
+            <p className={`text-xs px-4 py-2 border-b border-gray-100 ${crawlMsg.ok ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
+              {crawlMsg.domain}：{crawlMsg.text}
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
