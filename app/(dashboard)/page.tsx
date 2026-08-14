@@ -6,7 +6,6 @@ import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
 import { computeIndexStatus } from '@/lib/index-status'
 import { computeKwStatus } from '@/lib/kw-status'
-import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   LineChart,
   Line,
@@ -20,7 +19,6 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Category = 'large' | 'medium' | 'small'
-type TimeRange = 'month' | '3m' | 'year'
 
 interface Site { id: string; domain: string; name: string; category: Category }
 interface IndexSnap { site_id: string; snapshot_date: string; index_count: number }
@@ -54,12 +52,6 @@ interface WeightModalExtra {
 
 const CAT_LABEL: Record<Category, string> = { large: '大站', medium: '中站', small: '小站' }
 
-const TIME_OPTIONS: { value: TimeRange; label: string }[] = [
-  { value: 'month', label: '当月' },
-  { value: '3m', label: '近3个月' },
-  { value: 'year', label: '全年' },
-]
-
 // Color palette for multiple sites
 const SITE_COLORS = [
   '#22c55e', '#3b82f6', '#f97316', '#a855f7',
@@ -82,17 +74,6 @@ function getMY(offsetDays = 0): string {
     .slice(0, 10)
 }
 
-
-function getDateCutoff(range: TimeRange): string {
-  if (range === '3m') return getMY(-90)
-  const now = new Date(Date.now() + 8 * 3600000)
-  const y = now.getFullYear()
-  if (range === 'month') {
-    const m = String(now.getMonth() + 1).padStart(2, '0')
-    return `${y}-${m}-01`
-  }
-  return `${y}-01-01`
-}
 
 function fmtNum(n: number): string {
   if (n >= 10000) {
@@ -118,7 +99,15 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [timeRange, setTimeRange] = useState<TimeRange>('3m')
+  // 图表日期范围——2026-08-14 从预设"当月/近3个月/全年"改成自定义起止日期。
+  // 默认一个月，用户可以自己选，配合下面 load() 里按 chartFrom 动态限定查询
+  // 起点（不再固定拉365/90天全量），避免 weight_history/index_snapshots 这类
+  // 永久保留、持续增长的表撞上 Supabase 单次查询3000行硬顶（见
+  // project_supabase_row_limit_hard_cap 记忆，这两张表当时验证过365天和90天
+  // 窗口行数完全一样，说明表本身历史还没攒够90天就已经超过3000行了，缩小
+  // 固定天数窗口治标不治本，只有绑定到用户实际选的范围才能长期稳定）。
+  const [chartFrom, setChartFrom] = useState(getMY(-30))
+  const [chartTo, setChartTo] = useState(getMY())
   const [activeCategory, setActiveCategory] = useState<Category>('large')
   // selected = focused sites; empty = show all
   const [selected, setSelected] = useState<Record<Category, string[]>>({
@@ -131,7 +120,7 @@ export default function DashboardPage() {
   const [weightModalRankTab, setWeightModalRankTab] = useState<'up' | 'down'>('up')
   const [indexModalSite, setIndexModalSite] = useState<IndexAlertItem | null>(null)
 
-  useEffect(() => { load() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [chartFrom])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true)
@@ -141,44 +130,34 @@ export default function DashboardPage() {
       const yesterday = getMY(-1)
       const d28 = getMY(-30)
       const d30 = getMY(-30)
-      const d365 = getMY(-365)
-
-      // index_snapshots/weight_history 近365天全站数据已经超过 Supabase/PostgREST
-      // 单次查询硬顶的3000行（实测3098/3099行）——之前按 snapshot_date/record_date
-      // 升序不分页查询，超出上限的部分会被静默截断，而升序排列意味着截掉的正好是
-      // 最新的那批，也就是"今天"的数据完全拿不到（首页权重变动/收录变动因此
-      // 显示不出今天的变化，即使抓取日志和数据库里都有当天数据）。改用
-      // fetchAllRows 真分页，日期排序要加 site_id 兜底确保跨页顺序稳定
-      // （见 lib/supabase-paginate.ts 顶部注释，同一天有多个站点、只按日期排序
-      // 不足以保证确定性）。
-      const [{ count: snapsCount }, { count: wrecsCount }] = await Promise.all([
-        db.from('index_snapshots').select('site_id', { count: 'exact', head: true }).gte('snapshot_date', d365),
-        db.from('weight_history').select('site_id', { count: 'exact', head: true }).gte('record_date', d365),
-      ])
+      // 2026-08-13/14：weight_history/index_snapshots 之前固定拉365天（后来试过
+      // 缩到90天）全站数据，都会撞上 Supabase/PostgREST 单次查询3000行硬顶——
+      // 验证过这两张表当时90天和365天查出来的行数完全一样（都是3098/3099行），
+      // 说明表本身历史都还没攒够90天就已经超标，缩固定天数窗口治标不治本。
+      // 改成查询起点跟着用户在图表上选的 chartFrom 走（不再是写死的天数）：
+      // 权重变动/收录变动这两个提醒卡片只需要最近8天算日环比，所以起点取
+      // "chartFrom 和 8天前哪个更晚"——用户选的范围比8天短时，起点兜底不早于
+      // 8天前，保证提醒卡片一直有数据算；用户选得比8天长时，起点跟着 chartFrom
+      // 走。配合图表控件那边的最大跨度限制（见下方 maxChartSpanDays），单次查询
+      // 行数可以一直稳定压在3000以下，不用管站点数字以后涨到多少。
+      const d8 = getMY(-8)
+      const rangeFrom = chartFrom < d8 ? chartFrom : d8
 
       const [
         { data: sitesRaw },
-        snapsRaw,
-        wrecsRaw,
+        { data: snapsRaw },
+        { data: wrecsRaw },
         { data: kwStatsRaw },
       ] = await Promise.all([
         db.from('sites').select('id, domain, name, category'),
-        fetchAllRows<IndexSnap>(async (from, to) => {
-          const res = await db.from('index_snapshots')
-            .select('site_id, snapshot_date, index_count')
-            .gte('snapshot_date', d365)
-            .order('snapshot_date', { ascending: true }).order('site_id', { ascending: true })
-            .range(from, to)
-          return res
-        }, { countHint: snapsCount ?? 0 }),
-        fetchAllRows<WeightRec>(async (from, to) => {
-          const res = await db.from('weight_history')
-            .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
-            .gte('record_date', d365)
-            .order('record_date', { ascending: true }).order('site_id', { ascending: true })
-            .range(from, to)
-          return res
-        }, { countHint: wrecsCount ?? 0 }),
+        db.from('index_snapshots')
+          .select('site_id, snapshot_date, index_count')
+          .gte('snapshot_date', rangeFrom)
+          .order('snapshot_date'),
+        db.from('weight_history')
+          .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+          .gte('record_date', rangeFrom)
+          .order('record_date'),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (db.from('competitor_kw_stats') as any)
           .select('site_id, stat_date, app_count, game_count')
@@ -295,6 +274,27 @@ export default function DashboardPage() {
       : catSites[cat].map(s => s.id)
   }
 
+  // 图表最多能选多宽的日期范围——按当前站点数反推，保证单次查询行数稳定
+  // 压在 Supabase 3000行硬顶以下（每个站点每天最多1行，2800是留了200行余量）。
+  // 站点数以后涨了这个上限会自动跟着收紧，不用再手动改数字。
+  const maxChartSpanDays = sites.length > 0 ? Math.max(7, Math.floor(2800 / sites.length)) : 30
+
+  function addDays(dateStr: string, days: number): string {
+    return new Date(new Date(dateStr + 'T00:00:00Z').getTime() + days * 86400000).toISOString().slice(0, 10)
+  }
+
+  function handleChartFromChange(v: string) {
+    setChartFrom(v)
+    if (v > chartTo) setChartTo(v)
+    else if (addDays(v, maxChartSpanDays) < chartTo) setChartTo(addDays(v, maxChartSpanDays))
+  }
+
+  function handleChartToChange(v: string) {
+    setChartTo(v)
+    if (v < chartFrom) setChartFrom(v)
+    else if (addDays(v, -maxChartSpanDays) > chartFrom) setChartFrom(addDays(v, -maxChartSpanDays))
+  }
+
   function toggleSite(siteId: string) {
     setSelected(prev => {
       const cur = prev[activeCategory]
@@ -304,8 +304,7 @@ export default function DashboardPage() {
   }
 
   function getIndexData(ids: string[]) {
-    const cutoff = getDateCutoff(timeRange)
-    const filtered = indexSnaps.filter(r => r.snapshot_date >= cutoff && ids.includes(r.site_id))
+    const filtered = indexSnaps.filter(r => r.snapshot_date >= chartFrom && r.snapshot_date <= chartTo && ids.includes(r.site_id))
     const map = new Map<string, Record<string, number>>()
     for (const r of filtered) {
       if (!map.has(r.snapshot_date)) map.set(r.snapshot_date, {})
@@ -317,8 +316,7 @@ export default function DashboardPage() {
   }
 
   function getMobileIPData(ids: string[]) {
-    const cutoff = getDateCutoff(timeRange)
-    const filtered = weightRecs.filter(r => r.record_date >= cutoff && ids.includes(r.site_id))
+    const filtered = weightRecs.filter(r => r.record_date >= chartFrom && r.record_date <= chartTo && ids.includes(r.site_id))
     const map = new Map<string, Record<string, number>>()
     for (const r of filtered) {
       const avg = Math.round(((r.mobile_ip ?? 0) + (r.mobile_ip_max ?? 0)) / 2)
@@ -551,20 +549,26 @@ export default function DashboardPage() {
               )
             })}
           </div>
-          <div className="flex gap-1">
-            {TIME_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setTimeRange(opt.value)}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                  timeRange === opt.value
-                    ? 'bg-gray-800 text-white'
-                    : 'text-gray-500 hover:bg-gray-100'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={chartFrom}
+                max={chartTo}
+                onChange={e => handleChartFromChange(e.target.value)}
+                className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none"
+              />
+              <span className="text-xs text-gray-400">至</span>
+              <input
+                type="date"
+                value={chartTo}
+                min={chartFrom}
+                max={getMY()}
+                onChange={e => handleChartToChange(e.target.value)}
+                className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none"
+              />
+            </div>
+            <p className="text-[11px] text-gray-400">最多可选 {maxChartSpanDays} 天范围，超过会自动收窄——避免单次查询数据量太大被平台截断</p>
           </div>
         </div>
 
