@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { useUser } from '@/lib/user-context'
-import { explainOutcomeScore } from '@/lib/outcome-score'
+import { explainOutcomeScore, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
@@ -45,7 +45,12 @@ interface OutcomeRow {
   effectiveness: string
   env_excluded?: boolean
   source?: string | null
-  rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }[]
+  rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number; isNewRank?: boolean }[]
+  // 服务端算好的得分——'更新'类型走增量公式（需要历史查询判断"真新排名"，
+  // 前端算不出来），'新增'类型走关键词价值公式；直接用这个而不是前端重算，
+  // 保证跟排序（sortBy=score用的也是这个）显示的是同一个数字。
+  score: number
+  updateEffectBreakdown: UpdateEffectBreakdown | null
 }
 interface OutcomeSummary { total: number; rankedCount: number; indexedCount: number; trackingCount: number; invalidCount: number }
 type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_position' | 'rank_volume' | 'score'
@@ -580,12 +585,19 @@ export default function GroupReportPage() {
                                       <div className="flex flex-col gap-1">
                                         {matches.map((m, i) => {
                                           const mc = (m.rank_position != null && m.prev_rank_position != null) ? m.prev_rank_position - m.rank_position : null
+                                          // 'isNewRank' 只在这条是"真新排名"（历史上从没排过名，不是这条claim
+                                          // 刚开始追踪、还没攒够前一天数据）时才有意义——见
+                                          // app/api/task-groups/[id]/outcomes/route.ts 的历史查询。
+                                          const isNew = 'isNewRank' in m && m.isNewRank
                                           return (
                                             <div key={i} className="flex items-center justify-center gap-1.5">
                                               {m.rank_position != null
                                                 ? <span className="text-sm text-gray-700">第{m.rank_position}名</span>
                                                 : <span className="text-sm text-gray-300">—</span>}
-                                              {mc != null && mc !== 0 && (
+                                              {isNew && (
+                                                <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded-full px-1.5">新</span>
+                                              )}
+                                              {!isNew && mc != null && mc !== 0 && (
                                                 <span className={`text-xs font-semibold tabular-nums ${mc > 0 ? 'text-green-600' : 'text-red-400'}`}>
                                                   {mc > 0 ? `+${mc}` : `${mc}`}
                                                 </span>
@@ -614,7 +626,7 @@ export default function GroupReportPage() {
                                   {row.effectiveness === '无效'     && <span className="text-xs whitespace-nowrap bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
                                 </div>
                                 {(() => {
-                                  const score = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume, row.operation_type).total
+                                  const score = row.score
                                   if (row.effectiveness === '追踪中' && score === 0) return (
                                     <button onClick={() => setScoreDetailRow(row)} className="w-full text-center text-xs text-gray-300 hover:text-gray-500 transition-colors">—</button>
                                   )
@@ -990,7 +1002,69 @@ export default function GroupReportPage() {
       {/* 得分计算说明 Modal */}
       {scoreDetailRow && (() => {
         const row = scoreDetailRow
-        const b = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume, row.operation_type)
+        if (row.operation_type === '更新' && row.updateEffectBreakdown) {
+          const u = row.updateEffectBreakdown
+          const liftDesc = u.rankPos == null ? '没有排名'
+            : u.isNewRank ? `真新排名（历史上从没排过名）`
+            : u.rankChange != null && u.rankChange > 0 ? `排名上涨 ${u.rankChange} 位`
+            : u.rankChange != null && u.rankChange <= 0 ? '排名没有实际提升'
+            : '没有历史对比数据'
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold text-gray-900 truncate" title={row.final_keyword || row.keyword}>{row.final_keyword || row.keyword}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">"更新"成效是怎么算出来的</p>
+                  </div>
+                  <button onClick={() => setScoreDetailRow(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 flex-shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                </div>
+                <div className="overflow-y-auto flex-1 px-6 py-4 space-y-2.5 text-sm">
+                  <p className="text-[11px] text-gray-400 bg-gray-50 rounded-lg px-3 py-2">参考：这个词现在的关键词价值是 {u.keywordValue.toFixed(1)}（不管是谁做的、这个词现在值不值钱）——下面算的是"这次更新到底有没有用"，两个数字分开看。</p>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-gray-500">排名提升分（{liftDesc}）</span>
+                    <span className="font-medium text-gray-800 tabular-nums">{u.rankLiftScore}</span>
+                  </div>
+                  {u.tierBonus > 0 && (
+                    <div className="flex items-center justify-between py-1">
+                      <span className="text-gray-500">跨档奖励</span>
+                      <span className="font-medium text-gray-800 tabular-nums">+{u.tierBonus}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between py-1 border-b border-gray-100 pb-3">
+                    <span className="text-gray-500">搜索量系数{u.rankPos != null ? `（排名量 ${u.rankVolume?.toLocaleString() ?? 0}）` : ''}</span>
+                    <span className="font-medium text-gray-800 tabular-nums">×{u.volumeMultiplier.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1 border-b border-gray-100 pb-3">
+                    <span className="text-gray-500">收录确认分{u.indexConfirmScore > 0 ? '（这次真的新收录了）' : ''}</span>
+                    <span className="font-medium text-gray-800 tabular-nums">+{u.indexConfirmScore}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-gray-700 font-semibold">更新成效分</span>
+                    <span className={`text-lg font-bold tabular-nums ${u.total > 0 ? 'text-green-600' : 'text-gray-800'}`}>{u.total.toFixed(1)}</span>
+                  </div>
+                  {row.env_excluded && (
+                    <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">这条记录日期环境异常（全站大跌或抓取失败），不计入"得分"平均分。</p>
+                  )}
+                  <details className="pt-2">
+                    <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">公式说明</summary>
+                    <div className="mt-2 text-[11px] text-gray-500 leading-relaxed space-y-1">
+                      <p>更新成效分 = (排名提升分 + 跨档奖励) × 搜索量系数 + 收录确认分——"更新"看这次操作比操作前多创造了多少增量，不是这个词现在绝对值多少钱（那是"关键词价值"）</p>
+                      <p>排名提升分·真新排名：进前3 +30 / 前10 +22 / 前20 +16 / 前30 +12 / 前50 +8 / 50名以后 +4</p>
+                      <p>排名提升分·有历史对比：涨20+位+15 / 10-19位+10 / 5-9位+6 / 1-4位+3 / 没有实际提升 0分（不再按当前排名发钱）</p>
+                      <p>跨档奖励：31+进前30 +2 / 前30进前20 +3 / 前20进前10 +5 / 前10进前3 +6（只在有真实提升时叠加）</p>
+                      <p>搜索量系数：0-99×0.8 / 100-499×1.0 / 500-999×1.1 / 1000-4999×1.25 / 5000+×1.4</p>
+                      <p>收录确认分：这次claim期间真的新收录了 +2，本来就收录着的 0</p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+          )
+        }
+        const b = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume)
         const changeDesc = row.rank_change == null ? '无排名变化数据'
           : row.rank_change > 0 ? `排名上涨 ${row.rank_change} 位`
           : row.rank_change < 0 ? `排名下跌 ${-row.rank_change} 位`
@@ -1020,11 +1094,6 @@ export default function GroupReportPage() {
                   <span className="text-gray-600 font-medium">= 排名价值</span>
                   <span className="font-semibold text-gray-900 tabular-nums">{b.baseValue.toFixed(1)}</span>
                 </div>
-                {b.updateDiscount != null && (
-                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    "更新"类型且排名没有实际提升，排名价值已按当前档位打了{Math.round(b.updateDiscount * 100)}%折（避免更新一个本来就排得好的词直接白拿满分）。
-                  </p>
-                )}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-gray-500">收录分{row.is_indexed ? '（已收录）' : '（未收录）'}</span>
                   <span className="font-medium text-gray-800 tabular-nums">+{b.indexScore}</span>
@@ -1048,7 +1117,7 @@ export default function GroupReportPage() {
                     <p>搜索量权重：1 + log10(排名量+1)，只在有排名时生效</p>
                     <p>收录分：收录固定 +1</p>
                     <p>涨跌分：涨20+位+2 / 涨10-20位+1.5 / 涨1-9位+1 / 不变0 / 跌1-5位-0.2 / 跌6-10位-0.5 / 跌11-20位-1 / 跌20+位-1.5</p>
-                    <p>"更新"类型折扣：操作是"更新"且排名没有实际提升时，排名价值按当前档位打折——1-3名保留40% / 4-10名30% / 11-20名20% / 21-30名15% / 31-40名10% / 41名以后5%；"新增"或有真实提升的"更新"不受影响</p>
+                    <p>"更新"类型走单独的增量公式（点开一条"更新"记录的得分能看到），这里的公式只适用于"新增"</p>
                   </div>
                 </details>
               </div>

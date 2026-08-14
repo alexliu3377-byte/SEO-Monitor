@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeOutcomeScore } from '@/lib/outcome-score'
+import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -170,6 +170,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
+  // "更新"型claim的增量评分需要知道一个URL是不是"真新排名"（历史上从没排过
+  // 名 vs 这条claim刚开始追踪、还没攒够前一天数据）——只对 prev_rank_position
+  // 为null的"更新"行查（有真实prev_rank_position的已经证明不是新的）。这是
+  // 唯一在这个接口做完整精确版历史查询的地方，月度汇总/规则中心等次要页面
+  // 用简化版（直接当非提升处理，不查历史）。
+  const urlsNeedingHistory = dedupedRows
+    .filter(r => r.operation_type === '更新' && r.prev_rank_position == null && r.page_url)
+    .map(r => r.page_url as string)
+  const firstRankedDates = await fetchFirstRankedDates(service, urlsNeedingHistory)
+
   let rows = dedupedRows.map(r => {
     const matches = rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? []
     const matchedPositions = matches.map(m => m.rank_position).filter((p): p is number => p != null)
@@ -188,6 +198,34 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const rankChange = (r.rank_position != null && r.prev_rank_position != null)
       ? r.prev_rank_position - r.rank_position
       : null
+
+    // 这一行的URL是不是"真新排名"——只对 prev_rank_position 为null的行有意义。
+    const firstRankedDate = r.page_url ? firstRankedDates.get(bareUrl(r.page_url)) : undefined
+    const isNewRank = r.prev_rank_position == null && (firstRankedDate == null || firstRankedDate >= r.submit_date)
+
+    let score: number
+    let updateEffectBreakdown: UpdateEffectBreakdown | null = null
+    if (r.operation_type === '更新') {
+      updateEffectBreakdown = explainUpdateEffectScore({
+        rankPos: r.rank_position, prevRankPos: r.prev_rank_position, rankVolume: r.rank_volume,
+        isIndexed, indexFirstSeen: r.index_first_seen, submitDate: r.submit_date, isNewRank,
+      })
+      score = updateEffectBreakdown.total
+    } else {
+      // Same inputs the frontend's per-row "得分" cell uses (raw scalar
+      // rank_position/rank_volume, not bestRankPosition/totalRankVolume) —
+      // sorting has to match what's actually displayed.
+      score = computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume)
+    }
+
+    // 排名列每一个匹配到的排名词，各自判断是不是"真新"（跟行级共用同一个URL
+    // 的历史查询结果——同一个URL下的所有匹配词天然共享同一份"这个URL是不是
+    // 老URL"的历史)，只有 prev_rank_position 为null的那个匹配才可能是"新"。
+    const matchesWithNewFlag = matches.map(m => ({
+      ...m,
+      isNewRank: r.operation_type === '更新' && m.prev_rank_position == null && isNewRank,
+    }))
+
     return {
       ...r,
       is_indexed: isIndexed,
@@ -196,10 +234,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       env_excluded: badDates.has(r.record_date),
       source: claimSourceMap.get(r.claim_id) ?? null,
       bestRankPosition, totalRankVolume,
-      // Same inputs the frontend's per-row "得分" cell uses (raw scalar
-      // rank_position/rank_volume, not bestRankPosition/totalRankVolume) —
-      // sorting has to match what's actually displayed.
-      score: computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume, r.operation_type),
+      score, updateEffectBreakdown,
+      _matchesWithNewFlag: matchesWithNewFlag,
     }
   })
 
@@ -260,12 +296,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const totalRows = rows.length
   const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
 
-  // rankMatchesMap was already fetched for the full filtered set above (needed
-  // for sorting) — reuse it here instead of querying again.
-  const pagedRowsWithMatches = pagedRows.map(r => ({
-    ...r,
-    rank_matches: rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? [],
-  }))
+  // matchesWithNewFlag was already attached per row above (needed for the
+  // isNewRank "真新排名" flag on each matched keyword) — reuse it here
+  // instead of re-deriving from rankMatchesMap.
+  const pagedRowsWithMatches = pagedRows.map(r => {
+    const { _matchesWithNewFlag, ...rest } = r
+    return { ...rest, rank_matches: _matchesWithNewFlag }
+  })
 
   // fetchAllRows pages through .range() until a page comes back short, so
   // truncation is no longer structurally possible (a fetch error throws and

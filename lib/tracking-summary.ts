@@ -4,7 +4,7 @@
 // dedup/source-lookup/rank-match-lookup/scoring logic stays in exactly one
 // place instead of drifting between the two routes.
 
-import { computeOutcomeScore } from '@/lib/outcome-score'
+import { computeOutcomeScore, explainUpdateEffectScore } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { classifyContentCategory, type ContentCategory } from '@/lib/content-category'
 
@@ -51,10 +51,39 @@ export interface TrackRow {
   // predating site_tracking_rank_matches — optional so the aggregate route's
   // narrower select() doesn't need to carry it.
   rank_keyword?: string | null
-  // '新增'|'更新' — 只有 fetchGroupEffectivenessSummary 用来判断"更新且排名
-  // 没提升"该不该打折（见 lib/outcome-score.ts），可选是因为不是每个调用方
-  // 的 select() 都带这一列。
+  // '新增'|'更新' — 决定走哪套打分公式（见 computeRowScore / lib/outcome-score.ts），
+  // 可选是因为不是每个调用方的 select() 都带这一列。
   operation_type?: string | null
+  // '更新'型打分要用来判断这次是不是真的新增了收录，可选原因同上。
+  index_first_seen?: string | null
+}
+
+// 两套打分公式的统一入口——'新增'继续用旧的"关键词价值"公式（资产视角，看
+// 当前绝对值）；'更新'改用增量视角的新公式（2026-08-14，见 lib/outcome-score.ts
+// 头部注释），核心区别是"没有真实提升就是0分"，不再按当前排名档位发钱。
+// 这里是"简化版"——不做 fetchFirstRankedDates 历史查询去区分"真新排名"和
+// "数据没攒够"，prev_rank_position 为null时统一按非提升处理（isNewRank:false）。
+// 只有成效追踪主表 app/api/task-groups/[id]/outcomes/route.ts 做完整精确版，
+// 这里（月度汇总/规则中心等次要页面）用简化版换取不用多一次批量查询——
+// 代价是"更新"型claim如果排到的是真新排名，这里会保守算成0分而不是应得的
+// 8-30分，以后如果需要更精确可以再单独加。
+export function computeRowScore(
+  rankPos: number | null,
+  prevRankPos: number | null,
+  rankVolume: number,
+  isIndexed: boolean,
+  operationType: string | null | undefined,
+  submitDate: string,
+  indexFirstSeen: string | null | undefined
+): number {
+  if (operationType === '更新') {
+    return explainUpdateEffectScore({
+      rankPos, prevRankPos, rankVolume, isIndexed,
+      indexFirstSeen: indexFirstSeen ?? null, submitDate, isNewRank: false,
+    }).total
+  }
+  const rankChange = (rankPos != null && prevRankPos != null) ? prevRankPos - rankPos : null
+  return computeOutcomeScore(rankPos, isIndexed, rankChange, rankVolume)
 }
 
 // One claim can have many rows (one per tracking day) — keep only the latest.
@@ -191,7 +220,7 @@ export interface GroupEffectivenessSummary {
 export async function fetchGroupEffectivenessSummary(service: any, groupId: string, dateStart: string, dateEnd: string): Promise<GroupEffectivenessSummary> {
   const rows = await fetchAllRows<TrackRow & { keyword: string; page_url: string | null }>((from, to) =>
     service.from('site_tracking_records')
-      .select('claim_id, user_id, keyword, page_url, operation_type, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
+      .select('claim_id, user_id, keyword, page_url, operation_type, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, index_first_seen, effectiveness')
       .eq('group_id', groupId)
       .gte('record_date', dateStart).lte('record_date', dateEnd)
       .order('record_date', { ascending: false }).order('id', { ascending: true })
@@ -212,11 +241,11 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
 
   const topClaims = deduped
     .map(r => {
-      const rankChange = (r.rank_position != null && r.prev_rank_position != null) ? r.prev_rank_position - r.rank_position : null
+      const isIndexed = r.is_indexed || r.rank_position != null
       return {
         keyword: r.keyword, url: r.page_url,
         rank_position: r.rank_position, volume: r.rank_volume || 0,
-        score: computeOutcomeScore(r.rank_position, r.is_indexed || r.rank_position != null, rankChange, r.rank_volume, r.operation_type),
+        score: computeRowScore(r.rank_position, r.prev_rank_position, r.rank_volume, isIndexed, r.operation_type, r.submit_date, r.index_first_seen),
       }
     })
     .sort((a, b) => b.score - a.score)

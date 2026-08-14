@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeOutcomeScore } from '@/lib/outcome-score'
+import { computeRowScore } from '@/lib/tracking-summary'
 
 export async function GET() {
   const authClient = createClient()
@@ -46,13 +46,13 @@ export async function GET() {
     const since90 = new Date(Date.now() + 8 * 3600000 - 90 * 86400000).toISOString().slice(0, 10)
     const allClaimIds = Array.from(claimToRule.keys())
     const BATCH = 200
-    const siteTrackRows: { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null }[] = []
+    const siteTrackRows: { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null; submit_date: string; index_first_seen: string | null }[] = []
     const [, { data: envDays }] = await Promise.all([
       (async () => {
         for (let i = 0; i < allClaimIds.length; i += BATCH) {
           const { data } = await service
             .from('site_tracking_records')
-            .select('claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date, operation_type')
+            .select('claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date, operation_type, submit_date, index_first_seen')
             .in('claim_id', allClaimIds.slice(i, i + BATCH))
             .order('record_date', { ascending: false })
             .limit(1000)
@@ -77,18 +77,15 @@ export async function GET() {
     }
 
     const seenClaims = new Set<string>()
-    for (const t of (siteTrack ?? []) as { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null }[]) {
+    for (const t of (siteTrack ?? []) as { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null; submit_date: string; index_first_seen: string | null }[]) {
       if (seenClaims.has(t.claim_id)) continue
       if (badDates.has(t.record_date)) continue  // env_excluded: try next record_date for this claim
       seenClaims.add(t.claim_id)
       const ruleId = claimToRule.get(t.claim_id)
       if (!ruleId) continue
-      const rankChange = (t.rank_position != null && t.prev_rank_position != null)
-        ? t.prev_rank_position - t.rank_position : null
-      // 跟分组报告/成效追踪同一套公式（lib/outcome-score.ts），2026-08-05 之前
-      // 这里是一份重复的旧版打分逻辑（档位加总+封顶100，不含搜索量权重），
-      // 两处口径不一致，统一改成同一个函数。
-      const score = computeOutcomeScore(t.rank_position, t.is_indexed, rankChange, t.rank_volume, t.operation_type)
+      // 跟分组报告/成效追踪同一套公式（lib/tracking-summary.ts 的 computeRowScore
+      // → lib/outcome-score.ts），'更新'型走简化版（不查历史区分真新排名）。
+      const score = computeRowScore(t.rank_position, t.prev_rank_position, t.rank_volume ?? 0, t.is_indexed, t.operation_type, t.submit_date, t.index_first_seen)
       const s = scoreMap.get(ruleId) ?? { total: 0, count: 0 }
       s.total += score
       s.count += 1
