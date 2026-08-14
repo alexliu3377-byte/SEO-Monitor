@@ -614,7 +614,7 @@ export default function GroupReportPage() {
                                   {row.effectiveness === '无效'     && <span className="text-xs whitespace-nowrap bg-red-50 text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full">无效</span>}
                                 </div>
                                 {(() => {
-                                  const score = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume).total
+                                  const score = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume, row.operation_type).total
                                   if (row.effectiveness === '追踪中' && score === 0) return (
                                     <button onClick={() => setScoreDetailRow(row)} className="w-full text-center text-xs text-gray-300 hover:text-gray-500 transition-colors">—</button>
                                   )
@@ -990,7 +990,7 @@ export default function GroupReportPage() {
       {/* 得分计算说明 Modal */}
       {scoreDetailRow && (() => {
         const row = scoreDetailRow
-        const b = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume)
+        const b = explainOutcomeScore(row.rank_position, row.is_indexed, row.rank_change, row.rank_volume, row.operation_type)
         const changeDesc = row.rank_change == null ? '无排名变化数据'
           : row.rank_change > 0 ? `排名上涨 ${row.rank_change} 位`
           : row.rank_change < 0 ? `排名下跌 ${-row.rank_change} 位`
@@ -1020,6 +1020,11 @@ export default function GroupReportPage() {
                   <span className="text-gray-600 font-medium">= 排名价值</span>
                   <span className="font-semibold text-gray-900 tabular-nums">{b.baseValue.toFixed(1)}</span>
                 </div>
+                {b.updateDiscount != null && (
+                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    "更新"类型且排名没有实际提升，排名价值已按当前档位打了{Math.round(b.updateDiscount * 100)}%折（避免更新一个本来就排得好的词直接白拿满分）。
+                  </p>
+                )}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-gray-500">收录分{row.is_indexed ? '（已收录）' : '（未收录）'}</span>
                   <span className="font-medium text-gray-800 tabular-nums">+{b.indexScore}</span>
@@ -1043,6 +1048,7 @@ export default function GroupReportPage() {
                     <p>搜索量权重：1 + log10(排名量+1)，只在有排名时生效</p>
                     <p>收录分：收录固定 +1</p>
                     <p>涨跌分：涨20+位+2 / 涨10-20位+1.5 / 涨1-9位+1 / 不变0 / 跌1-5位-0.2 / 跌6-10位-0.5 / 跌11-20位-1 / 跌20+位-1.5</p>
+                    <p>"更新"类型折扣：操作是"更新"且排名没有实际提升时，排名价值按当前档位打折——1-3名保留40% / 4-10名30% / 11-20名20% / 21-30名15% / 31-40名10% / 41名以后5%；"新增"或有真实提升的"更新"不受影响</p>
                   </div>
                 </details>
               </div>

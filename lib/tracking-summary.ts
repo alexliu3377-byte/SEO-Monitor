@@ -51,6 +51,10 @@ export interface TrackRow {
   // predating site_tracking_rank_matches — optional so the aggregate route's
   // narrower select() doesn't need to carry it.
   rank_keyword?: string | null
+  // '新增'|'更新' — 只有 fetchGroupEffectivenessSummary 用来判断"更新且排名
+  // 没提升"该不该打折（见 lib/outcome-score.ts），可选是因为不是每个调用方
+  // 的 select() 都带这一列。
+  operation_type?: string | null
 }
 
 // One claim can have many rows (one per tracking day) — keep only the latest.
@@ -187,7 +191,7 @@ export interface GroupEffectivenessSummary {
 export async function fetchGroupEffectivenessSummary(service: any, groupId: string, dateStart: string, dateEnd: string): Promise<GroupEffectivenessSummary> {
   const rows = await fetchAllRows<TrackRow & { keyword: string; page_url: string | null }>((from, to) =>
     service.from('site_tracking_records')
-      .select('claim_id, user_id, keyword, page_url, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
+      .select('claim_id, user_id, keyword, page_url, operation_type, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
       .eq('group_id', groupId)
       .gte('record_date', dateStart).lte('record_date', dateEnd)
       .order('record_date', { ascending: false }).order('id', { ascending: true })
@@ -212,7 +216,7 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
       return {
         keyword: r.keyword, url: r.page_url,
         rank_position: r.rank_position, volume: r.rank_volume || 0,
-        score: computeOutcomeScore(r.rank_position, r.is_indexed || r.rank_position != null, rankChange, r.rank_volume),
+        score: computeOutcomeScore(r.rank_position, r.is_indexed || r.rank_position != null, rankChange, r.rank_volume, r.operation_type),
       }
     })
     .sort((a, b) => b.score - a.score)

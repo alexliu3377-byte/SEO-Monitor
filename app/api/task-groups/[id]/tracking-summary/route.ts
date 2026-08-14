@@ -60,7 +60,7 @@ function buildSummary(
     if (!badDates.has(r.record_date)) {
       const rankChange = (r.rank_position != null && r.prev_rank_position != null)
         ? r.prev_rank_position - r.rank_position : null
-      scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange, r.rank_volume)
+      scoreTotal += computeOutcomeScore(r.rank_position, r.is_indexed, rankChange, r.rank_volume, r.operation_type)
     }
   }
 
@@ -128,7 +128,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // count-then-limit 治标不治本，改用 fetchAllRows 真分页（见 lib/supabase-paginate.ts）。
   const rawRows = await fetchAllRows<TrackRow>((from, to) => service
     .from('site_tracking_records')
-    .select('claim_id, user_id, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
+    .select('claim_id, user_id, operation_type, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, effectiveness')
     .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
     .order('record_date', { ascending: false }).order('id', { ascending: true })
     .range(from, to))

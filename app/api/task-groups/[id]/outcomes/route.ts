@@ -199,7 +199,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       // Same inputs the frontend's per-row "得分" cell uses (raw scalar
       // rank_position/rank_volume, not bestRankPosition/totalRankVolume) —
       // sorting has to match what's actually displayed.
-      score: computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume),
+      score: computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume, r.operation_type),
     }
   })
 

@@ -23,16 +23,44 @@ export interface OutcomeScoreBreakdown {
   baseValue: number
   indexScore: number
   changeScore: number
+  updateDiscount: number | null
   total: number
+}
+
+// 2026-08-14：'更新'类型的claim之前跟'新增'用同一套算法——baseValue只看
+// "现在排第几"，不看这个排名是不是这次更新带来的。漏洞：一个词已经排第15名
+// （之前别的工作做上去的），随便谁隔天对同一个词+URL重新提交一条"更新"
+// claim，只要排名没掉，baseValue照样按第15名满额计分——等于白捡一次高分，
+// 不用管这次更新到底有没有让排名变得更好。
+// 修复：'更新'类型且排名没有真的提升（rankChange不是正数，含0和null——
+// null发生在这条claim第一天还没有前一天数据可比）时，baseValue按当前档位
+// 打折，档位越高保留比例越高（维持住顶级排名本身也有价值，竞品也在抢），
+// 档位越低保留比例越低。真的提升了（rankChange>0）不受这套折扣影响，还是
+// 全额计分——这才是这个组员这次工作真正创造的价值。'新增'完全不受影响。
+const UPDATE_NO_IMPROVEMENT_DISCOUNT: { max: number; keep: number }[] = [
+  { max: 3, keep: 0.4 },
+  { max: 10, keep: 0.3 },
+  { max: 20, keep: 0.2 },
+  { max: 30, keep: 0.15 },
+  { max: 40, keep: 0.1 },
+  { max: Infinity, keep: 0.05 },
+]
+
+function updateDiscountFor(rankPos: number): number {
+  return (UPDATE_NO_IMPROVEMENT_DISCOUNT.find(b => rankPos <= b.max) ?? UPDATE_NO_IMPROVEMENT_DISCOUNT[UPDATE_NO_IMPROVEMENT_DISCOUNT.length - 1]).keep
 }
 
 // 前端"得分"点开的解释弹窗、以及 computeOutcomeScore 本身都基于这一个函数，
 // 保证展示出来的每一步数字跟实际用于统计的总分是同一套计算，不会对不上。
+// operationType 传 '更新' 才会触发上面的折扣判断；不传/传其它值（比如'新增'
+// 或者不适用折扣逻辑的场景，如竞品追踪、研究报告里的原始排名列表）一律不打折，
+// 行为跟改动前完全一致。
 export function explainOutcomeScore(
   rankPos: number | null,
   isIndexed: boolean,
   rankChange: number | null,
-  rankVolume: number | null
+  rankVolume: number | null,
+  operationType?: string | null
 ): OutcomeScoreBreakdown {
   let rankScore = 0
   if (rankPos != null) {
@@ -44,7 +72,14 @@ export function explainOutcomeScore(
   }
   // 没排上名时排名量不产生价值——避免"没排名但搜索量很大"被误算出一截分数。
   const volumeWeight = rankPos != null ? 1 + Math.log10((rankVolume ?? 0) + 1) : 0
-  const baseValue = rankScore * volumeWeight
+  let baseValue = rankScore * volumeWeight
+
+  let updateDiscount: number | null = null
+  const isRealImprovement = rankChange != null && rankChange > 0
+  if (operationType === '更新' && rankPos != null && !isRealImprovement) {
+    updateDiscount = updateDiscountFor(rankPos)
+    baseValue = Math.round(baseValue * updateDiscount * 10) / 10
+  }
 
   const indexScore = isIndexed ? 1 : 0
 
@@ -60,14 +95,15 @@ export function explainOutcomeScore(
   }
 
   const total = Math.round((baseValue + indexScore + changeScore) * 10) / 10
-  return { rankPos, rankVolume, isIndexed, rankChange, rankScore, volumeWeight, baseValue, indexScore, changeScore, total }
+  return { rankPos, rankVolume, isIndexed, rankChange, rankScore, volumeWeight, baseValue, indexScore, changeScore, updateDiscount, total }
 }
 
 export function computeOutcomeScore(
   rankPos: number | null,
   isIndexed: boolean,
   rankChange: number | null,
-  rankVolume: number | null
+  rankVolume: number | null,
+  operationType?: string | null
 ): number {
-  return explainOutcomeScore(rankPos, isIndexed, rankChange, rankVolume).total
+  return explainOutcomeScore(rankPos, isIndexed, rankChange, rankVolume, operationType).total
 }

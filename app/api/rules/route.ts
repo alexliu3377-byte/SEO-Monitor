@@ -46,13 +46,13 @@ export async function GET() {
     const since90 = new Date(Date.now() + 8 * 3600000 - 90 * 86400000).toISOString().slice(0, 10)
     const allClaimIds = Array.from(claimToRule.keys())
     const BATCH = 200
-    const siteTrackRows: { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string }[] = []
+    const siteTrackRows: { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null }[] = []
     const [, { data: envDays }] = await Promise.all([
       (async () => {
         for (let i = 0; i < allClaimIds.length; i += BATCH) {
           const { data } = await service
             .from('site_tracking_records')
-            .select('claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date')
+            .select('claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date, operation_type')
             .in('claim_id', allClaimIds.slice(i, i + BATCH))
             .order('record_date', { ascending: false })
             .limit(1000)
@@ -77,7 +77,7 @@ export async function GET() {
     }
 
     const seenClaims = new Set<string>()
-    for (const t of (siteTrack ?? []) as { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string }[]) {
+    for (const t of (siteTrack ?? []) as { claim_id: string; rank_position: number | null; prev_rank_position: number | null; rank_volume: number | null; is_indexed: boolean; record_date: string; operation_type: string | null }[]) {
       if (seenClaims.has(t.claim_id)) continue
       if (badDates.has(t.record_date)) continue  // env_excluded: try next record_date for this claim
       seenClaims.add(t.claim_id)
@@ -88,7 +88,7 @@ export async function GET() {
       // 跟分组报告/成效追踪同一套公式（lib/outcome-score.ts），2026-08-05 之前
       // 这里是一份重复的旧版打分逻辑（档位加总+封顶100，不含搜索量权重），
       // 两处口径不一致，统一改成同一个函数。
-      const score = computeOutcomeScore(t.rank_position, t.is_indexed, rankChange, t.rank_volume)
+      const score = computeOutcomeScore(t.rank_position, t.is_indexed, rankChange, t.rank_volume, t.operation_type)
       const s = scoreMap.get(ruleId) ?? { total: 0, count: 0 }
       s.total += score
       s.count += 1
