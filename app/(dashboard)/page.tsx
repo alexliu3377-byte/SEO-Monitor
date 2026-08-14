@@ -6,6 +6,7 @@ import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
 import { computeIndexStatus } from '@/lib/index-status'
 import { computeKwStatus } from '@/lib/kw-status'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   LineChart,
   Line,
@@ -142,21 +143,42 @@ export default function DashboardPage() {
       const d30 = getMY(-30)
       const d365 = getMY(-365)
 
+      // index_snapshots/weight_history 近365天全站数据已经超过 Supabase/PostgREST
+      // 单次查询硬顶的3000行（实测3098/3099行）——之前按 snapshot_date/record_date
+      // 升序不分页查询，超出上限的部分会被静默截断，而升序排列意味着截掉的正好是
+      // 最新的那批，也就是"今天"的数据完全拿不到（首页权重变动/收录变动因此
+      // 显示不出今天的变化，即使抓取日志和数据库里都有当天数据）。改用
+      // fetchAllRows 真分页，日期排序要加 site_id 兜底确保跨页顺序稳定
+      // （见 lib/supabase-paginate.ts 顶部注释，同一天有多个站点、只按日期排序
+      // 不足以保证确定性）。
+      const [{ count: snapsCount }, { count: wrecsCount }] = await Promise.all([
+        db.from('index_snapshots').select('site_id', { count: 'exact', head: true }).gte('snapshot_date', d365),
+        db.from('weight_history').select('site_id', { count: 'exact', head: true }).gte('record_date', d365),
+      ])
+
       const [
         { data: sitesRaw },
-        { data: snapsRaw },
-        { data: wrecsRaw },
+        snapsRaw,
+        wrecsRaw,
         { data: kwStatsRaw },
       ] = await Promise.all([
         db.from('sites').select('id, domain, name, category'),
-        db.from('index_snapshots')
-          .select('site_id, snapshot_date, index_count')
-          .gte('snapshot_date', d365)
-          .order('snapshot_date'),
-        db.from('weight_history')
-          .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
-          .gte('record_date', d365)
-          .order('record_date'),
+        fetchAllRows<IndexSnap>(async (from, to) => {
+          const res = await db.from('index_snapshots')
+            .select('site_id, snapshot_date, index_count')
+            .gte('snapshot_date', d365)
+            .order('snapshot_date', { ascending: true }).order('site_id', { ascending: true })
+            .range(from, to)
+          return res
+        }, { countHint: snapsCount ?? 0 }),
+        fetchAllRows<WeightRec>(async (from, to) => {
+          const res = await db.from('weight_history')
+            .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+            .gte('record_date', d365)
+            .order('record_date', { ascending: true }).order('site_id', { ascending: true })
+            .range(from, to)
+          return res
+        }, { countHint: wrecsCount ?? 0 }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (db.from('competitor_kw_stats') as any)
           .select('site_id, stat_date, app_count, game_count')
