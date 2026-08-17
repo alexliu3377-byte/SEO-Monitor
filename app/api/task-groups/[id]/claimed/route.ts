@@ -84,7 +84,7 @@ export async function POST(
   if (!callerId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: groupId } = await params
-  const { keyword, source, search_volume, operation_type, final_keyword, page_url, source_rule_id } = await req.json() as {
+  const { keyword, source, search_volume, operation_type, final_keyword, page_url, source_rule_id, userId: requestedUserId } = await req.json() as {
     keyword: string
     source: string
     search_volume?: number
@@ -92,6 +92,7 @@ export async function POST(
     final_keyword?: string
     page_url?: string
     source_rule_id?: string | null
+    userId?: string
   }
 
   if (!keyword) {
@@ -100,6 +101,20 @@ export async function POST(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+
+  // 代组员认领——只有 admin/super 能指定别人的 userId（跟 GET 的
+  // requestedUserId 是同一套权限模型）。2026-08-17 加入：之前不管前端"查看
+  // 谁的"切换成什么样，认领动作永远写成 callerId 自己，导致管理员切到组员
+  // 视图后双击认领，认领记录实际却算在管理员自己头上——今日推荐合并视图
+  // 需要"代组员认领"，顺带把这个既有的口径不一致也修掉。
+  let targetUserId = callerId
+  if (requestedUserId && requestedUserId !== callerId) {
+    const requesterRole = await getCallerRole(callerId)
+    if (requesterRole !== 'super' && requesterRole !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    targetUserId = requestedUserId
+  }
 
   // Verify caller is a member of this group — super/admin bypass this (2026-08-11
   // 用户反馈：超管本人没被加进某个分组的成员列表时，双击认领会被这条检查
@@ -134,8 +149,8 @@ export async function POST(
 
   if (existing) {
     let claimedByName = '其他组员'
-    if (existing.user_id === callerId) {
-      claimedByName = '你自己'
+    if (existing.user_id === targetUserId) {
+      claimedByName = targetUserId === callerId ? '你自己' : '这个组员自己'
     } else {
       const { data: member } = await service
         .from('task_group_members')
@@ -152,7 +167,7 @@ export async function POST(
     .from('member_claimed_keywords')
     .insert({
       group_id: groupId,
-      user_id: callerId,
+      user_id: targetUserId,
       keyword,
       keyword_type: null,
       source,

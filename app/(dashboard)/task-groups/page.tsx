@@ -491,6 +491,14 @@ export default function TaskGroupsPage() {
   // 只看"今天"claimedKeywords 的那个bug）。
   const [submissionHistoryUrlSet, setSubmissionHistoryUrlSet] = useState<Set<string>>(new Set())
   const [submissionHistoryKey, setSubmissionHistoryKey] = useState<string | null>(null)
+  // 管理员看"今日推荐"的合并视图（跌排/涨排更新）——全组每个组员各自的历史
+  // 提交记录+7天冷却豁免/dismiss记录，2026-08-17 加入。跟上面单组员版本
+  // （submissionHistoryMap/submissionHistoryUrlSet/dismissedRecMap）结构一样，
+  // 只是按 user_id 分开存一份，渲染时逐组员算出各自的匹配结果再合到一张表。
+  const [allMembersHistory, setAllMembersHistory] = useState<Map<string, { kwMap: Map<string, { lastSubmittedAt: string; updateCount: number }>; urlSet: Set<string> }>>(new Map())
+  const [allMembersHistoryKey, setAllMembersHistoryKey] = useState<string | null>(null)
+  const [allMembersDismissed, setAllMembersDismissed] = useState<Map<string, Map<string, string>>>(new Map())
+  const [allMembersDismissedKey, setAllMembersDismissedKey] = useState<string | null>(null)
   const [rdPage, setRdPage] = useState(0)
   const [rankdownDate, setRankdownDate] = useState('')
 
@@ -804,6 +812,69 @@ export default function TaskGroupsPage() {
     }
   }
 
+  // 管理员"今日推荐"合并视图用——一次性把全组每个组员各自的历史提交记录都
+  // 拉回来（跟 loadSubmissionHistory 同一份查询逻辑，只是不锁定某一个
+  // effectiveViewingId，对 activeGroup.members 里每个人各查一份）。
+  async function loadAllMembersSubmissionHistory() {
+    if (!activeGroup || !canManage || activeGroup.members.length === 0) return
+    const key = activeGroup.id
+    if (allMembersHistoryKey === key) return
+    try {
+      const supabase = getBrowserClient()
+      const results = await Promise.all(activeGroup.members.map(async m => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data } = await (supabase.from('member_claimed_keywords') as any)
+          .select('keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
+          .eq('group_id', activeGroup.id)
+          .eq('user_id', m.user_id)
+          .eq('status', 'submitted')
+        const kwMap = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
+        const urlSet = new Set<string>()
+        for (const r of (data || []) as { keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; submitted_at: string | null; claimed_date: string }[]) {
+          const kw = (r.final_keyword || r.keyword).toLowerCase()
+          const at = r.submitted_at || r.claimed_date
+          const isUpdate = r.operation_type === '更新' ? 1 : 0
+          const existing = kwMap.get(kw)
+          if (!existing) kwMap.set(kw, { lastSubmittedAt: at, updateCount: isUpdate })
+          else kwMap.set(kw, {
+            lastSubmittedAt: at > existing.lastSubmittedAt ? at : existing.lastSubmittedAt,
+            updateCount: existing.updateCount + isUpdate,
+          })
+          if (r.page_url) urlSet.add(normalizeUrl(r.page_url).toLowerCase())
+        }
+        return [m.user_id, { kwMap, urlSet }] as const
+      }))
+      setAllMembersHistory(new Map(results))
+      setAllMembersHistoryKey(key)
+    } catch {
+      // network error — combined view just falls back to no-cooldown-info this render
+    }
+  }
+
+  async function loadAllMembersDismissed() {
+    if (!activeGroup || !canManage || activeGroup.members.length === 0) return
+    const key = activeGroup.id
+    if (allMembersDismissedKey === key) return
+    try {
+      const supabase = getBrowserClient()
+      const since = new Date(Date.now() - RECOMMEND_COOLDOWN_UNIT_DAYS * 86400000).toISOString()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.from('member_rec_dismissals') as any)
+        .select('user_id, keyword, dismissed_at')
+        .eq('group_id', activeGroup.id)
+        .gte('dismissed_at', since)
+      const byMember = new Map<string, Map<string, string>>()
+      for (const r of (data || []) as { user_id: string; keyword: string; dismissed_at: string }[]) {
+        if (!byMember.has(r.user_id)) byMember.set(r.user_id, new Map())
+        byMember.get(r.user_id)!.set(r.keyword, r.dismissed_at)
+      }
+      setAllMembersDismissed(byMember)
+      setAllMembersDismissedKey(key)
+    } catch {
+      // network error — combined view just falls back to no-dismiss-info this render
+    }
+  }
+
   // 冷却期按历史更新次数递增：新增后首次冷却7天；每被"更新"一次，下一次冷却再
   // +7天（更新1次=14天，更新2次=21天…），避免同一个词被短时间内反复更新。冷却期
   // 内的词直接不显示；冷却期一过，越早"刚满冷却"的词优先级越高（同一批信号里最
@@ -814,11 +885,16 @@ export default function TaskGroupsPage() {
   function addDays(dateStr: string, days: number): string {
     return new Date(new Date(`${dateStr}T00:00:00Z`).getTime() + days * 86400000).toISOString().slice(0, 10)
   }
-  function applyRecommendCooldown<T extends { keyword: string; volume: number }>(rows: T[]): T[] {
+  // historyMap 默认用当前查看组员的（submissionHistoryMap）——合并视图对每个
+  // 组员分别传各自的历史记录进来，冷却期判断互不影响。
+  function applyRecommendCooldown<T extends { keyword: string; volume: number }>(
+    rows: T[],
+    historyMap: Map<string, { lastSubmittedAt: string; updateCount: number }> = submissionHistoryMap
+  ): T[] {
     const today = getMYDate(0)
     return rows
       .map(r => {
-        const info = submissionHistoryMap.get(r.keyword.toLowerCase())
+        const info = historyMap.get(r.keyword.toLowerCase())
         if (!info) return { r, eligible: true, daysSinceEligible: 0 } // 没有历史提交记录（按URL匹配到但词不同）：不受冷却限制
         const lastDate = info.lastSubmittedAt.slice(0, 10)
         const cooldownDays = RECOMMEND_COOLDOWN_UNIT_DAYS * (info.updateCount + 1)
@@ -950,7 +1026,11 @@ export default function TaskGroupsPage() {
     } finally { setDistributeClearing(false) }
   }
 
-  async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string) {
+  // targetUserId 默认是当前查看的组员（effectiveViewingId）——管理员切到
+  // 某个组员的视图后双击认领，认领记录应该算在那个组员头上，不是管理员自己。
+  // 合并推荐视图（见下方"今日推荐"渲染）每一行知道自己是哪个组员的，双击时
+  // 显式传入那一行的 user_id，不受当前"查看谁"的切换影响。
+  async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string, targetUserId?: string) {
     // claimedSet covers "already in state"; claimingRef covers "in-flight request"
     if (!activeGroupId || claimedSet.has(keyword) || claimingRef.current.has(keyword)) return
     claimingRef.current.add(keyword)
@@ -958,7 +1038,7 @@ export default function TaskGroupsPage() {
       const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, source, search_volume, operation_type: '新增', source_rule_id: source_rule_id ?? null }),
+        body: JSON.stringify({ keyword, source, search_volume, operation_type: '新增', source_rule_id: source_rule_id ?? null, userId: targetUserId ?? effectiveViewingId }),
       })
       if (res.status === 409) {
         // Same keyword+day is reserved group-wide (2026-07-29) — someone (maybe
@@ -970,8 +1050,12 @@ export default function TaskGroupsPage() {
       }
       if (res.ok) {
         const data = await res.json()
-        setClaimedKeywords(prev => [...prev, data.keyword])
-        setExpandedClaimIds(new Set<string>([data.keyword.id]))
+        // 认领的是当前正在查看的组员时才追加进这份"今天已认领"列表——合并推荐
+        // 视图代其它组员认领时，这份列表跟那个组员无关，不用管。
+        if ((targetUserId ?? effectiveViewingId) === effectiveViewingId) {
+          setClaimedKeywords(prev => [...prev, data.keyword])
+          setExpandedClaimIds(new Set<string>([data.keyword.id]))
+        }
         if (rightTab === 'distribute') loadDistributed()
       } else {
         // 409 已经在上面单独处理并 return 了，这里是其它失败（比如403）——
@@ -985,14 +1069,28 @@ export default function TaskGroupsPage() {
     } finally { claimingRef.current.delete(keyword) }
   }
 
-  function dismissRec(keyword: string) {
+  // targetUserId 默认是当前查看的组员——合并推荐视图里每一行知道自己是哪个
+  // 组员的，×掉时要写进那个组员自己的 dismiss 记录，不是当前查看者的。
+  function dismissRec(keyword: string, targetUserId?: string) {
+    const uid = targetUserId ?? effectiveViewingId
     const now = new Date().toISOString()
-    setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, now); return next })
-    if (!activeGroupId || !effectiveViewingId) return
+    if (uid === effectiveViewingId) {
+      setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, now); return next })
+    }
+    if (canManage) {
+      setAllMembersDismissed(prev => {
+        const next = new Map(prev)
+        const inner = new Map(next.get(uid) ?? new Map())
+        inner.set(keyword, now)
+        next.set(uid, inner)
+        return next
+      })
+    }
+    if (!activeGroupId || !uid) return
     const supabase = getBrowserClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(supabase.from('member_rec_dismissals') as any)
-      .upsert({ group_id: activeGroupId, user_id: effectiveViewingId, keyword, dismissed_at: now }, { onConflict: 'group_id,user_id,keyword' })
+      .upsert({ group_id: activeGroupId, user_id: uid, keyword, dismissed_at: now }, { onConflict: 'group_id,user_id,keyword' })
       .then(() => {})
   }
 
@@ -1276,6 +1374,7 @@ export default function TaskGroupsPage() {
   useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadSiteRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadDismissedRec() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (rightTab === 'recommend' && canManage) { loadAllMembersSubmissionHistory(); loadAllMembersDismissed() } }, [rightTab, activeGroupId, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
@@ -1539,10 +1638,36 @@ export default function TaskGroupsPage() {
       const rankdownMatched = matchAndRank(siteRankdownData)
       const rankupMatched = matchAndRank(siteRankupData)
 
+      // 管理员合并视图：每个组员各自算一遍匹配（各自的历史提交记录+各自的
+      // dismiss记录），再合成一张表，每行带上是哪个组员的。2026-08-17 加入
+      // ——用户想看全组的推荐，而不是一次只能切一个组员看。
+      type MoveRow = typeof siteRankdownData[number]
+      type MoveRowWithMember = MoveRow & { _memberId: string; _memberName: string }
+      const matchAndRankAll = (data: typeof siteRankdownData): MoveRowWithMember[] => {
+        const rows: MoveRowWithMember[] = []
+        for (const m of activeGroup?.members ?? []) {
+          const hist = allMembersHistory.get(m.user_id)
+          if (!hist) continue
+          const dismissed = allMembersDismissed.get(m.user_id) ?? new Map<string, string>()
+          const matched = data.filter(r =>
+            hist.kwMap.has(r.keyword.toLowerCase()) ||
+            (r.url && hist.urlSet.has(normalizeUrl(r.url).toLowerCase()))
+          ).filter(r => !dismissed.has(r.keyword))
+          for (const r of applyRecommendCooldown(matched, hist.kwMap)) {
+            rows.push({ ...r, _memberId: m.user_id, _memberName: m.username })
+          }
+        }
+        return rows.sort((a, b) => b.volume - a.volume)
+      }
+      const rankdownMatchedAll = canManage ? matchAndRankAll(siteRankdownData) : []
+      const rankupMatchedAll = canManage ? matchAndRankAll(siteRankupData) : []
+
       const renderMoveTable = (direction: 'down' | 'up') => {
         const loading = direction === 'down' ? siteRankdownLoading : siteRankupLoading
         const rawData = direction === 'down' ? siteRankdownData : siteRankupData
-        const matched = direction === 'down' ? rankdownMatched : rankupMatched
+        const matched: (MoveRow | MoveRowWithMember)[] = canManage
+          ? (direction === 'down' ? rankdownMatchedAll : rankupMatchedAll)
+          : (direction === 'down' ? rankdownMatched : rankupMatched)
         const source = direction === 'down' ? '跌排更新' : '涨排更新'
         const moveLabel = direction === 'down' ? '跌幅' : '涨幅'
         if (loading) return <Spinner />
@@ -1551,7 +1676,7 @@ export default function TaskGroupsPage() {
             <div className="text-center py-10 text-gray-400 text-sm">
               {rawData.length === 0
                 ? `近30天自有站无m端${direction === 'down' ? '下跌' : '上涨'}词`
-                : `暂无与你提交记录匹配、且已过冷却期的${direction === 'down' ? '下跌' : '上涨'}词`}
+                : `暂无与${canManage ? '组员们' : '你'}提交记录匹配、且已过冷却期的${direction === 'down' ? '下跌' : '上涨'}词`}
             </div>
           )
         }
@@ -1562,6 +1687,7 @@ export default function TaskGroupsPage() {
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
                 <th className="px-2 py-2 text-left font-medium">排名页面</th>
+                {canManage && <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>}
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">{moveLabel}</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
@@ -1569,18 +1695,23 @@ export default function TaskGroupsPage() {
               </tr></thead>
               <tbody>
                 {matched.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
-                  const claimed = claimedSet.has(r.keyword)
+                  const memberId = '_memberId' in r ? r._memberId : effectiveViewingId
+                  const memberName = '_memberId' in r ? r._memberName : undefined
+                  // 合并视图里只有"当前正在查看的组员"那一行的今日认领状态是
+                  // 准确的（claimedSet只装了effectiveViewingId的今天列表）——
+                  // 其它组员的行不去猜，双击照样能认领，服务端本来就会拦重复。
+                  const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
                   return (
-                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, source, r.volume)}
+                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, source, r.volume, undefined, memberId)}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                      title={claimed ? '已认领' : '双击认领'}>
+                      title={claimed ? '已认领' : `双击代${memberName ?? '该组员'}认领`}>
                       <td className="pl-2 py-2">
-                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword) }}
+                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword, memberId) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, source, r.volume) }}
+                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, source, r.volume, undefined, memberId) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -1597,6 +1728,9 @@ export default function TaskGroupsPage() {
                           </a>
                         ) : <span className="text-xs text-gray-300">—</span>}
                       </td>
+                      {canManage && (
+                        <td className="px-2 py-2 text-center text-xs text-gray-500 truncate" title={memberName ?? ''}>{memberName ?? '—'}</td>
+                      )}
                       <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
                         {r.rank_position ?? <span className="text-gray-400">脱排</span>}
                       </td>
