@@ -479,9 +479,14 @@ export default function TaskGroupsPage() {
   const [siteRankdownData, setSiteRankdownData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]>([])
   const [siteRankdownLoading, setSiteRankdownLoading] = useState(false)
   const [siteRankdownGroupId, setSiteRankdownGroupId] = useState<string | null>(null)
-  const [siteRankupData, setSiteRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]>([])
-  const [siteRankupLoading, setSiteRankupLoading] = useState(false)
-  const [siteRankupGroupId, setSiteRankupGroupId] = useState<string | null>(null)
+  // "涨排更新"tab 2026-08-17 改成看竞品的涨排（不是我们自己站的）——用户
+  // 原话"我是要找这个词我们没有做到收录或排名的东西来做更新，就是根据近期
+  // 竞品有拿到这个词的涨排的来做比较""看竞品涨排是看他们的涨而已"。跟原来
+  // "跌排更新"（看自己站，跟自己历史做过的词匹配）是两套完全不同的逻辑：
+  // 这边看的是"竞品最近涨了什么词"×"这个词我们自己完全没有排名"的交集。
+  const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null }[]>([])
+  const [competitorRankupLoading, setCompetitorRankupLoading] = useState(false)
+  const [competitorRankupGroupId, setCompetitorRankupGroupId] = useState<string | null>(null)
   // 组员对某个词最近一次"新增/更新"提交时间 + 历史"更新"次数 —— 用于给
   // 跌排更新/涨排更新推荐做冷却（7天内提交过的词不再重复推荐）和优先级
   // （反复更新过的词优先级更低）排序，2026-07-29 加入。
@@ -720,37 +725,112 @@ export default function TaskGroupsPage() {
     } finally { setSiteRankdownLoading(false) }
   }
 
-  async function loadSiteRankup() {
-    if (!activeGroup || siteRankupGroupId === activeGroup.id || siteRankupLoading) return
+  // 竞品涨排×我方零覆盖的交集——步骤：
+  // 1. 竞品范围＝所有正在跟踪、且不是"任何一个分组"自家站点的站（用户明确
+  //    要"全部在跟踪中的非自家站点"，不局限于当前分组配置的竞品）。
+  // 2. 从这批竞品站最近30天的m端涨排里取词（跟"跌排更新"同一张表
+  //    site_keyword_ranks，同一套30天窗口/3000行上限处理方式）。
+  // 3. 排掉我们自己站（当前分组的site_domains）已经有排名的词——不管是不是
+  //    这批涨排里同一个url，只要词一样就算我们已经覆盖了。
+  // 4. "排名页面"优先显示我们自己历史上给这个词提交过的URL（哪怕还没排名，
+  //    有页面可以直接改），没有的话才显示竞品的URL当参考。
+  async function loadCompetitorRankup() {
+    if (!activeGroup || competitorRankupGroupId === activeGroup.id || competitorRankupLoading) return
     const ownDomains = activeGroup.site_domains
-    if (ownDomains.length === 0) { setSiteRankupData([]); setSiteRankupGroupId(activeGroup.id); return }
-    setSiteRankupLoading(true)
+    if (ownDomains.length === 0) { setCompetitorRankupData([]); setCompetitorRankupGroupId(activeGroup.id); return }
+    setCompetitorRankupLoading(true)
     try {
       const supabase = getBrowserClient()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: siteData } = await (supabase.from('sites') as any)
-        .select('id').in('domain', ownDomains)
-      const siteIds = ((siteData || []) as { id: string }[]).map(s => s.id)
-      if (siteIds.length > 0) {
-        const since = getMYDate(-30)
+      const [{ data: ownSiteData }, { data: allSites }, { data: allGroups }] = await Promise.all([
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data } = await (supabase.from('site_keyword_ranks') as any)
-          .select('keyword, stat_date, rank_position, prev_rank, volume, url, title')
-          .in('site_id', siteIds)
-          .eq('type', 'rankup')
-          .eq('platform', 'mobile')
-          .gte('stat_date', since)
-          .order('stat_date', { ascending: false })
-          .order('volume', { ascending: false })
-          .limit(3000)
-        const rows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
-        setSiteRankupData(rows)
-      } else {
-        setSiteRankupData([])
+        (supabase.from('sites') as any).select('id').in('domain', ownDomains),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase.from('sites') as any).select('id, domain'),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase.from('task_groups') as any).select('site_domains'),
+      ])
+      const ownSiteIds = ((ownSiteData || []) as { id: string }[]).map(s => s.id)
+      const globalOwnDomains = new Set<string>()
+      for (const g of (allGroups || []) as { site_domains: string[] | null }[]) {
+        for (const d of g.site_domains ?? []) globalOwnDomains.add(d)
       }
-      setSiteRankupGroupId(activeGroup.id)
+      const competitorSiteIds = ((allSites || []) as { id: string; domain: string }[])
+        .filter(s => !globalOwnDomains.has(s.domain))
+        .map(s => s.id)
+
+      if (ownSiteIds.length === 0 || competitorSiteIds.length === 0) {
+        setCompetitorRankupData([])
+        setCompetitorRankupGroupId(activeGroup.id)
+        return
+      }
+
+      const since = getMYDate(-30)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rankupRows } = await (supabase.from('site_keyword_ranks') as any)
+        .select('keyword, stat_date, rank_position, prev_rank, volume, url, title')
+        .in('site_id', competitorSiteIds)
+        .eq('type', 'rankup')
+        .eq('platform', 'mobile')
+        .gte('stat_date', since)
+        .order('stat_date', { ascending: false })
+        .order('volume', { ascending: false })
+        .limit(3000)
+      const candidates = (rankupRows || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
+
+      // 分批查：这批词是不是我们自己站已经有排名了（有排名≈已经收录，见
+      // 项目里"没排名不判定收录"的自愈逻辑同一个道理，不用再单独查收录表）。
+      // CJK关键词批量 .in() 之前踩过 header 超限的坑（project_supabase_
+      // in_query_header_overflow），这里保守按100一批。
+      const distinctKeywords = Array.from(new Set(candidates.map(c => c.keyword)))
+      const ownRankedKeywords = new Set<string>()
+      const KW_BATCH = 100
+      const kwChunks = (arr: string[]) => {
+        const out: string[][] = []
+        for (let i = 0; i < arr.length; i += KW_BATCH) out.push(arr.slice(i, i + KW_BATCH))
+        return out
+      }
+      await Promise.all(kwChunks(distinctKeywords).map(async chunk => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: ownRanks, error } = await (supabase.from('site_keyword_ranks') as any)
+          .select('keyword')
+          .in('site_id', ownSiteIds)
+          .in('keyword', chunk)
+          .eq('platform', 'mobile')
+          .not('rank_position', 'is', null)
+        if (error) return
+        for (const r of (ownRanks || []) as { keyword: string }[]) ownRankedKeywords.add(r.keyword)
+      }))
+      const gaps = candidates.filter(c => !ownRankedKeywords.has(c.keyword))
+
+      // 我们自己历史上有没有为这个词提交过页面（不分组员、不分是否已提交），
+      // 有的话"排名页面"优先展示这个，方便直接去改，而不是只能参考竞品URL。
+      const gapKeywordsOriginalCase = Array.from(new Set(gaps.map(c => c.keyword)))
+      const ownUrlByKeyword = new Map<string, string>()
+      // 不用 .or() 拼手写filter字符串（关键词里万一带逗号/括号会拼坏查询），
+      // 按 keyword 和 final_keyword 分两次批量查，结果自己在内存里合并。
+      await Promise.all(kwChunks(gapKeywordsOriginalCase).map(async chunk => {
+        const [byKeyword, byFinal] = await Promise.all([
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase.from('member_claimed_keywords') as any)
+            .select('keyword, final_keyword, page_url')
+            .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('keyword', chunk),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase.from('member_claimed_keywords') as any)
+            .select('keyword, final_keyword, page_url')
+            .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('final_keyword', chunk),
+        ])
+        for (const r of [...(byKeyword.data || []), ...(byFinal.data || [])] as { keyword: string; final_keyword: string | null; page_url: string | null }[]) {
+          if (!r.page_url) continue
+          const kw = (r.final_keyword || r.keyword).toLowerCase()
+          if (!ownUrlByKeyword.has(kw)) ownUrlByKeyword.set(kw, r.page_url)
+        }
+      }))
+
+      const rows = gaps.map(c => ({ ...c, ownUrl: ownUrlByKeyword.get(c.keyword.toLowerCase()) ?? null }))
+      setCompetitorRankupData(rows)
+      setCompetitorRankupGroupId(activeGroup.id)
       setRdPage(0)
-    } finally { setSiteRankupLoading(false) }
+    } finally { setCompetitorRankupLoading(false) }
   }
 
   // 组员对每个词最近一次"新增/更新"提交时间 + 历史"更新"次数，用于跌排/涨排更新
@@ -1371,7 +1451,7 @@ export default function TaskGroupsPage() {
   useEffect(() => { if (rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'distribute') loadDistributed() }, [rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown')) loadSiteRankdown() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadSiteRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadCompetitorRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend') loadDismissedRec() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (rightTab === 'recommend' && canManage) { loadAllMembersSubmissionHistory(); loadAllMembersDismissed() } }, [rightTab, activeGroupId, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1617,39 +1697,36 @@ export default function TaskGroupsPage() {
 
     if (rightTab === 'recommend') {
       const pg_rec = tabPage['recommend']
-      // Build sets of member's submitted keywords and URLs for matching — shared
-      // by both 跌排更新/涨排更新, which are otherwise identical except direction.
+      // ── 跌排更新（自己站排名下跌，匹配这个组员/全组历史做过的词）──────────
       // 2026-08-17 修复：这里之前用 claimedKeywords（只有"当前选中日期"，默认
       // 今天，那一天认领的词），导致必须"今天认领的词"恰好也在"今天"的排名
-      // 涨跌报告里出现才会匹配上——两个概率事件叠在一起，实测这两个tab上线
+      // 涨跌报告里出现才会匹配上——两个概率事件叠在一起，实测这个tab上线
       // 近20天全站只成功匹配过2次。真正该比的是"这个组员历史上有没有做过
       // 这个词/这个URL"（不分哪天），改用 loadSubmissionHistory 已经在查的
       // 全历史 submissionHistoryMap/submissionHistoryUrlSet（原本只用来算
       // 冷却期，现在也用来当匹配池）。
       const submittedKwSet = new Set(submissionHistoryMap.keys())
       const submittedUrlSet = submissionHistoryUrlSet
-      const matchAndRank = (data: typeof siteRankdownData) => {
-        const matched = data.filter(r =>
+      const rankdownMatched = (() => {
+        const matched = siteRankdownData.filter(r =>
           submittedKwSet.has(r.keyword.toLowerCase()) ||
           (r.url && submittedUrlSet.has(normalizeUrl(r.url).toLowerCase()))
         ).filter(r => !dismissedRecMap.has(r.keyword))
         return applyRecommendCooldown(matched)
-      }
-      const rankdownMatched = matchAndRank(siteRankdownData)
-      const rankupMatched = matchAndRank(siteRankupData)
+      })()
 
       // 管理员合并视图：每个组员各自算一遍匹配（各自的历史提交记录+各自的
       // dismiss记录），再合成一张表，每行带上是哪个组员的。2026-08-17 加入
       // ——用户想看全组的推荐，而不是一次只能切一个组员看。
       type MoveRow = typeof siteRankdownData[number]
       type MoveRowWithMember = MoveRow & { _memberId: string; _memberName: string }
-      const matchAndRankAll = (data: typeof siteRankdownData): MoveRowWithMember[] => {
+      const rankdownMatchedAll: MoveRowWithMember[] = canManage ? (() => {
         const rows: MoveRowWithMember[] = []
         for (const m of activeGroup?.members ?? []) {
           const hist = allMembersHistory.get(m.user_id)
           if (!hist) continue
           const dismissed = allMembersDismissed.get(m.user_id) ?? new Map<string, string>()
-          const matched = data.filter(r =>
+          const matched = siteRankdownData.filter(r =>
             hist.kwMap.has(r.keyword.toLowerCase()) ||
             (r.url && hist.urlSet.has(normalizeUrl(r.url).toLowerCase()))
           ).filter(r => !dismissed.has(r.keyword))
@@ -1658,25 +1735,17 @@ export default function TaskGroupsPage() {
           }
         }
         return rows.sort((a, b) => b.volume - a.volume)
-      }
-      const rankdownMatchedAll = canManage ? matchAndRankAll(siteRankdownData) : []
-      const rankupMatchedAll = canManage ? matchAndRankAll(siteRankupData) : []
+      })() : []
 
-      const renderMoveTable = (direction: 'down' | 'up') => {
-        const loading = direction === 'down' ? siteRankdownLoading : siteRankupLoading
-        const rawData = direction === 'down' ? siteRankdownData : siteRankupData
-        const matched: (MoveRow | MoveRowWithMember)[] = canManage
-          ? (direction === 'down' ? rankdownMatchedAll : rankupMatchedAll)
-          : (direction === 'down' ? rankdownMatched : rankupMatched)
-        const source = direction === 'down' ? '跌排更新' : '涨排更新'
-        const moveLabel = direction === 'down' ? '跌幅' : '涨幅'
-        if (loading) return <Spinner />
+      const renderRankdownTable = () => {
+        const matched: (MoveRow | MoveRowWithMember)[] = canManage ? rankdownMatchedAll : rankdownMatched
+        if (siteRankdownLoading) return <Spinner />
         if (matched.length === 0) {
           return (
             <div className="text-center py-10 text-gray-400 text-sm">
-              {rawData.length === 0
-                ? `近30天自有站无m端${direction === 'down' ? '下跌' : '上涨'}词`
-                : `暂无与${canManage ? '组员们' : '你'}提交记录匹配、且已过冷却期的${direction === 'down' ? '下跌' : '上涨'}词`}
+              {siteRankdownData.length === 0
+                ? '近30天自有站无m端下跌词'
+                : `暂无与${canManage ? '组员们' : '你'}提交记录匹配、且已过冷却期的下跌词`}
             </div>
           )
         }
@@ -1689,7 +1758,7 @@ export default function TaskGroupsPage() {
                 <th className="px-2 py-2 text-left font-medium">排名页面</th>
                 {canManage && <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>}
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
-                <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">{moveLabel}</th>
+                <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">跌幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
                 <th className="w-14" />
               </tr></thead>
@@ -1702,7 +1771,7 @@ export default function TaskGroupsPage() {
                   // 其它组员的行不去猜，双击照样能认领，服务端本来就会拦重复。
                   const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
                   return (
-                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, source, r.volume, undefined, memberId)}
+                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId)}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                       title={claimed ? '已认领' : `双击代${memberName ?? '该组员'}认领`}>
                       <td className="pl-2 py-2">
@@ -1711,7 +1780,7 @@ export default function TaskGroupsPage() {
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, source, r.volume, undefined, memberId) }}
+                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -1734,14 +1803,12 @@ export default function TaskGroupsPage() {
                       <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
                         {r.rank_position ?? <span className="text-gray-400">脱排</span>}
                       </td>
-                      <td className={`px-2 py-2 text-center text-xs font-medium ${direction === 'down' ? 'text-red-500' : 'text-green-600'}`}>
-                        {direction === 'down'
-                          ? (r.rank_position == null ? <span className="text-gray-400">脱排</span> : r.prev_rank != null ? `▼${r.rank_position - r.prev_rank}` : '—')
-                          : (r.rank_position != null && r.prev_rank != null ? `▲${r.prev_rank - r.rank_position}` : '—')}
+                      <td className="px-2 py-2 text-center text-xs font-medium text-red-500">
+                        {r.rank_position == null ? <span className="text-gray-400">脱排</span> : r.prev_rank != null ? `▼${r.rank_position - r.prev_rank}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                       <td className="px-2 py-2 text-right">
-                        <button onClick={() => openDetail(r.keyword, source)}
+                        <button onClick={() => openDetail(r.keyword, '跌排更新')}
                           className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
                       </td>
                     </tr>
@@ -1750,6 +1817,94 @@ export default function TaskGroupsPage() {
               </tbody>
             </table>
             <Pager page={pg_rec} total={matched.length} onPage={p => setPage('recommend', p)} />
+          </>
+        )
+      }
+
+      // ── 涨排更新（竞品排名上涨、但我们自己完全没有排名的词）──────────────
+      // 2026-08-17 改版：用户原话"我是要找这个词我们没有做到收录或排名的东西
+      // 来做更新，就是根据近期竞品有拿到这个词的涨排的来做比较""看竞品涨排
+      // 是看他们的涨而已"——跟"跌排更新"完全不是同一套逻辑，不再是"匹配组员
+      // 历史做过的词"，而是"竞品刚涨上去+我们完全没有覆盖"的机会词，群组共享
+      // 的一份清单，不属于哪个组员，所以没有"组员"列，双击谁在看就代谁认领
+      // （管理员切到哪个组员视图就代那个组员，跟其它tab行为一致）。
+      const rankupCandidates = (() => {
+        const matched = competitorRankupData.filter(r => !dismissedRecMap.has(r.keyword))
+        return applyRecommendCooldown(matched)
+      })()
+
+      const renderRankupTable = () => {
+        if (competitorRankupLoading) return <Spinner />
+        if (rankupCandidates.length === 0) {
+          return (
+            <div className="text-center py-10 text-gray-400 text-sm">
+              {competitorRankupData.length === 0
+                ? '近30天竞品站无m端上涨词，或我们已经都有排名了'
+                : '暂无已过冷却期的机会词'}
+            </div>
+          )
+        }
+        return (
+          <>
+            <table className="w-full table-fixed">
+              <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+                <th className="w-7" />
+                <th className="px-3 py-2 text-left font-medium">关键词</th>
+                <th className="px-2 py-2 text-left font-medium">排名页面</th>
+                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">竞品排名</th>
+                <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">涨幅</th>
+                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
+                <th className="w-14" />
+              </tr></thead>
+              <tbody>
+                {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
+                  const claimed = claimedSet.has(r.keyword)
+                  const displayUrl = r.ownUrl ?? r.url
+                  return (
+                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume)}
+                      className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
+                      title={claimed ? '已认领' : '双击认领'}>
+                      <td className="pl-2 py-2">
+                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword) }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-sm text-gray-800 select-text cursor-text"
+                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '涨排更新', r.volume) }}
+                          title={r.keyword}>
+                          {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
+                        </span>
+                        {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
+                      </td>
+                      <td className="px-2 py-2">
+                        {displayUrl ? (
+                          <a href={displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`}
+                            target="_blank" rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-[11px] text-blue-500 hover:underline truncate block max-w-[130px]"
+                            title={r.ownUrl ? `我们自己的页面：${displayUrl}` : `参考竞品页面：${displayUrl}`}>
+                            {r.ownUrl ? '' : <span className="text-gray-300">参考·</span>}
+                            {displayUrl.replace(/^https?:\/\//, '').slice(0, 22)}{displayUrl.replace(/^https?:\/\//, '').length > 22 ? '…' : ''}
+                          </a>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
+                        {r.rank_position ?? <span className="text-gray-400">脱排</span>}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-medium text-green-600">
+                        {r.rank_position != null && r.prev_rank != null ? `▲${r.prev_rank - r.rank_position}` : '—'}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
+                      <td className="px-2 py-2 text-right">
+                        <button onClick={() => openDetail(r.keyword, '涨排更新')}
+                          className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            <Pager page={pg_rec} total={rankupCandidates.length} onPage={p => setPage('recommend', p)} />
           </>
         )
       }
@@ -1766,8 +1921,8 @@ export default function TaskGroupsPage() {
             ))}
           </div>
 
-          {recSubTab === 'rankdown' && renderMoveTable('down')}
-          {recSubTab === 'rankup' && renderMoveTable('up')}
+          {recSubTab === 'rankdown' && renderRankdownTable()}
+          {recSubTab === 'rankup' && renderRankupTable()}
         </div>
       )
     }
