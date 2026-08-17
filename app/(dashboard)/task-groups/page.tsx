@@ -486,6 +486,10 @@ export default function TaskGroupsPage() {
   // 跌排更新/涨排更新推荐做冷却（7天内提交过的词不再重复推荐）和优先级
   // （反复更新过的词优先级更低）排序，2026-07-29 加入。
   const [submissionHistoryMap, setSubmissionHistoryMap] = useState<Map<string, { lastSubmittedAt: string; updateCount: number }>>(new Map())
+  // 历史提交过的URL集合（跟 submissionHistoryMap 同一次查询里一起建，跌排/涨排
+  // 更新推荐按关键词或URL任一匹配即可，见下面 matchAndRank 用它替换掉原来
+  // 只看"今天"claimedKeywords 的那个bug）。
+  const [submissionHistoryUrlSet, setSubmissionHistoryUrlSet] = useState<Set<string>>(new Set())
   const [submissionHistoryKey, setSubmissionHistoryKey] = useState<string | null>(null)
   const [rdPage, setRdPage] = useState(0)
   const [rankdownDate, setRankdownDate] = useState('')
@@ -752,12 +756,13 @@ export default function TaskGroupsPage() {
       const supabase = getBrowserClient()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data } = await (supabase.from('member_claimed_keywords') as any)
-        .select('keyword, final_keyword, operation_type, submitted_at, claimed_date')
+        .select('keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
         .eq('group_id', activeGroup.id)
         .eq('user_id', effectiveViewingId)
         .eq('status', 'submitted')
       const map = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
-      for (const r of (data || []) as { keyword: string; final_keyword: string | null; operation_type: string | null; submitted_at: string | null; claimed_date: string }[]) {
+      const urlSet = new Set<string>()
+      for (const r of (data || []) as { keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; submitted_at: string | null; claimed_date: string }[]) {
         const kw = (r.final_keyword || r.keyword).toLowerCase()
         const at = r.submitted_at || r.claimed_date
         const isUpdate = r.operation_type === '更新' ? 1 : 0
@@ -767,8 +772,10 @@ export default function TaskGroupsPage() {
           lastSubmittedAt: at > existing.lastSubmittedAt ? at : existing.lastSubmittedAt,
           updateCount: existing.updateCount + isUpdate,
         })
+        if (r.page_url) urlSet.add(normalizeUrl(r.page_url).toLowerCase())
       }
       setSubmissionHistoryMap(map)
+      setSubmissionHistoryUrlSet(urlSet)
       setSubmissionHistoryKey(key)
     } catch {
       // network error — recommendations just fall back to no-cooldown-info this render
@@ -1513,8 +1520,15 @@ export default function TaskGroupsPage() {
       const pg_rec = tabPage['recommend']
       // Build sets of member's submitted keywords and URLs for matching — shared
       // by both 跌排更新/涨排更新, which are otherwise identical except direction.
-      const submittedKwSet = new Set(claimedKeywords.map(k => (k.final_keyword || k.keyword).toLowerCase()))
-      const submittedUrlSet = new Set(claimedKeywords.filter(k => k.page_url).map(k => normalizeUrl(k.page_url!).toLowerCase()))
+      // 2026-08-17 修复：这里之前用 claimedKeywords（只有"当前选中日期"，默认
+      // 今天，那一天认领的词），导致必须"今天认领的词"恰好也在"今天"的排名
+      // 涨跌报告里出现才会匹配上——两个概率事件叠在一起，实测这两个tab上线
+      // 近20天全站只成功匹配过2次。真正该比的是"这个组员历史上有没有做过
+      // 这个词/这个URL"（不分哪天），改用 loadSubmissionHistory 已经在查的
+      // 全历史 submissionHistoryMap/submissionHistoryUrlSet（原本只用来算
+      // 冷却期，现在也用来当匹配池）。
+      const submittedKwSet = new Set(submissionHistoryMap.keys())
+      const submittedUrlSet = submissionHistoryUrlSet
       const matchAndRank = (data: typeof siteRankdownData) => {
         const matched = data.filter(r =>
           submittedKwSet.has(r.keyword.toLowerCase()) ||
