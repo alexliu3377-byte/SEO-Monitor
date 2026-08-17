@@ -484,7 +484,7 @@ export default function TaskGroupsPage() {
   // 竞品有拿到这个词的涨排的来做比较""看竞品涨排是看他们的涨而已"。跟原来
   // "跌排更新"（看自己站，跟自己历史做过的词匹配）是两套完全不同的逻辑：
   // 这边看的是"竞品最近涨了什么词"×"这个词我们自己完全没有排名"的交集。
-  const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null }[]>([])
+  const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null; ownUserId: string | null }[]>([])
   const [competitorRankupLoading, setCompetitorRankupLoading] = useState(false)
   const [competitorRankupGroupId, setCompetitorRankupGroupId] = useState<string | null>(null)
   // 组员对某个词最近一次"新增/更新"提交时间 + 历史"更新"次数 —— 用于给
@@ -808,29 +808,40 @@ export default function TaskGroupsPage() {
       // 是否已提交），竞品涨排在这里纯粹是"该优先更新哪个词"的信号，不是
       // 用来发现全新的词。
       const gapKeywordsOriginalCase = Array.from(new Set(gaps.map(c => c.keyword)))
-      const ownUrlByKeyword = new Map<string, string>()
+      // 2026-08-17 加上 user_id——用户要"分发回给他们自己提交过的人"，得知道
+      // 是哪个组员提交的这个URL才能告诉他"别人站点涨排名了，去更新一下"。
+      // 按 created_at 倒序取，同一个词多个组员都提交过时，认最近提交的那个
+      // （最可能还在维护这个页面的人）。
+      const ownUrlByKeyword = new Map<string, { url: string; userId: string; createdAt: string }>()
       // 不用 .or() 拼手写filter字符串（关键词里万一带逗号/括号会拼坏查询），
-      // 按 keyword 和 final_keyword 分两次批量查，结果自己在内存里合并。
+      // 按 keyword 和 final_keyword 分两次批量查，结果自己在内存里合并、
+      // 按 created_at 比较谁更新，保留最近提交的那条。
       await Promise.all(kwChunks(gapKeywordsOriginalCase).map(async chunk => {
         const [byKeyword, byFinal] = await Promise.all([
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (supabase.from('member_claimed_keywords') as any)
-            .select('keyword, final_keyword, page_url')
+            .select('keyword, final_keyword, page_url, user_id, created_at')
             .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('keyword', chunk),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (supabase.from('member_claimed_keywords') as any)
-            .select('keyword, final_keyword, page_url')
+            .select('keyword, final_keyword, page_url, user_id, created_at')
             .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('final_keyword', chunk),
         ])
-        for (const r of [...(byKeyword.data || []), ...(byFinal.data || [])] as { keyword: string; final_keyword: string | null; page_url: string | null }[]) {
+        for (const r of [...(byKeyword.data || []), ...(byFinal.data || [])] as { keyword: string; final_keyword: string | null; page_url: string | null; user_id: string; created_at: string }[]) {
           if (!r.page_url) continue
           const kw = (r.final_keyword || r.keyword).toLowerCase()
-          if (!ownUrlByKeyword.has(kw)) ownUrlByKeyword.set(kw, r.page_url)
+          const existing = ownUrlByKeyword.get(kw)
+          if (!existing || r.created_at > existing.createdAt) {
+            ownUrlByKeyword.set(kw, { url: r.page_url, userId: r.user_id, createdAt: r.created_at })
+          }
         }
       }))
 
       const rows = gaps
-        .map(c => ({ ...c, ownUrl: ownUrlByKeyword.get(c.keyword.toLowerCase()) ?? null }))
+        .map(c => {
+          const own = ownUrlByKeyword.get(c.keyword.toLowerCase())
+          return { ...c, ownUrl: own?.url ?? null, ownUserId: own?.userId ?? null }
+        })
         .filter(r => r.ownUrl != null)
       setCompetitorRankupData(rows)
       setCompetitorRankupGroupId(activeGroup.id)
@@ -1856,30 +1867,34 @@ export default function TaskGroupsPage() {
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
                 <th className="px-2 py-2 text-left font-medium">排名页面</th>
+                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">竞品排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">涨幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
-                <th className="w-14" />
               </tr></thead>
               <tbody>
                 {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
-                  const claimed = claimedSet.has(r.keyword)
-                  // ownUrl 现在保证非空——loadCompetitorRankup 里已经把没有
-                  // 自己历史URL的候选词过滤掉了（用户明确要求只看"组员们自己
-                  // 提交过的词"，竞品涨排只是信号，不是拿来发现全新词的）。
+                  // ownUrl/ownUserId 现在保证非空——loadCompetitorRankup 里已经把
+                  // 没有自己历史URL的候选词过滤掉了（用户明确要求只看"组员们自己
+                  // 提交过的词"，竞品涨排只是信号，不是拿来发现全新词的）。分发
+                  // 回去要让原来提交这个词的组员去更新，双击认领代那个组员认领，
+                  // 不是当前正在查看的人。
                   const displayUrl = r.ownUrl
-                  if (!displayUrl) return null
+                  const memberId = r.ownUserId
+                  if (!displayUrl || !memberId) return null
+                  const memberName = activeGroup?.members.find(m => m.user_id === memberId)?.username ?? '—'
+                  const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
                   return (
-                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume)}
+                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                      title={claimed ? '已认领' : '双击认领'}>
+                      title={claimed ? '已认领' : `双击代${memberName}认领`}>
                       <td className="pl-2 py-2">
-                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword) }}
+                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword, memberId) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '涨排更新', r.volume) }}
+                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -1894,6 +1909,7 @@ export default function TaskGroupsPage() {
                           {displayUrl.replace(/^https?:\/\//, '').slice(0, 26)}{displayUrl.replace(/^https?:\/\//, '').length > 26 ? '…' : ''}
                         </a>
                       </td>
+                      <td className="px-2 py-2 text-center text-xs text-gray-500 truncate" title={memberName}>{memberName}</td>
                       <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
                         {r.rank_position ?? <span className="text-gray-400">脱排</span>}
                       </td>
@@ -1901,10 +1917,6 @@ export default function TaskGroupsPage() {
                         {r.rank_position != null && r.prev_rank != null ? `▲${r.prev_rank - r.rank_position}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                      <td className="px-2 py-2 text-right">
-                        <button onClick={() => openDetail(r.keyword, '涨排更新')}
-                          className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
-                      </td>
                     </tr>
                   )
                 })}
