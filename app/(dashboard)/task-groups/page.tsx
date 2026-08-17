@@ -802,8 +802,11 @@ export default function TaskGroupsPage() {
       }))
       const gaps = candidates.filter(c => !ownRankedKeywords.has(c.keyword))
 
-      // 我们自己历史上有没有为这个词提交过页面（不分组员、不分是否已提交），
-      // 有的话"排名页面"优先展示这个，方便直接去改，而不是只能参考竞品URL。
+      // 2026-08-17 用户进一步收窄范围："我要的只是组员们自己提交过的词，别的
+      // 站点拿到涨排名作为一个信号"——不要"我们从没做过、只能给竞品URL当
+      // 参考"那种情况，只保留组员历史上真的提交过页面的词（不分组员、不分
+      // 是否已提交），竞品涨排在这里纯粹是"该优先更新哪个词"的信号，不是
+      // 用来发现全新的词。
       const gapKeywordsOriginalCase = Array.from(new Set(gaps.map(c => c.keyword)))
       const ownUrlByKeyword = new Map<string, string>()
       // 不用 .or() 拼手写filter字符串（关键词里万一带逗号/括号会拼坏查询），
@@ -826,7 +829,9 @@ export default function TaskGroupsPage() {
         }
       }))
 
-      const rows = gaps.map(c => ({ ...c, ownUrl: ownUrlByKeyword.get(c.keyword.toLowerCase()) ?? null }))
+      const rows = gaps
+        .map(c => ({ ...c, ownUrl: ownUrlByKeyword.get(c.keyword.toLowerCase()) ?? null }))
+        .filter(r => r.ownUrl != null)
       setCompetitorRankupData(rows)
       setCompetitorRankupGroupId(activeGroup.id)
       setRdPage(0)
@@ -1839,7 +1844,7 @@ export default function TaskGroupsPage() {
           return (
             <div className="text-center py-10 text-gray-400 text-sm">
               {competitorRankupData.length === 0
-                ? '近30天竞品站无m端上涨词，或我们已经都有排名了'
+                ? '近30天竞品站无m端上涨词、我们已经都有排名了，或者都不是组员提交过的词'
                 : '暂无已过冷却期的机会词'}
             </div>
           )
@@ -1859,7 +1864,11 @@ export default function TaskGroupsPage() {
               <tbody>
                 {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
                   const claimed = claimedSet.has(r.keyword)
-                  const displayUrl = r.ownUrl ?? r.url
+                  // ownUrl 现在保证非空——loadCompetitorRankup 里已经把没有
+                  // 自己历史URL的候选词过滤掉了（用户明确要求只看"组员们自己
+                  // 提交过的词"，竞品涨排只是信号，不是拿来发现全新词的）。
+                  const displayUrl = r.ownUrl
+                  if (!displayUrl) return null
                   return (
                     <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume)}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
@@ -1877,16 +1886,13 @@ export default function TaskGroupsPage() {
                         {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
                       </td>
                       <td className="px-2 py-2">
-                        {displayUrl ? (
-                          <a href={displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`}
-                            target="_blank" rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="text-[11px] text-blue-500 hover:underline truncate block max-w-[130px]"
-                            title={r.ownUrl ? `我们自己的页面：${displayUrl}` : `参考竞品页面：${displayUrl}`}>
-                            {r.ownUrl ? '' : <span className="text-gray-300">参考·</span>}
-                            {displayUrl.replace(/^https?:\/\//, '').slice(0, 22)}{displayUrl.replace(/^https?:\/\//, '').length > 22 ? '…' : ''}
-                          </a>
-                        ) : <span className="text-xs text-gray-300">—</span>}
+                        <a href={displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`}
+                          target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="text-[11px] text-blue-500 hover:underline truncate block max-w-[130px]"
+                          title={`我们自己的页面：${displayUrl}`}>
+                          {displayUrl.replace(/^https?:\/\//, '').slice(0, 26)}{displayUrl.replace(/^https?:\/\//, '').length > 26 ? '…' : ''}
+                        </a>
                       </td>
                       <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
                         {r.rank_position ?? <span className="text-gray-400">脱排</span>}
