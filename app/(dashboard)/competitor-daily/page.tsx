@@ -17,7 +17,7 @@ interface CompetitorRow {
   weekdayBaseline: number
   weekendBaseline: number
   trend: { date: string; count: number }[]
-  status: 'normal' | 'warning' | 'danger' | 'high'
+  status: 'normal' | 'warning' | 'high'
   hasHtml: boolean
   hasRankData: boolean
   hasRankTitle: boolean
@@ -68,7 +68,6 @@ const PAGE_SIZES: PageSize[] = [50, 100, 500]
 const statusConfig = {
   normal:  { label: '正常', className: 'text-green-600 bg-green-50 px-2 py-0.5 rounded text-sm font-medium' },
   warning: { label: '偏低', className: 'text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded text-sm font-medium' },
-  danger:  { label: '异常', className: 'text-red-600 bg-red-50 px-2 py-0.5 rounded text-sm font-medium' },
   high:    { label: '偏高', className: 'text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-sm font-medium' },
 }
 
@@ -243,10 +242,9 @@ export default function CompetitorDailyPage() {
       })
 
       const statusPriority = (r: CompetitorRow) => {
-        if (r.status === 'danger') return 0
-        if (r.status === 'warning') return 1
-        if (r.status === 'high') return 2
-        return 3
+        if (r.status === 'warning') return 0
+        if (r.status === 'high') return 1
+        return 2
       }
       const { idMap, colorMap } = buildGroupMaps(sites)
       const sorted = result.sort((a, b) => {
@@ -673,7 +671,6 @@ export default function CompetitorDailyPage() {
                 <option value="">全部</option>
                 <option value="normal">正常</option>
                 <option value="warning">偏低</option>
-                <option value="danger">异常</option>
                 <option value="high">偏高</option>
               </select>
             </div>

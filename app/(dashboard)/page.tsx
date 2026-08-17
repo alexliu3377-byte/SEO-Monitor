@@ -34,7 +34,7 @@ interface WeightRec {
 }
 interface KwStatRow { site_id: string; stat_date: string; app_count: number; game_count: number }
 interface WeightChangeItem { site_id: string; domain: string; pcChange: number; mobileChange: number; date: string }
-interface AlertItem { site_id: string; domain: string; status: 'danger' | 'warning' | 'high'; date: string }
+interface AlertItem { site_id: string; domain: string; status: 'warning' | 'high'; date: string }
 interface IndexAlertItem { site_id: string; domain: string; status: 'danger' | 'warning' | 'rising'; date: string }
 interface WeightModalExtra {
   appKw: { keyword: string }[]
@@ -229,7 +229,7 @@ export default function DashboardPage() {
       }
       kAlerts.sort((a, b) => {
         if (a.date !== b.date) return b.date.localeCompare(a.date)
-        const order = { danger: 0, warning: 1, high: 2 }
+        const order = { warning: 0, high: 1 }
         return order[a.status] - order[b.status]
       })
       setKwAlerts(kAlerts.slice(0, 50))
@@ -508,11 +508,10 @@ export default function DashboardPage() {
                   <span className="font-medium text-gray-800">{a.domain}</span>
                 </p>
                 <span className={`text-xs px-1.5 rounded font-medium flex-shrink-0 ${
-                  a.status === 'danger' ? 'bg-red-50 text-red-500' :
                   a.status === 'warning' ? 'bg-yellow-50 text-yellow-600' :
                   'bg-blue-50 text-blue-600'
                 }`}>
-                  {a.status === 'danger' ? '异常' : a.status === 'warning' ? '偏低' : '偏高'}
+                  {a.status === 'warning' ? '偏低' : '偏高'}
                 </span>
               </button>
             )

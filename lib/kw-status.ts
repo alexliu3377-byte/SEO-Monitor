@@ -1,4 +1,4 @@
-export type KwStatus = 'normal' | 'warning' | 'danger' | 'high'
+export type KwStatus = 'normal' | 'warning' | 'high'
 
 interface KwStatRow {
   stat_date: string | null
@@ -56,13 +56,15 @@ export function computeKwBaseline(siteStats: KwStatRow[], yesterday: string): nu
 // 比例判断，避免小基数站点/天天被噪音标红。
 const MIN_BASELINE_FOR_ALERT = 5
 
+// 2026-08-17：'danger'（跌破30%基准，标"异常"）单独拎出来意义不大——用户
+// 反馈只想看"偏高/偏低"两档，不需要"偏低"里再细分出一档更严重的"异常"。
+// 合并成一档：跌破60%基准统一算 warning（偏低）。
 export function computeKwStatus(siteStats: KwStatRow[], yesterday: string): KwStatus {
   const ytStat = siteStats.find(s => (s.stat_date ?? '').slice(0, 10) === yesterday)
   const yesterdayVal = (ytStat?.app_count ?? 0) + (ytStat?.game_count ?? 0)
   const baseline = getBaseline(siteStats, yesterday)
   if (baseline >= MIN_BASELINE_FOR_ALERT) {
     const ratio = yesterdayVal / baseline
-    if (ratio < 0.3) return 'danger'
     if (ratio < 0.6) return 'warning'
     if (ratio > 1.5) return 'high'
   }
