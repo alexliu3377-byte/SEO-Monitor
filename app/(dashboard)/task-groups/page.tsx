@@ -484,7 +484,7 @@ export default function TaskGroupsPage() {
   // 竞品有拿到这个词的涨排的来做比较""看竞品涨排是看他们的涨而已"。跟原来
   // "跌排更新"（看自己站，跟自己历史做过的词匹配）是两套完全不同的逻辑：
   // 这边看的是"竞品最近涨了什么词"×"这个词我们自己完全没有排名"的交集。
-  const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null; ownUserId: string | null }[]>([])
+  const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null; ownUserId: string | null; ownCreatedAt: string | null }[]>([])
   const [competitorRankupLoading, setCompetitorRankupLoading] = useState(false)
   const [competitorRankupGroupId, setCompetitorRankupGroupId] = useState<string | null>(null)
   // 组员对某个词最近一次"新增/更新"提交时间 + 历史"更新"次数 —— 用于给
@@ -840,7 +840,7 @@ export default function TaskGroupsPage() {
       const rows = gaps
         .map(c => {
           const own = ownUrlByKeyword.get(c.keyword.toLowerCase())
-          return { ...c, ownUrl: own?.url ?? null, ownUserId: own?.userId ?? null }
+          return { ...c, ownUrl: own?.url ?? null, ownUserId: own?.userId ?? null, ownCreatedAt: own?.createdAt ?? null }
         })
         .filter(r => r.ownUrl != null)
       setCompetitorRankupData(rows)
@@ -1840,23 +1840,40 @@ export default function TaskGroupsPage() {
       // ── 涨排更新（竞品排名上涨、但我们自己完全没有排名的词）──────────────
       // 2026-08-17 改版：用户原话"我是要找这个词我们没有做到收录或排名的东西
       // 来做更新，就是根据近期竞品有拿到这个词的涨排的来做比较""看竞品涨排
-      // 是看他们的涨而已"——跟"跌排更新"完全不是同一套逻辑，不再是"匹配组员
-      // 历史做过的词"，而是"竞品刚涨上去+我们完全没有覆盖"的机会词，群组共享
-      // 的一份清单，不属于哪个组员，所以没有"组员"列，双击谁在看就代谁认领
-      // （管理员切到哪个组员视图就代那个组员，跟其它tab行为一致）。
-      const rankupCandidates = (() => {
-        const matched = competitorRankupData.filter(r => !dismissedRecMap.has(r.keyword))
-        return applyRecommendCooldown(matched)
+      // 是看他们的涨而已"——跟"跌排更新"不是同一套匹配逻辑（不再是"匹配组员
+      // 历史做过的词"，而是"竞品刚涨上去+我们完全没有覆盖"的机会词），但"给谁
+      // 看"这一层要跟"跌排更新"保持一致："参考跌排更新的，主要都是给组员自己
+      // 去做更新的"——普通组员打开自己的"今日推荐"，只看到自己历史上提交过的
+      // 那些词（自然而然地"分发"到本人，不是管理员主动推送）；管理员才看到
+      // 全组合并视图+"组员"列，方便掌握全局。
+      const rankupMatchedOwn = (() => {
+        const ownRows = competitorRankupData.filter(r => r.ownUserId === effectiveViewingId)
+        const filtered = ownRows.filter(r => !dismissedRecMap.has(r.keyword))
+        return applyRecommendCooldown(filtered)
       })()
+      const rankupMatchedAll = canManage ? (() => {
+        const rows: typeof competitorRankupData = []
+        for (const m of activeGroup?.members ?? []) {
+          const ownRows = competitorRankupData.filter(r => r.ownUserId === m.user_id)
+          if (ownRows.length === 0) continue
+          const hist = allMembersHistory.get(m.user_id)
+          if (!hist) continue
+          const dismissed = allMembersDismissed.get(m.user_id) ?? new Map<string, string>()
+          const filtered = ownRows.filter(r => !dismissed.has(r.keyword))
+          rows.push(...applyRecommendCooldown(filtered, hist.kwMap))
+        }
+        return rows.sort((a, b) => b.volume - a.volume)
+      })() : []
 
       const renderRankupTable = () => {
+        const rankupCandidates = canManage ? rankupMatchedAll : rankupMatchedOwn
         if (competitorRankupLoading) return <Spinner />
         if (rankupCandidates.length === 0) {
           return (
             <div className="text-center py-10 text-gray-400 text-sm">
               {competitorRankupData.length === 0
                 ? '近30天竞品站无m端上涨词、我们已经都有排名了，或者都不是组员提交过的词'
-                : '暂无已过冷却期的机会词'}
+                : `暂无与${canManage ? '组员们' : '你'}历史提交匹配、且已过冷却期的机会词`}
             </div>
           )
         }
@@ -1867,7 +1884,8 @@ export default function TaskGroupsPage() {
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
                 <th className="px-2 py-2 text-left font-medium">排名页面</th>
-                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>
+                {canManage && <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>}
+                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">提交日期</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">竞品排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">涨幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
@@ -1876,9 +1894,9 @@ export default function TaskGroupsPage() {
                 {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
                   // ownUrl/ownUserId 现在保证非空——loadCompetitorRankup 里已经把
                   // 没有自己历史URL的候选词过滤掉了（用户明确要求只看"组员们自己
-                  // 提交过的词"，竞品涨排只是信号，不是拿来发现全新词的）。分发
-                  // 回去要让原来提交这个词的组员去更新，双击认领代那个组员认领，
-                  // 不是当前正在查看的人。
+                  // 提交过的词"，竞品涨排只是信号，不是拿来发现全新词的）。管理员
+                  // 合并视图双击代那个组员认领；普通组员看到的本来就只有自己的词
+                  // （见上面 rankupMatchedOwn），memberId 恒等于 effectiveViewingId。
                   const displayUrl = r.ownUrl
                   const memberId = r.ownUserId
                   if (!displayUrl || !memberId) return null
@@ -1887,7 +1905,7 @@ export default function TaskGroupsPage() {
                   return (
                     <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                      title={claimed ? '已认领' : `双击代${memberName}认领`}>
+                      title={claimed ? '已认领' : (canManage ? `双击代${memberName}认领` : '双击认领')}>
                       <td className="pl-2 py-2">
                         <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword, memberId) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
@@ -1909,7 +1927,10 @@ export default function TaskGroupsPage() {
                           {displayUrl.replace(/^https?:\/\//, '').slice(0, 26)}{displayUrl.replace(/^https?:\/\//, '').length > 26 ? '…' : ''}
                         </a>
                       </td>
-                      <td className="px-2 py-2 text-center text-xs text-gray-500 truncate" title={memberName}>{memberName}</td>
+                      {canManage && (
+                        <td className="px-2 py-2 text-center text-xs text-gray-500 truncate" title={memberName}>{memberName}</td>
+                      )}
+                      <td className="px-2 py-2 text-center text-xs text-gray-500">{r.ownCreatedAt ? fmtDate(r.ownCreatedAt.slice(0, 10)) : '—'}</td>
                       <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
                         {r.rank_position ?? <span className="text-gray-400">脱排</span>}
                       </td>
