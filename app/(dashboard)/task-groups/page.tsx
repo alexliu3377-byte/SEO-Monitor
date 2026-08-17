@@ -52,6 +52,21 @@ function normalizeUrl(raw: string): string {
   return raw.trim().replace(/^https?:\/\/(www\.|m\.)?/, '')
 }
 
+// site_keyword_ranks 30天窗口里同一个关键词经常在好几个不同 stat_date 都有
+// 记录（比如连续多天都在"下跌"名单里）——"今日推荐"按关键词展示，不按天，
+// 不去重的话同一个词会在表里重复出现好几行。传入的数组要求已经按
+// stat_date desc（新的在前）排序，保留每个关键词第一次出现的那行即可
+// （即最新的一天）。2026-08-17 用户反馈"跌排更新里面有很多重复的东西"
+// 排查出的根因。
+function dedupeByKeyword<T extends { keyword: string }>(rows: T[]): T[] {
+  const seen = new Set<string>()
+  return rows.filter(r => {
+    if (seen.has(r.keyword)) return false
+    seen.add(r.keyword)
+    return true
+  })
+}
+
 function getBadge(first_date: string, last_date: string, yesterday: string): Badge {
   if (!last_date || last_date < yesterday) return null
   if (first_date >= yesterday) return 'new'
@@ -475,6 +490,9 @@ export default function TaskGroupsPage() {
   // 点×移除某个跌排/涨排更新推荐词——持久化到数据库、7天冷却，不再是刷新页面
   // 就重新出现的临时前端状态，2026-07-29 加入。
   const [dismissedRecMap, setDismissedRecMap] = useState<Map<string, string>>(new Map())
+  // 点×先弹一个"永久移除/7天后再显示"的选择，不直接执行——2026-08-17 用户
+  // 要求，之前是直接永久按7天冷却处理，点错了没有二次确认的机会。
+  const [dismissConfirm, setDismissConfirm] = useState<{ keyword: string; targetUserId: string; memberName?: string } | null>(null)
   const [dismissedRecKey, setDismissedRecKey] = useState<string | null>(null)
   const [siteRankdownData, setSiteRankdownData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]>([])
   const [siteRankdownLoading, setSiteRankdownLoading] = useState(false)
@@ -713,7 +731,8 @@ export default function TaskGroupsPage() {
           .order('stat_date', { ascending: false })
           .order('volume', { ascending: false })
           .limit(3000)
-        const rows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
+        const rawRows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
+        const rows = dedupeByKeyword(rawRows)
         setSiteRankdownData(rows)
         // Default date = most recent stat_date in data
         if (rows.length > 0) setRankdownDate(prev => prev || rows[0].stat_date)
@@ -775,7 +794,7 @@ export default function TaskGroupsPage() {
         .order('stat_date', { ascending: false })
         .order('volume', { ascending: false })
         .limit(3000)
-      const candidates = (rankupRows || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
+      const candidates = dedupeByKeyword((rankupRows || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[])
 
       // 分批查：这批词是不是我们自己站已经有排名了（有排名≈已经收录，见
       // 项目里"没排名不判定收录"的自愈逻辑同一个道理，不用再单独查收录表）。
@@ -1167,17 +1186,22 @@ export default function TaskGroupsPage() {
 
   // targetUserId 默认是当前查看的组员——合并推荐视图里每一行知道自己是哪个
   // 组员的，×掉时要写进那个组员自己的 dismiss 记录，不是当前查看者的。
-  function dismissRec(keyword: string, targetUserId?: string) {
+  // "永久移除"不新增数据库字段——loadDismissedRec/loadAllMembersDismissed 本来
+  // 就是拿 `dismissed_at >= 7天前` 当"还在冷却期内、要不要隐藏"的唯一判断依据，
+  // 写一个远未来的哨兵时间天然就"永远满足这个条件"，不用改表结构/迁移。
+  // 2026-08-17 用户要求区分"永久移除"和"7天后再显示"两种选择时加入。
+  const PERMANENT_DISMISS_AT = '2099-12-31T00:00:00.000Z'
+  function dismissRec(keyword: string, targetUserId?: string, permanent = false) {
     const uid = targetUserId ?? effectiveViewingId
-    const now = new Date().toISOString()
+    const at = permanent ? PERMANENT_DISMISS_AT : new Date().toISOString()
     if (uid === effectiveViewingId) {
-      setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, now); return next })
+      setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, at); return next })
     }
     if (canManage) {
       setAllMembersDismissed(prev => {
         const next = new Map(prev)
         const inner = new Map(next.get(uid) ?? new Map())
-        inner.set(keyword, now)
+        inner.set(keyword, at)
         next.set(uid, inner)
         return next
       })
@@ -1186,7 +1210,7 @@ export default function TaskGroupsPage() {
     const supabase = getBrowserClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(supabase.from('member_rec_dismissals') as any)
-      .upsert({ group_id: activeGroupId, user_id: uid, keyword, dismissed_at: now }, { onConflict: 'group_id,user_id,keyword' })
+      .upsert({ group_id: activeGroupId, user_id: uid, keyword, dismissed_at: at }, { onConflict: 'group_id,user_id,keyword' })
       .then(() => {})
   }
 
@@ -1791,7 +1815,7 @@ export default function TaskGroupsPage() {
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                       title={claimed ? '已认领' : `双击代${memberName ?? '该组员'}认领`}>
                       <td className="pl-2 py-2">
-                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword, memberId) }}
+                        <button onClick={e => { e.stopPropagation(); setDismissConfirm({ keyword: r.keyword, targetUserId: memberId, memberName }) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
@@ -1907,7 +1931,7 @@ export default function TaskGroupsPage() {
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                       title={claimed ? '已认领' : (canManage ? `双击代${memberName}认领` : '双击认领')}>
                       <td className="pl-2 py-2">
-                        <button onClick={e => { e.stopPropagation(); dismissRec(r.keyword, memberId) }}
+                        <button onClick={e => { e.stopPropagation(); setDismissConfirm({ keyword: r.keyword, targetUserId: memberId, memberName }) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
@@ -2877,6 +2901,27 @@ export default function TaskGroupsPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setDeleteId(null)} className="btn-ghost">取消</button>
               <button onClick={() => handleDelete(deleteId)} className="btn-danger">确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 今日推荐"×"确认弹窗——永久移除 / 7天后再显示 */}
+      {dismissConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDismissConfirm(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-900 mb-2">移除"{dismissConfirm.keyword}"</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              {dismissConfirm.memberName ? `这是${dismissConfirm.memberName}的推荐词，` : ''}要7天后再显示，还是永久不再推荐？
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => { dismissRec(dismissConfirm.keyword, dismissConfirm.targetUserId, false); setDismissConfirm(null) }}
+                className="btn-ghost w-full">7天后再显示</button>
+              <button
+                onClick={() => { dismissRec(dismissConfirm.keyword, dismissConfirm.targetUserId, true); setDismissConfirm(null) }}
+                className="btn-danger w-full">永久移除</button>
+              <button onClick={() => setDismissConfirm(null)} className="text-xs text-gray-400 hover:text-gray-600 mt-1">取消</button>
             </div>
           </div>
         </div>
