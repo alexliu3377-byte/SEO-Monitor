@@ -271,13 +271,6 @@ export default function DashboardPage() {
     return SITE_COLORS[idx % SITE_COLORS.length]
   }
 
-  // Which sites to draw: selected ones, or all if nothing selected
-  function activeSiteIds(cat: Category): string[] {
-    return selected[cat].length > 0
-      ? selected[cat]
-      : catSites[cat].map(s => s.id)
-  }
-
   // 图表最多能选多宽的日期范围——按当前站点数反推，保证单次查询行数稳定
   // 压在 Supabase 3000行硬顶以下（每个站点每天最多1行，2800是留了200行余量）。
   // 站点数以后涨了这个上限会自动跟着收紧，不用再手动改数字。
@@ -417,7 +410,6 @@ export default function DashboardPage() {
   }
 
   const today = getMY()
-  const activeIds = activeSiteIds(activeCategory)
   const activeSelected = selected[activeCategory]
 
   return (
@@ -578,15 +570,17 @@ export default function DashboardPage() {
 
         <div className="p-5 space-y-4">
 
-          {/* Site grouped pills */}
+          {/* Site grouped pills，每组下面各自跟一对图表——2026-08-18 用户
+              反馈站点一多，所有站点混在同一对图表里线条太密看不清，改成
+              a-m/n-z/0-9 三组各自独立一对图表，只画自己组内的站点。 */}
           {catSites[activeCategory].length === 0 ? (
             <p className="text-sm text-gray-400">该分类暂无站点，请在网站管理中设置分类</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-6">
               {activeSelected.length > 0 && (
                 <button
                   onClick={() => setSelected(prev => ({ ...prev, [activeCategory]: [] }))}
-                  className="text-xs px-2 py-0.5 rounded border border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600 transition-colors mb-1"
+                  className="text-xs px-2 py-0.5 rounded border border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600 transition-colors"
                 >
                   全部
                 </button>
@@ -600,75 +594,83 @@ export default function DashboardPage() {
                   .filter(s => g.test(s.domain))
                   .sort((a, b) => a.domain.localeCompare(b.domain))
                 if (groupSites.length === 0) return null
+                const groupIds = groupSites.map(s => s.id)
+                // 选了具体站点时，这组图表只画"被选中的站点里属于这组的那些"
+                // ——没选任何站点（默认全选）时，这组图表画组内全部站点。
+                const groupActiveIds = activeSelected.length > 0
+                  ? groupIds.filter(id => activeSelected.includes(id))
+                  : groupIds
                 return (
-                  <div key={g.label} className="flex items-start gap-3">
-                    <span className="text-xs text-gray-400 font-mono w-8 flex-shrink-0 pt-1.5">{g.label}</span>
-                    <div className="w-px self-stretch bg-gray-200 flex-shrink-0" />
-                    <div className="flex flex-wrap gap-2">
-                      {groupSites.map(s => {
-                        const color = siteColor(activeCategory, s.id)
-                        const isActive = activeSelected.length === 0 || activeSelected.includes(s.id)
-                        const w = latestWeightMap.get(s.id)
-                        return (
-                          <button
-                            key={s.id}
-                            onClick={() => toggleSite(s.id)}
-                            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                              activeSelected.includes(s.id)
-                                ? 'border-transparent text-white font-medium'
-                                : activeSelected.length > 0
-                                  ? 'border-gray-200 text-gray-400 hover:text-gray-600'
-                                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                            }`}
-                            style={activeSelected.includes(s.id) ? { backgroundColor: color } : {}}
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: isActive ? color : '#d1d5db' }}
-                            />
-                            <span className="flex flex-col items-start leading-tight">
-                              <span>{s.domain}</span>
-                              {w && (
-                                <span className={`text-[10px] ${activeSelected.includes(s.id) ? 'text-white/70' : 'text-gray-400'}`}>
-                                  PC{w.pc} · M{w.mobile}
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        )
-                      })}
+                  <div key={g.label} className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs text-gray-400 font-mono w-8 flex-shrink-0 pt-1.5">{g.label}</span>
+                      <div className="w-px self-stretch bg-gray-200 flex-shrink-0" />
+                      <div className="flex flex-wrap gap-2">
+                        {groupSites.map(s => {
+                          const color = siteColor(activeCategory, s.id)
+                          const isActive = activeSelected.length === 0 || activeSelected.includes(s.id)
+                          const w = latestWeightMap.get(s.id)
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => toggleSite(s.id)}
+                              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                activeSelected.includes(s.id)
+                                  ? 'border-transparent text-white font-medium'
+                                  : activeSelected.length > 0
+                                    ? 'border-gray-200 text-gray-400 hover:text-gray-600'
+                                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                              }`}
+                              style={activeSelected.includes(s.id) ? { backgroundColor: color } : {}}
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: isActive ? color : '#d1d5db' }}
+                              />
+                              <span className="flex flex-col items-start leading-tight">
+                                <span>{s.domain}</span>
+                                {w && (
+                                  <span className={`text-[10px] ${activeSelected.includes(s.id) ? 'text-white/70' : 'text-gray-400'}`}>
+                                    PC{w.pc} · M{w.mobile}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
+                    {groupActiveIds.length > 0 && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pl-11">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-600 mb-3">收录趋势</p>
+                          <CompareChart
+                            key={activeCategory + g.label + '-index'}
+                            data={getIndexData(groupActiveIds)}
+                            siteIds={groupActiveIds}
+                            colorMap={Object.fromEntries(groupActiveIds.map(id => [id, siteColor(activeCategory, id)]))}
+                            siteMap={siteMap}
+                            yFormatter={fmtNum}
+                          />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-600 mb-3">移动 IP 均值趋势</p>
+                          <CompareChart
+                            key={activeCategory + g.label + '-mobile'}
+                            data={getMobileIPData(groupActiveIds)}
+                            siteIds={groupActiveIds}
+                            colorMap={Object.fromEntries(groupActiveIds.map(id => [id, siteColor(activeCategory, id)]))}
+                            siteMap={siteMap}
+                            yFormatter={fmtNum}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
           )}
-
-          {/* Two comparison charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <p className="text-sm font-semibold text-gray-600 mb-3">收录趋势</p>
-              <CompareChart
-                key={activeCategory + '-index'}
-                data={getIndexData(activeIds)}
-                siteIds={activeIds}
-                colorMap={Object.fromEntries(activeIds.map(id => [id, siteColor(activeCategory, id)]))}
-                siteMap={siteMap}
-                yFormatter={fmtNum}
-              />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-600 mb-3">移动 IP 均值趋势</p>
-              <CompareChart
-                key={activeCategory + '-mobile'}
-                data={getMobileIPData(activeIds)}
-                siteIds={activeIds}
-                colorMap={Object.fromEntries(activeIds.map(id => [id, siteColor(activeCategory, id)]))}
-                siteMap={siteMap}
-                yFormatter={fmtNum}
-              />
-            </div>
-          </div>
 
         </div>
       </div>
