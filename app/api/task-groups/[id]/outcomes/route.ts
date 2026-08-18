@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, type UpdateEffectBreakdown } from '@/lib/outcome-score'
-import { fetchAllRows } from '@/lib/supabase-paginate'
+import { computeGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
+
+export const maxDuration = 60
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = createClient()
@@ -26,14 +27,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (!member) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Members lookup (for usernames)
-  const { data: membersRaw } = await service
-    .from('task_group_members').select('user_id, username').eq('group_id', groupId)
-  const memberMap = new Map<string, string>(
-    (membersRaw || []).map((m: { user_id: string; username: string | null }) =>
-      [m.user_id, m.username || m.user_id.slice(0, 8)])
-  )
-
   // Filters — accept both submitStart and discoverStart for backward compat
   const filterSubmitStart   = searchParams.get('submitStart')  || searchParams.get('discoverStart') || ''
   const filterSubmitEnd     = searchParams.get('submitEnd')    || searchParams.get('discoverEnd')   || ''
@@ -44,203 +37,38 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const filterRankKw        = (searchParams.get('rankKeyword') || '').toLowerCase()
   const filterEffectiveness = searchParams.get('outcome') || ''         // '获取排名'|'获取收录'|'追踪中'|'无效'
   const sortBy              = searchParams.get('sortBy') || 'submit_date'
-  const sortDir             = searchParams.get('sortDir') || 'desc'
+  const sortDir              = searchParams.get('sortDir') || 'desc'
   const page                = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
   const pageSize            = Math.min(200, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10) || 20))
 
-  // Fetch bad environment dates (crawl anomaly or site-wide index drop > 5%)
-  const since90 = new Date(Date.now() + 8 * 3600000 - 90 * 86400000).toISOString().slice(0, 10)
-  const { data: envDays } = await service
-    .from('environment_daily')
-    .select('date, crawl_anomaly, avg_index_change_pct')
-    .gte('date', since90)
-  const badDates = new Set<string>()
-  for (const e of (envDays ?? []) as { date: string; crawl_anomaly: boolean; avg_index_change_pct: number | null }[]) {
-    if (e.crawl_anomaly || (e.avg_index_change_pct !== null && e.avg_index_change_pct < -5)) {
-      badDates.add(e.date)
-    }
+  // 2026-08-18：这张表原来的"实时查site_tracking_records全量+批量查认领来源/
+  // 排名匹配词/更新型真新排名历史+逐行算分"那一整套很重（用户反馈"打开很
+  // 慢"），改成读 group_tracking_cache（GitHub Actions 每天08:05 MYT算好写
+  // 进去，见 lib/group-tracking-cache.ts + app/api/tracking-cache/refresh）。
+  // 缓存没命中（刚上线还没跑过定时任务、或者这个分组是新建的）才现场算一次
+  // 并顺手写回，跟 hot_radar_cache 的兜底逻辑一致。
+  const { data: cached } = await service
+    .from('group_tracking_cache').select('payload').eq('group_id', groupId).maybeSingle()
+  let allRows: EnrichedTrackRow[]
+  if (cached?.payload) {
+    allRows = cached.payload as EnrichedTrackRow[]
+  } else {
+    allRows = await computeGroupTrackingPayload(service, groupId)
+    await service.from('group_tracking_cache').upsert({ group_id: groupId, payload: allRows, computed_at: new Date().toISOString() })
   }
 
-  // Build the shared filter set once so the count query and the row query stay
-  // in sync — the limit below is sized off this exact count, so a mismatch
-  // here would silently reintroduce truncation.
-  //
-  // effectiveness is intentionally NOT included here — unlike user_id/
-  // operation_type/submit_date (fixed per claim), effectiveness is a per-day
-  // snapshot that can change over a claim's tracking history. Pushing it into
-  // the DB query would filter the raw multi-day rows BEFORE dedup, so dedup
-  // would then pick each claim's latest row matching that effectiveness
-  // (its last-ever-ranked day, say) instead of its true latest status —
-  // silently inflating the filtered count above the unfiltered baseline
-  // (found via user report: filtering to 获取排名 showed 76 vs 56 unfiltered).
-  // It's applied as a post-fetch filter on the deduped rows instead, same as
-  // filterIndex/filterKw/filterRankKw below.
-  //
-  // filterMember is ALSO deliberately left out (only for canSeeAll — normal
-  // users still get the unconditional .eq('user_id', userId) below, they can
-  // never see other members' rows at all). Fetching the whole group's rows
-  // regardless of the member filter lets us compute a "group total" alongside
-  // the member-scoped one (2026-08-04 request: cards show "该组员 / 全组" so
-  // admin/super can compare a selected member against the group at a glance)
-  // without a second round-trip — the member filter is applied in-memory
-  // after groupSummary is computed, further down.
-  function applyTrackFilters<T extends { eq: any; gte: any; lte: any }>(q: T): T {
-    let query = q
-    if (!canSeeAll) query = query.eq('user_id', userId)
-    if (filterOp) query = query.eq('operation_type', filterOp)
-    if (filterSubmitStart) query = query.gte('submit_date', filterSubmitStart)
-    if (filterSubmitEnd)   query = query.lte('submit_date', filterSubmitEnd)
-    return query
-  }
+  // 原来 applyTrackFilters 里对 DB 的过滤（user_id/operation_type/submit_date）
+  // 现在改成对缓存数组的内存过滤——effectiveness 依然不在这一批里（原因见下
+  // 面 post-fetch 过滤那段注释，缓存本身已经是"每个claim取最新一行"，跟原来
+  // 的 dedup-after-fetch 顺序一致，不会重新引入那个"筛完比不筛还多"的坑）。
+  let rows = allRows
+  if (!canSeeAll) rows = rows.filter(r => r.user_id === userId)
+  if (filterOp) rows = rows.filter(r => r.operation_type === filterOp)
+  if (filterSubmitStart) rows = rows.filter(r => (r.submit_date ?? '') >= filterSubmitStart)
+  if (filterSubmitEnd) rows = rows.filter(r => (r.submit_date ?? '') <= filterSubmitEnd)
 
-  // site_tracking_records keeps one row per claim per tracking day forever, so a
-  // fixed LIMIT eventually truncates any long-lived group (verified 2026-07-29:
-  // one group already had 3441 rows against the old 2000 cap). Counting first
-  // and sizing a .limit() off that count does NOT actually fix this — Supabase/
-  // PostgREST on this project hard-caps every single request at 3000 rows
-  // regardless of what .limit()/.range() asks for (found 2026-08-06 while
-  // debugging the same pattern in the rules-center research tasks route: a
-  // .limit(2700000)-style call still silently came back with exactly 3000 rows).
-  // The only real fix is pagination — fetchAllRows loops with .range() until a
-  // page comes back short, which actually retrieves every row no matter the count.
-  const trackRows = await fetchAllRows<TrackRow>((from, to) => {
-    let trackQuery = service
-      .from('site_tracking_records')
-      .select('id, claim_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submit_date, record_date, is_indexed, index_first_seen, index_disappeared, rank_keyword, rank_position, prev_rank_position, rank_volume, rank_date, effectiveness')
-      .eq('group_id', groupId)
-      .order('record_date', { ascending: false })
-      .order('submit_date', { ascending: false })
-      .order('id', { ascending: true })
-      .range(from, to)
-    return applyTrackFilters(trackQuery)
-  })
-
-  type TrackRow = {
-    id: string; claim_id: string; user_id: string
-    keyword: string; final_keyword: string | null
-    page_url: string | null; operation_type: string | null
-    search_volume: number; submit_date: string; record_date: string
-    is_indexed: boolean; index_first_seen: string | null; index_disappeared: string | null
-    rank_keyword: string | null; rank_position: number | null; prev_rank_position: number | null
-    rank_volume: number; rank_date: string | null; effectiveness: string
-  }
-
-  // Deduplicate: keep only the latest record per claim (rows already sorted record_date DESC)
-  const seen = new Set<string>()
-  const dedupedRows = ((trackRows || []) as TrackRow[]).filter(r => {
-    if (seen.has(r.claim_id)) return false
-    seen.add(r.claim_id)
-    return true
-  })
-
-  // Fetch source for deduped claim_ids (batched to avoid URL length limits —
-  // UUIDs are fixed-width so 200/batch is safe here, unlike the CJK-keyword
-  // case elsewhere in this codebase).
-  const claimIds = dedupedRows.map(r => r.claim_id)
-  const claimSourceMap = new Map<string, string | null>()
-  const BATCH = 200
-  for (let i = 0; i < claimIds.length; i += BATCH) {
-    const { data: claimMeta } = await service
-      .from('member_claimed_keywords')
-      .select('id, source')
-      .in('id', claimIds.slice(i, i + BATCH))
-    for (const c of (claimMeta ?? []) as { id: string; source: string | null }[]) {
-      claimSourceMap.set(c.id, c.source)
-    }
-  }
-
-  // Fetch every matched rank keyword for the full filtered set (not just the
-  // page being returned) — "排名"/"排名量" now sort by the best position and
-  // summed volume across ALL of a claim's matched keywords, not the single
-  // "best pick" scalar columns, so we need the whole picture before sorting.
-  // The same map is reused below to attach matches to the paginated response,
-  // so this isn't a second query on top of the per-page one.
-  type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
-  const rankMatchesMap = new Map<string, RankMatch[]>()
-  for (let i = 0; i < claimIds.length; i += BATCH) {
-    const { data: matchRows } = await service
-      .from('site_tracking_rank_matches')
-      .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
-      .in('claim_id', claimIds.slice(i, i + BATCH))
-      .order('rank_position', { ascending: true, nullsFirst: false })
-    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
-      const key = `${m.claim_id}|${m.record_date}`
-      if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
-      rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
-    }
-  }
-
-  // "更新"型claim的增量评分需要知道一个URL是不是"真新排名"（历史上从没排过
-  // 名 vs 这条claim刚开始追踪、还没攒够前一天数据）——只对 prev_rank_position
-  // 为null的"更新"行查（有真实prev_rank_position的已经证明不是新的）。这是
-  // 唯一在这个接口做完整精确版历史查询的地方，月度汇总/规则中心等次要页面
-  // 用简化版（直接当非提升处理，不查历史）。
-  const urlsNeedingHistory = dedupedRows
-    .filter(r => r.operation_type === '更新' && r.prev_rank_position == null && r.page_url)
-    .map(r => r.page_url as string)
-  const firstRankedDates = await fetchFirstRankedDates(service, urlsNeedingHistory)
-
-  let rows = dedupedRows.map(r => {
-    const matches = rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? []
-    const matchedPositions = matches.map(m => m.rank_position).filter((p): p is number => p != null)
-    // Best (lowest = highest-ranking) position across every matched keyword,
-    // falling back to the single scalar rank_position for rows predating this
-    // table. No rank at all sorts as worst regardless of direction.
-    const bestRankPosition = matchedPositions.length > 0 ? Math.min(...matchedPositions) : r.rank_position
-    // Sum of volume across every matched keyword, not just the one "best pick".
-    const totalRankVolume = matches.length > 0 ? matches.reduce((s, m) => s + (m.volume || 0), 0) : (r.rank_volume ?? 0)
-    // A page can't rank in search without being indexed — if site_keyword_ranks
-    // found a rank_position, it's indexed even when our own site_indexed_pages
-    // crawl hasn't caught it yet (separate crawl, can lag/miss coverage). Only
-    // overridden here at read time (2026-07-29), not at write time, so this
-    // self-heals for historical rows too without a backfill.
-    const isIndexed = r.is_indexed || r.rank_position != null
-    const rankChange = (r.rank_position != null && r.prev_rank_position != null)
-      ? r.prev_rank_position - r.rank_position
-      : null
-
-    // 这一行的URL是不是"真新排名"——只对 prev_rank_position 为null的行有意义。
-    const firstRankedDate = r.page_url ? firstRankedDates.get(bareUrl(r.page_url)) : undefined
-    const isNewRank = r.prev_rank_position == null && (firstRankedDate == null || firstRankedDate >= r.submit_date)
-
-    let score: number
-    let updateEffectBreakdown: UpdateEffectBreakdown | null = null
-    if (r.operation_type === '更新') {
-      updateEffectBreakdown = explainUpdateEffectScore({
-        rankPos: r.rank_position, prevRankPos: r.prev_rank_position, rankVolume: r.rank_volume,
-        isIndexed, indexFirstSeen: r.index_first_seen, submitDate: r.submit_date, isNewRank,
-      })
-      score = updateEffectBreakdown.total
-    } else {
-      // Same inputs the frontend's per-row "得分" cell uses (raw scalar
-      // rank_position/rank_volume, not bestRankPosition/totalRankVolume) —
-      // sorting has to match what's actually displayed.
-      score = computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume)
-    }
-
-    // 排名列每一个匹配到的排名词，各自判断是不是"真新"（跟行级共用同一个URL
-    // 的历史查询结果——同一个URL下的所有匹配词天然共享同一份"这个URL是不是
-    // 老URL"的历史)，只有 prev_rank_position 为null的那个匹配才可能是"新"。
-    const matchesWithNewFlag = matches.map(m => ({
-      ...m,
-      isNewRank: r.operation_type === '更新' && m.prev_rank_position == null && isNewRank,
-    }))
-
-    return {
-      ...r,
-      is_indexed: isIndexed,
-      username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
-      rank_change: rankChange,
-      env_excluded: badDates.has(r.record_date),
-      source: claimSourceMap.get(r.claim_id) ?? null,
-      bestRankPosition, totalRankVolume,
-      score, updateEffectBreakdown,
-      _matchesWithNewFlag: matchesWithNewFlag,
-    }
-  })
-
-  // Post-fetch filters (everything except the member filter — see the comment
-  // on applyTrackFilters above for why member narrowing happens after this).
+  // Post-fetch filters (everything except the member filter — member narrowing
+  // happens after groupSummary is computed, same as before).
   if (filterEffectiveness)   rows = rows.filter(r => r.effectiveness === filterEffectiveness)
   if (filterKw)              rows = rows.filter(r => r.keyword.toLowerCase().includes(filterKw) || (r.final_keyword ?? '').toLowerCase().includes(filterKw))
   if (filterIndex === 'has') rows = rows.filter(r => r.is_indexed)
@@ -262,7 +90,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   // Sort
   const dir = sortDir === 'asc' ? 1 : -1
-  rows.sort((a, b) => {
+  rows = [...rows].sort((a, b) => {
     switch (sortBy) {
       case 'search_volume': return dir * ((a.search_volume ?? 0) - (b.search_volume ?? 0))
       case 'rank_position': {
@@ -282,9 +110,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   })
 
   // Summary and pilot stats are computed over the full filtered set (every page
-  // combined), not just the page being returned — the browser only ever
-  // receives one page of raw rows below, but these aggregates still need to
-  // reflect everything so they don't silently shift as more history accumulates.
+  // combined), not just the page being returned.
   const summary = {
     total:         rows.length,
     rankedCount:   rows.filter(r => r.effectiveness === '获取排名').length,
@@ -296,19 +122,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const totalRows = rows.length
   const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
 
-  // matchesWithNewFlag was already attached per row above (needed for the
-  // isNewRank "真新排名" flag on each matched keyword) — reuse it here
-  // instead of re-deriving from rankMatchesMap.
-  const pagedRowsWithMatches = pagedRows.map(r => {
-    const { _matchesWithNewFlag, ...rest } = r
-    return { ...rest, rank_matches: _matchesWithNewFlag }
-  })
-
-  // fetchAllRows pages through .range() until a page comes back short, so
-  // truncation is no longer structurally possible (a fetch error throws and
-  // 500s instead of silently returning a partial set).
   return NextResponse.json({
-    rows: pagedRowsWithMatches, summary, groupSummary, totalRows, page, pageSize,
+    rows: pagedRows, summary, groupSummary, totalRows, page, pageSize,
     truncated: false,
   })
 }

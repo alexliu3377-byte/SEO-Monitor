@@ -1,0 +1,28 @@
+name: Group Tracking Cache Refresh
+
+on:
+  schedule:
+    - cron: '5 0 * * *'  # 08:05 MYT（tracking抓取06:45、环境快照07:15都跑完之后）
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call tracking-cache refresh API
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl -sf \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/tracking-cache/refresh")
+          echo "$RESPONSE"
+          SUCCESS=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('success',''))")
+          if [ "$SUCCESS" = "True" ]; then
+            echo "Group tracking cache refreshed successfully"
+          else
+            echo "ERROR: API returned failure for one or more groups"
+            exit 1
+          fi

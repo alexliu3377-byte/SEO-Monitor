@@ -275,6 +275,19 @@ CREATE TABLE IF NOT EXISTS monthly_trend_cache (
   computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 2026-08-18：分组报告"成效追踪"/"追踪汇总"背后的重计算结果缓存——group_id
+-- 是主键，一个分组一行，payload 是这个分组全部claim的"增强行"数组（已按
+-- claim_id去重取最新、带算好的分数），由 GitHub Actions
+-- （group-tracking-cache.yml，每天08:05 MYT）调 /api/tracking-cache/refresh
+-- 算好写入；两个接口只读这张表，不再现场对 site_tracking_records 做全量
+-- 扫描+批量查询。跟 hot_radar_cache 是同一套思路（见 lib/group-tracking-
+-- cache.ts 头部注释）。
+CREATE TABLE IF NOT EXISTS group_tracking_cache (
+  group_id    UUID PRIMARY KEY REFERENCES task_groups(id) ON DELETE CASCADE,
+  payload     JSONB NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- get_hot_rank_words 含 rank_days（涨排次数 = 不同日期数）
 -- DROP FUNCTION get_hot_rank_words(text);
 -- CREATE FUNCTION public.get_hot_rank_words(p_since text)

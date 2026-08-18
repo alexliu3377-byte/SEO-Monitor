@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { fetchAllRows } from '@/lib/supabase-paginate'
+import { computeGroupTrackingPayload, type EnrichedTrackRow, type RankMatchWithFlag } from '@/lib/group-tracking-cache'
 import {
-  currentMonth, monthRange, dedupeByClaim, fetchClaimSourceMap, fetchRankMatches,
-  fetchBadDates, computeSourceEffectiveness, effectiveMatchesForClaim, computeRowScore, RANK_BUCKETS,
-  type TrackRow, type RankMatch, type SourceEffectivenessEntry,
+  currentMonth, monthRange, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
+  type RankMatch, type SourceEffectivenessEntry,
 } from '@/lib/tracking-summary'
+
+export const maxDuration = 60
 
 interface MemberSummary {
   userId: string
@@ -21,10 +22,8 @@ interface MemberSummary {
 }
 
 function buildSummary(
-  rows: TrackRow[],
-  claimSourceMap: Map<string, string | null>,
+  rows: EnrichedTrackRow[],
   matchesByClaim: Map<string, RankMatch[]>,
-  badDates: Set<string>,
   userId: string,
   username: string
 ): MemberSummary {
@@ -33,13 +32,14 @@ function buildSummary(
   const indexedBySource = new Map<string, number>()
   let rankedTotal = 0
   const buckets = RANK_BUCKETS.map(b => ({ label: b.label, count: 0, volume: 0, bySource: new Map<string, number>() }))
-  // 得分口径要跟成效追踪表格里逐条的"得分"列完全一致（同一个 computeOutcomeScore,
-  // 同样排除环境异常日）——这里是累加总和，不是平均值，用户明确要"得分总数"。
+  // 得分口径要跟成效追踪表格里逐条的"得分"列完全一致——2026-08-18 起两边
+  // 都直接读缓存里已经算好的精确分（带"真新排名"历史查询的那版本），不再
+  // 用简化版 computeRowScore 现场估算，两个页面数字终于对得上。
   let scoreTotal = 0
 
   for (const r of rows) {
     submittedTotal++
-    const src = claimSourceMap.get(r.claim_id) ?? '未知'
+    const src = r.source ?? '未知'
     if (r.effectiveness === '获取收录') {
       indexedCount++
       indexedVolume += r.search_volume || 0
@@ -56,9 +56,7 @@ function buildSummary(
         target.bySource.set(src, (target.bySource.get(src) ?? 0) + 1)
       }
     }
-    if (!badDates.has(r.record_date)) {
-      scoreTotal += computeRowScore(r.rank_position, r.prev_rank_position, r.rank_volume, r.is_indexed, r.operation_type, r.submit_date, r.index_first_seen)
-    }
+    if (!r.env_excluded) scoreTotal += r.score
   }
 
   const bucketsOut = buckets.map(b => ({
@@ -116,28 +114,31 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     else scopeUserId = requestedMemberId
   }
 
-  // Always fetch the whole group's rows unfiltered — group-wide source
-  // effectiveness is shown to everyone regardless of role (it's aggregated
-  // by source, not by member, so it doesn't expose individual identities),
-  // and reusing this same set avoids a second round-trip for whichever
-  // scope ends up selected.
-  // Supabase/PostgREST 在这个项目上单次查询硬截到3000行，不管 .limit() 传多大——
-  // count-then-limit 治标不治本，改用 fetchAllRows 真分页（见 lib/supabase-paginate.ts）。
-  const rawRows = await fetchAllRows<TrackRow>((from, to) => service
-    .from('site_tracking_records')
-    .select('claim_id, user_id, operation_type, submit_date, record_date, search_volume, rank_position, prev_rank_position, rank_volume, is_indexed, index_first_seen, effectiveness')
-    .eq('group_id', groupId).gte('submit_date', start).lte('submit_date', end)
-    .order('record_date', { ascending: false }).order('id', { ascending: true })
-    .range(from, to))
+  // 2026-08-18：这个接口原来的"实时查site_tracking_records当月部分+批量查
+  // 认领来源/排名匹配词/环境异常日"那一套很重，改成读跟"成效追踪"共用的
+  // group_tracking_cache（GitHub Actions 每天08:05 MYT算好写入，见
+  // lib/group-tracking-cache.ts）。缓存本身是这个分组的全量历史（不分月），
+  // 这里按 submit_date 落在当月区间筛——submit_date 是claim级别固定值，
+  // 缓存已经是"每个claim取最新一行"，按它筛不需要再去重一次。
+  const { data: cached } = await service
+    .from('group_tracking_cache').select('payload').eq('group_id', groupId).maybeSingle()
+  let allRows: EnrichedTrackRow[]
+  if (cached?.payload) {
+    allRows = cached.payload as EnrichedTrackRow[]
+  } else {
+    allRows = await computeGroupTrackingPayload(service, groupId)
+    await service.from('group_tracking_cache').upsert({ group_id: groupId, payload: allRows, computed_at: new Date().toISOString() })
+  }
+  const rows = allRows.filter(r => r.submit_date >= start && r.submit_date <= end)
 
-  const rows = dedupeByClaim(rawRows)
-  const claimIds = rows.map(r => r.claim_id)
-  const [claimSourceMap, badDates] = await Promise.all([
-    fetchClaimSourceMap(service, claimIds),
-    fetchBadDates(service),
-  ])
-  const rankedClaimIds = rows.filter(r => r.effectiveness === '获取排名').map(r => r.claim_id)
-  const matchesByClaim = await fetchRankMatches(service, rankedClaimIds)
+  // matchesByClaim/claimSourceMap/badDates 原来是单独查询得到的，现在直接从
+  // 缓存行本身派生（每行已经带 source/rank_matches/env_excluded）——
+  // effectiveMatchesForClaim 还是复用 lib/tracking-summary.ts 里那个既有函数
+  // （没排名匹配记录时回退到单条scalar字段），只是它要的 Map 现在从缓存行
+  // 现场拼一份，不用再查 site_tracking_rank_matches 表。
+  const matchesByClaim = new Map<string, RankMatch[]>(
+    rows.map(r => [`${r.claim_id}|${r.record_date}`, r.rank_matches as RankMatchWithFlag[]])
+  )
 
   const scopeRows = scope === 'own' ? rows.filter(r => r.user_id === user.id)
     : scope === 'total' ? rows
@@ -148,27 +149,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     : scope === 'total' ? '全组汇总'
     : (usernameOf.get(scopeUserId) ?? scopeUserId.slice(0, 8))
 
-  const summary = buildSummary(scopeRows, claimSourceMap, matchesByClaim, badDates, scopeUserIdOut, scopeUsername)
-  const groupSummary = scope === 'total' ? summary : buildSummary(rows, claimSourceMap, matchesByClaim, badDates, groupId, '全组汇总')
-  const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, claimSourceMap)
+  const summary = buildSummary(scopeRows, matchesByClaim, scopeUserIdOut, scopeUsername)
+  const groupSummary = scope === 'total' ? summary : buildSummary(rows, matchesByClaim, groupId, '全组汇总')
+  const groupSourceEffectiveness: SourceEffectivenessEntry[] = computeSourceEffectiveness(rows, new Map(rows.map(r => [r.claim_id, r.source])))
   const scopeSourceEffectiveness: SourceEffectivenessEntry[] = scope === 'total'
     ? groupSourceEffectiveness
-    : computeSourceEffectiveness(scopeRows, claimSourceMap)
+    : computeSourceEffectiveness(scopeRows, new Map(scopeRows.map(r => [r.claim_id, r.source])))
 
-  // 全组排名（2026-08-04 请求，替换掉原来的4张统计卡片）：给每个组员（哪怕这个月
-  // 一条提交都没有）都算一份汇总，按得分从高到低排名。排名和姓名对所有组员可见
-  // （2026-08-04 二次调整：一开始做成非管理员只能看自己那一条，用户改成"能看到
-  // 其他人的排名，只是不能看到其它人的资料"），但具体数字（提交数/获取排名/
-  // 获取收录/得分）只对本人和管理员暴露——这个屏蔽在接口层做，不是前端隐藏，
-  // 避免绕过UI直接读接口拿到其他组员的具体数字；全组汇总同理，非管理员的响应
-  // 里完全不含 groupSummary。
-  const rowsByUser = new Map<string, TrackRow[]>()
+  // 全组排名：给每个组员（哪怕这个月一条提交都没有）都算一份汇总，按得分
+  // 从高到低排名。排名和姓名对所有组员可见，但具体数字只对本人和管理员
+  // 暴露——这个屏蔽在接口层做，不是前端隐藏。
+  const rowsByUser = new Map<string, EnrichedTrackRow[]>()
   for (const r of rows) {
     if (!rowsByUser.has(r.user_id)) rowsByUser.set(r.user_id, [])
     rowsByUser.get(r.user_id)!.push(r)
   }
   const fullRanking = memberList
-    .map(m => buildSummary(rowsByUser.get(m.user_id) ?? [], claimSourceMap, matchesByClaim, badDates, m.user_id, usernameOf.get(m.user_id)!))
+    .map(m => buildSummary(rowsByUser.get(m.user_id) ?? [], matchesByClaim, m.user_id, usernameOf.get(m.user_id)!))
     .sort((a, b) => b.totalScore - a.totalScore)
     .map((s, i) => ({ rank: i + 1, summary: s }))
   const ranking = fullRanking.map(({ rank, summary: s }) => {
