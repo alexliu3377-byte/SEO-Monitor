@@ -17,7 +17,7 @@ on:
         required: false
         default: ''
   schedule:
-    - cron: '30 15 * * *'  # 23:30 MYT (target ~00:30 MYT after ~1h queue) — keywords
+    - cron: '5 16 * * *'  # 00:05 MYT (target ~01:05 MYT after ~1h queue) — keywords
     - cron: '30 16 * * *'  # 00:30 MYT (target ~01:30 MYT after ~1h queue) — weight
     - cron: '30 17 * * *'  # 01:30 MYT (target ~02:30 MYT after ~1h queue) — rank
     - cron: '30 18 * * *'  # 02:30 MYT — rank-title
@@ -48,7 +48,7 @@ jobs:
             # 根据 step 决定每组站点上限
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               STEP="${{ github.event.inputs.step }}"
-            elif [ "${{ github.event.schedule }}" = "30 15 * * *" ]; then
+            elif [ "${{ github.event.schedule }}" = "5 16 * * *" ]; then
               STEP="keywords"
             elif [ "${{ github.event.schedule }}" = "30 16 * * *" ]; then
               STEP="weight"
@@ -123,7 +123,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             STEP="${{ github.event.inputs.step }}"
-          elif [ "${{ github.event.schedule }}" = "30 15 * * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "5 16 * * *" ]; then
             STEP="keywords"
           elif [ "${{ github.event.schedule }}" = "30 16 * * *" ]; then
             STEP="weight"

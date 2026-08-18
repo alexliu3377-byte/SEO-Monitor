@@ -18,9 +18,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'keywords',
     title: '关键词抓取',
-    badge: 'step=keywords · GitHub Actions · 目标 00:30 MYT（cron 23:30 MYT + 排队约 1h）',
+    badge: 'step=keywords · GitHub Actions · 目标 01:05 MYT（cron 00:05 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 15 * * * UTC = 23:30 MYT 前一天)，动态 matrix job 并行（每5个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约5个站点；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队约1小时，实际执行约 00:30 MYT。失败/空站由 retry-crawl.yml (cron 30 20 UTC = 04:30 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每5个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约5个站点；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟），实际执行时间约 00:30-01:30 MYT 之间。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。失败/空站由 retry-crawl.yml (cron 30 20 UTC = 04:30 MYT) 自动补抓' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 list_url 已填写的站点；is_enabled 由用户在网站管理"关键词数据"开关控制，关闭后跳过关键词抓取但权重/排名照常运行' },
       { label: '文章链接抓取', text: '各来源可在"文章链接CSS选择器"（url_selectors 字段，||| 分隔多来源）填写指定 CSS 选择器；填写后爬虫用该选择器在每条记录的容器内查找 <a> 元素并写入 raw_keywords.source_url；留空则 source_url 为 null；支持完整URL和相对路径（相对路径自动补全域名）' },
       { label: '频率规则', text: '所有站点均为 daily（每天）' },
