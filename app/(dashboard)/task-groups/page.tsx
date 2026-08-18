@@ -2666,8 +2666,8 @@ export default function TaskGroupsPage() {
                                 prev.has(k.id) ? new Set<string>() : new Set<string>([k.id])
                               )}
                             >
-                              {isViewingOwn && k.status === 'pending' ? (
-                                <button onClick={e => { e.stopPropagation(); dismissClaimed(k.id) }} className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-sm leading-none">×</button>
+                              {isViewingOwn && (k.status === 'pending' || k.status === 'submitted') ? (
+                                <button onClick={e => { e.stopPropagation(); dismissClaimed(k.id) }} className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-sm leading-none" title={k.status === 'submitted' ? '移除这条已提交的记录（分组认领错了/提交错了都可以用这个撤掉）' : '移除'}>×</button>
                               ) : (
                                 <span className={`flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs ${k.status !== 'pending' ? 'text-green-400' : ''}`}>{k.status !== 'pending' ? '✓' : ''}</span>
                               )}
