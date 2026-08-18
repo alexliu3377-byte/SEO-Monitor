@@ -224,13 +224,11 @@ export default function DashboardPage() {
         for (let i = 1; i <= 7; i++) {
           const checkDate = getMY(-i)
           const status = computeKwStatus(ss, checkDate)
-          // 2026-08-17 用户反馈"新增变动"信息还是太多——"我不是很在乎他们的
-          // 新增变动，只是看下有什么异常而已"：新增量偏高基本不算异常（内容
-          // 发得比平时多，不是问题），只有偏低（可能是站点出问题、更新停了）
-          // 才值得在首页快报提醒。只改首页这个卡片，lib/kw-status.ts 和
-          // "竞品日收"页面共用同一份 computeKwStatus，都没动——竞品日收那边
-          // 偏高对判断竞品动向还有参考价值，不该跟着一起砍掉。
-          if (status === 'warning') kAlerts.push({ site_id: s.id, domain: s.domain, status, date: checkDate })
+          // 2026-08-17 曾经只保留偏低（"不在乎新增变动，只想看异常"），当天
+          // 又反悔要把偏高加回来——两个都要提醒。真正用来控制"信息太多"的是
+          // lib/kw-status.ts 的 SPREAD_MULTIPLIER（阈值本身，同一天已经从
+          // 2.5调到4）和这里的7天回看窗口，不是靠砍掉某一档状态。
+          if (status !== 'normal') kAlerts.push({ site_id: s.id, domain: s.domain, status, date: checkDate })
         }
       }
       kAlerts.sort((a, b) => {
