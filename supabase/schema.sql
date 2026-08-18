@@ -138,6 +138,15 @@ $$;
 -- （非当月）算完一次就存进缓存表，之后同一个月直接读缓存，不用重算；只有
 -- 还在变动的当月每次都会重新调这几个函数（现在很快，不再是瓶颈）。
 CREATE INDEX IF NOT EXISTS idx_rank_changes_stat_date ON rank_changes(stat_date);
+-- 2026-08-17：rank_changes 已经涨到175万行（保留策略从30天改成永久保留后
+-- 只会持续增长），get_hot_rank_words/get_hot_streak_words 这两个RPC自己的
+-- 注释就写着"单次要跑约15秒"，而 statement_timeout 只有20秒，余量很薄——
+-- 已经因为这个原因出过一次超时报错被静默吞掉、缓存被空结果覆盖的真实事故
+-- （见 lib/hot-radar.ts 的 failedSections 处理）。单列的 stat_date 索引只能
+-- 缩小日期范围内的初始扫描，GROUP BY keyword/关联 sites 那步还是要处理
+-- 全部命中的行；加一列 keyword 进复合索引，让常见的"某段日期+按keyword聚合"
+-- 查询模式能更多地走索引，减少参与聚合的行数，给超时留出更多余量。
+CREATE INDEX IF NOT EXISTS idx_rank_changes_stat_date_keyword ON rank_changes(stat_date, keyword);
 
 CREATE OR REPLACE FUNCTION monthly_rank_change_top(p_start date, p_end date, p_type text, p_limit int DEFAULT 100)
 RETURNS TABLE(keyword text, volume bigint, domains text[])
