@@ -1,3 +1,12 @@
+-- 2026-08-17：这份文件不是当前数据库的完整/权威schema——早期表建好后，
+-- 后续加的不少表（member_claimed_keywords、site_keyword_ranks、
+-- site_tracking_records、competitor_tracking_records、environment_daily、
+-- user_profiles 等，数量比这个文件里已有的还多）都是直接在 Supabase
+-- Dashboard 建的，没有回填进这里。改数据库结构以 Dashboard 实际状态为准，
+-- 不要假设这个文件列全了。这里先按需补上了 member_rec_dismissals/
+-- hot_radar_cache 这两张这次分析时用到的表（真实字段用 REST API 直接对
+-- 生产库核实过），完整补全是更大的单独任务，没有一起做。
+
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -295,4 +304,28 @@ CREATE TABLE IF NOT EXISTS task_group_members (
   user_id   UUID NOT NULL,
   username  TEXT,
   PRIMARY KEY (group_id, user_id)
+);
+
+-- 今日推荐"×"移除记录——同一个组员对同一个词只保留一条（永久移除时
+-- dismissed_at 写一个远未来哨兵时间，见 app/(dashboard)/task-groups/page.tsx
+-- 的 dismissRec；字段用 REST API 对生产库核实过，2026-08-17 补进这个文件）。
+CREATE TABLE IF NOT EXISTS member_rec_dismissals (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id     UUID NOT NULL REFERENCES task_groups(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL,
+  keyword      TEXT NOT NULL,
+  dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (group_id, user_id, keyword)
+);
+CREATE INDEX IF NOT EXISTS idx_member_rec_dismissals_lookup ON member_rec_dismissals(group_id, user_id, dismissed_at);
+
+-- 热词雷达聚合结果缓存——单行（id='latest'），定时任务
+-- （hot-radar-cache.yml，每天08:00 MYT）算好写入，/api/hot-radar 只读这一行，
+-- 不再每次现场跑 get_hot_new_words/get_hot_rank_words/get_hot_streak_words
+-- 三个RPC（见 lib/hot-radar.ts 头部注释）。字段用 REST API 对生产库核实过，
+-- 2026-08-17 补进这个文件。
+CREATE TABLE IF NOT EXISTS hot_radar_cache (
+  id           TEXT PRIMARY KEY,
+  payload      JSONB NOT NULL,
+  computed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
