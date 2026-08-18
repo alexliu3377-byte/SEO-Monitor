@@ -600,54 +600,43 @@ export default function DashboardPage() {
                   .filter(s => g.test(s.domain))
                   .sort((a, b) => a.domain.localeCompare(b.domain))
                 if (groupSites.length === 0) return null
-                // 站点多了以后一整行胶囊堆在一起太密——每个字母范围拆成左右
-                // 两栏（2026-08-18 用户要求"a-m两个/n-z两个/0-9两个"，均匀
-                // 分成两栏，不是拆内容），按排序后的顺序对半分，左栏排前半、
-                // 右栏排后半，字母顺序读下来还是连续的。
-                const mid = Math.ceil(groupSites.length / 2)
-                const columns = [groupSites.slice(0, mid), groupSites.slice(mid)]
-                const renderPill = (s: Site) => {
-                  const color = siteColor(activeCategory, s.id)
-                  const isActive = activeSelected.length === 0 || activeSelected.includes(s.id)
-                  const w = latestWeightMap.get(s.id)
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => toggleSite(s.id)}
-                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        activeSelected.includes(s.id)
-                          ? 'border-transparent text-white font-medium'
-                          : activeSelected.length > 0
-                            ? 'border-gray-200 text-gray-400 hover:text-gray-600'
-                            : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                      }`}
-                      style={activeSelected.includes(s.id) ? { backgroundColor: color } : {}}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: isActive ? color : '#d1d5db' }}
-                      />
-                      <span className="flex flex-col items-start leading-tight">
-                        <span>{s.domain}</span>
-                        {w && (
-                          <span className={`text-[10px] ${activeSelected.includes(s.id) ? 'text-white/70' : 'text-gray-400'}`}>
-                            PC{w.pc} · M{w.mobile}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  )
-                }
                 return (
                   <div key={g.label} className="flex items-start gap-3">
                     <span className="text-xs text-gray-400 font-mono w-8 flex-shrink-0 pt-1.5">{g.label}</span>
                     <div className="w-px self-stretch bg-gray-200 flex-shrink-0" />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 flex-1">
-                      {columns.map((col, i) => (
-                        <div key={i} className="flex flex-wrap content-start gap-2">
-                          {col.map(renderPill)}
-                        </div>
-                      ))}
+                    <div className="flex flex-wrap gap-2">
+                      {groupSites.map(s => {
+                        const color = siteColor(activeCategory, s.id)
+                        const isActive = activeSelected.length === 0 || activeSelected.includes(s.id)
+                        const w = latestWeightMap.get(s.id)
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => toggleSite(s.id)}
+                            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                              activeSelected.includes(s.id)
+                                ? 'border-transparent text-white font-medium'
+                                : activeSelected.length > 0
+                                  ? 'border-gray-200 text-gray-400 hover:text-gray-600'
+                                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                            }`}
+                            style={activeSelected.includes(s.id) ? { backgroundColor: color } : {}}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: isActive ? color : '#d1d5db' }}
+                            />
+                            <span className="flex flex-col items-start leading-tight">
+                              <span>{s.domain}</span>
+                              {w && (
+                                <span className={`text-[10px] ${activeSelected.includes(s.id) ? 'text-white/70' : 'text-gray-400'}`}>
+                                  PC{w.pc} · M{w.mobile}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                 )
