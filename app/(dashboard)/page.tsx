@@ -224,7 +224,13 @@ export default function DashboardPage() {
         for (let i = 1; i <= 7; i++) {
           const checkDate = getMY(-i)
           const status = computeKwStatus(ss, checkDate)
-          if (status !== 'normal') kAlerts.push({ site_id: s.id, domain: s.domain, status, date: checkDate })
+          // 2026-08-17 用户反馈"新增变动"信息还是太多——"我不是很在乎他们的
+          // 新增变动，只是看下有什么异常而已"：新增量偏高基本不算异常（内容
+          // 发得比平时多，不是问题），只有偏低（可能是站点出问题、更新停了）
+          // 才值得在首页快报提醒。只改首页这个卡片，lib/kw-status.ts 和
+          // "竞品日收"页面共用同一份 computeKwStatus，都没动——竞品日收那边
+          // 偏高对判断竞品动向还有参考价值，不该跟着一起砍掉。
+          if (status === 'warning') kAlerts.push({ site_id: s.id, domain: s.domain, status, date: checkDate })
         }
       }
       kAlerts.sort((a, b) => {
