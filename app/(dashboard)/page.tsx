@@ -431,7 +431,7 @@ export default function DashboardPage() {
       {/* ── Alert Cards ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
 
-        <AlertCard title="权重变动" count={weightChanges.length} color="red" empty="暂无权重变动">
+        <AlertCard title="权重变动" count={weightChanges.length} badgeCount={weightChanges.filter(w => w.date === getMY()).length} color="red" empty="暂无权重变动">
           {weightChanges.map((w, i) => {
             const isRecent = w.date === getMY()
             return (
@@ -499,6 +499,7 @@ export default function DashboardPage() {
         <AlertCard
           title="新增变动"
           count={kwAlerts.length}
+          badgeCount={kwAlerts.filter(a => a.date === getMY(-1)).length}
           color="yellow"
           empty="各站新增正常"
         >
@@ -1704,10 +1705,15 @@ const PALETTE = {
 }
 
 function AlertCard({
-  title, count, color, empty, children, action,
+  title, count, badgeCount, color, empty, children, action,
 }: {
   title: string
   count: number
+  // 角标数字默认就是 count（列表总条数）；权重变动/新增变动这两张卡要求角标
+  // 只显示某一天（今日/昨日）的数量，不是列表里7天累计的条数——传 badgeCount
+  // 单独覆盖显示的数字，count 还是继续控制"有没有内容可展开"这个判断，不然
+  // 今天/昨天刚好是0条时，会把本来有数据的整个列表也一起隐藏掉。
+  badgeCount?: number
   color: keyof typeof PALETTE
   empty: string
   children: ReactNode
@@ -1716,6 +1722,7 @@ function AlertCard({
   const c = PALETTE[color]
   const isPlaceholder = count < 0
   const hasAlerts = count > 0
+  const displayCount = badgeCount ?? count
 
   return (
     <div className={`rounded-xl border ${c.border} bg-white p-4 flex flex-col h-[272px]`}>
@@ -1726,7 +1733,7 @@ function AlertCard({
         </div>
         {action ?? (
           <span className={`text-xl font-bold ${c.count}`}>
-            {isPlaceholder ? '—' : count}
+            {isPlaceholder ? '—' : displayCount}
           </span>
         )}
       </div>
