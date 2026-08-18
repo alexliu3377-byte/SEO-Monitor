@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase-server'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
@@ -6,6 +7,12 @@ const UA =
 type HotItem = { rank: number; name: string; labels: string[] }
 
 export async function GET() {
+  // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
+  // 完全没做校验，无鉴权无限流地代理抓取第三方站点。
+  const authClient = createClient()
+  const { data: { user } } = await authClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   try {
     const res = await fetch('https://www.taptap.cn/top/download', {
       headers: {

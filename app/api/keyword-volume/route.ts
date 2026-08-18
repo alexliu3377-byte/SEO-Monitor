@@ -62,6 +62,7 @@ export async function GET(req: Request) {
         .from('keyword_volume')
         .select('keyword, volume, latest_trend')
         .order('volume', { ascending: false })
+        .order('keyword', { ascending: true })
         .range(offset, offset + batchSize - 1)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       if (!data || data.length === 0) break
@@ -84,6 +85,7 @@ export async function GET(req: Request) {
     .from('keyword_volume')
     .select('keyword, volume, latest_trend, volume_change')
     .order('volume', { ascending: false })
+    .order('keyword', { ascending: true })
     .range(offset, offset + PAGE_SIZE - 1)
   if (q) dataQuery = dataQuery.ilike('keyword', `%${q}%`)
 

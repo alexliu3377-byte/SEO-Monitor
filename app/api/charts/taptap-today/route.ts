@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase-server'
 
 const BASE = 'https://www.taptap.cn'
 const UA = 'V%3D1%26PN%3DWebApp%26LANG%3Dzh_CN%26VN_CODE%3D102%26LOC%3DCN%26PLT%3DPC%26DS%3DAndroid'
@@ -100,6 +101,12 @@ async function fetchUpcoming30Days(): Promise<ReturnType<typeof parseItem>[]> {
 }
 
 export async function GET() {
+  // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
+  // 完全没做校验，无鉴权无限流地代理抓取第三方站点。
+  const authClient = createClient()
+  const { data: { user } } = await authClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const [todayGames, upcomingGames, topEvents] = await Promise.all([
     fetchTodayGames(),
     fetchUpcoming30Days(),

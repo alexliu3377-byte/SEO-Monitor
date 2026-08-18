@@ -661,7 +661,11 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {users.map(user => (
+              {users.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="table-td text-center text-gray-400 py-10">暂无账号</td>
+                </tr>
+              ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-gray-100 transition-colors">
                   <td className="table-td">
                     <span className="font-medium text-gray-900">{user.username ?? <span className="text-gray-400 italic">未设置</span>}</span>

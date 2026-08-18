@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeHotRadarPayload } from '@/lib/hot-radar'
 
-export const revalidate = 300  // cache 5 min; hot-radar data only updates once a day (see refresh route)
 export const maxDuration = 60
 
 // 2026-08-11 起改成读 hot_radar_cache（由 .github/workflows/hot-radar-cache.yml
@@ -12,6 +11,9 @@ export const maxDuration = 60
 // 持续写入），单次2-8秒，用户反馈"热词雷达/分组任务每天打开都很慢"。
 // 缓存没命中（比如刚上线还没跑过定时任务）时现场算一次并顺手写回缓存，
 // 不会一直空着——但正常情况下每天只应该现场算这一次，其余请求都是缓存命中。
+// （之前这里还留了 export const revalidate = 300，但 handler 里调用了
+// auth.getUser() 读 cookie，Next.js 因此把这条路由判定成动态路由，路由级
+// revalidate 对动态路由不生效，是个死配置，删掉——真正的缓存靠上面这张表。）
 export async function GET() {
   const authCheck = createClient()
   const { data: { user } } = await authCheck.auth.getUser()

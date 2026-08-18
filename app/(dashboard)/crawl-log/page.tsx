@@ -261,6 +261,7 @@ export default function CrawlLogPage() {
   })
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Row 2 cards
   const [row2, setRow2] = useState<Row2Stats>({
@@ -280,6 +281,7 @@ export default function CrawlLogPage() {
   const [detailActivity, setDetailActivity] = useState<ActivityLog | null>(null)
   const [siteLogs, setSiteLogs] = useState<SiteLog[]>([])
   const [siteLogsLoading, setSiteLogsLoading] = useState(false)
+  const [siteLogsError, setSiteLogsError] = useState<string | null>(null)
   const [retryModal, setRetryModal] = useState<{ step: string; sites: SiteLog[] } | null>(null)
 
   // Card expand
@@ -291,15 +293,17 @@ export default function CrawlLogPage() {
     const supabase = getBrowserClient()
     const today = getMalaysiaToday()
     const { from, to } = getMytDayRange(today)
+    const errors: string[] = []
 
     // Cards row 1: cron_task + cron_manual
-    const { data: todayData } = await supabase
+    const { data: todayData, error: todayErr } = await supabase
       .from('activity_log')
       .select('*')
       .gte('logged_at', from)
       .lte('logged_at', to)
       .in('type', ['cron_task', 'cron_manual'])
       .order('logged_at', { ascending: false })
+    if (todayErr) errors.push(todayErr.message)
 
     const grouped: Record<string, ActivityLog[]> = { keywords: [], rank: [], weight: [] }
     for (const row of (todayData || []) as ActivityLog[]) {
@@ -308,29 +312,32 @@ export default function CrawlLogPage() {
     setTodayLogs(grouped)
 
     // Row 2 rank-title card: all has_rank_title sites, count those with data today
-    const { data: rtSitesRaw } = await supabase.from('sites').select('id').eq('has_rank_title', true)
+    const { data: rtSitesRaw, error: rtSitesErr } = await supabase.from('sites').select('id').eq('has_rank_title', true)
+    if (rtSitesErr) errors.push(rtSitesErr.message)
     const rtSiteIds = (rtSitesRaw || []).map((s: { id: string }) => s.id)
     const rtTotal = rtSiteIds.length
     let rtSucceeded = 0
     if (rtTotal > 0) {
-      const { data: rtToday } = await supabase
+      const { data: rtToday, error: rtTodayErr } = await supabase
         .from('site_keyword_ranks')
         .select('site_id')
         .eq('stat_date', today)
         .in('site_id', rtSiteIds)
+      if (rtTodayErr) errors.push(rtTodayErr.message)
       rtSucceeded = new Set((rtToday || []).map((r: { site_id: string }) => r.site_id)).size
     }
-    const { data: rtTs } = await supabase
+    const { data: rtTs, error: rtTsErr } = await supabase
       .from('site_keyword_ranks')
       .select('created_at')
       .eq('stat_date', today)
       .order('created_at', { ascending: false })
       .limit(1)
+    if (rtTsErr) errors.push(rtTsErr.message)
     const rtLoggedAt = (rtTs as { created_at: string }[] | null)?.[0]?.created_at ?? null
 
     // Row 2 card C: index-pages latest activity_log (last 2 days in case run was yesterday night)
     const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString()
-    const { data: ipLogs } = await supabase
+    const { data: ipLogs, error: ipLogsErr } = await supabase
       .from('activity_log')
       .select('*')
       .gte('logged_at', twoDaysAgo)
@@ -338,6 +345,7 @@ export default function CrawlLogPage() {
       .eq('type', 'cron_task')
       .order('logged_at', { ascending: false })
       .limit(1)
+    if (ipLogsErr) errors.push(ipLogsErr.message)
     const latestIndexPages = ((ipLogs || []) as ActivityLog[])[0] ?? null
 
     setRow2({
@@ -345,13 +353,17 @@ export default function CrawlLogPage() {
       indexPages: latestIndexPages,
     })
 
-    const { data: logsData } = await supabase
+    const { data: logsData, error: logsErr } = await supabase
       .from('activity_log')
       .select('*')
       .order('logged_at', { ascending: false })
       .limit(200)
+    if (logsErr) errors.push(logsErr.message)
 
     setLogs((logsData || []) as ActivityLog[])
+    // 这个页面本身是运维用来判断"抓取任务是否正常"的监控页——查询失败时
+    // 静默当成"今日暂无记录"处理会掩盖监控本身失效的事实，必须显式提示。
+    setFetchError(errors.length > 0 ? errors[0] : null)
     setLoading(false)
   }, [])
 
@@ -361,12 +373,14 @@ export default function CrawlLogPage() {
     setDetailActivity(activity)
     setSiteLogsLoading(true)
     setSiteLogs([])
+    setSiteLogsError(null)
     const supabase = getBrowserClient()
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('activity_site_log')
       .select('*')
       .eq('activity_id', activity.id)
       .order('logged_at', { ascending: true })
+    if (error) setSiteLogsError(error.message)
     setSiteLogs((data || []) as SiteLog[])
     setSiteLogsLoading(false)
   }
@@ -384,12 +398,13 @@ export default function CrawlLogPage() {
     const manualIds = manualLogs.map(l => l.id)
     const ids = [...mainIds, ...manualIds]
     if (ids.length === 0) return []
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('activity_site_log')
       .select('*')
       .in('activity_id', ids)
       .not('status', 'eq', 'skip')
       .order('logged_at', { ascending: false })
+    if (error) console.error('fetchProblemSites failed:', error.message)
     // Take latest status per domain, keep only still-problematic ones
     const latestPerDomain = new Map<string, SiteLog>()
     for (const log of (data || []) as SiteLog[]) {
@@ -500,6 +515,11 @@ export default function CrawlLogPage() {
         </button>
       </div>
 
+      {fetchError && !loading && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-600">
+          部分数据加载失败：{fetchError}
+        </div>
+      )}
       {loading ? (
         <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>
       ) : (
@@ -941,6 +961,8 @@ export default function CrawlLogPage() {
               )}
               {siteLogsLoading ? (
                 <div className="text-center text-gray-400 text-sm py-8">加载中…</div>
+              ) : siteLogsError ? (
+                <div className="text-center text-red-500 text-sm py-8">加载失败：{siteLogsError}</div>
               ) : siteLogs.length === 0 ? (
                 <div className="text-center text-gray-400 text-sm py-8">无站点明细记录</div>
               ) : (

@@ -67,7 +67,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { id } = await params
 
-  const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  // 项目里"近N天"统一按MYT（UTC+8）换算，避免边界附近少算/多算一天。
+  const since = new Date(Date.now() + 8 * 3600000 - 30 * 86400000).toISOString().slice(0, 10)
 
   const { data: rows, error } = await service
     .from('raw_keywords')

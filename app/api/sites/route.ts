@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { getUserProfile } from '@/lib/get-user-profile'
 
 async function getCallerRole(): Promise<string | null> {
   const supabase = createClient()
@@ -12,14 +13,15 @@ async function getCallerRole(): Promise<string | null> {
 }
 
 export async function GET() {
-  const role = await getCallerRole()
-  if (!role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const profile = await getUserProfile()
+  if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const supabase = createServiceClient()
-    const { data, error } = await supabase
-      .from('sites')
-      .select('*')
-      .order('created_at', { ascending: false })
+    let query = supabase.from('sites').select('*').order('created_at', { ascending: false })
+    // normal 角色只能看 accessibleSiteIds 范围内的站点（focus_level=3 或被
+    // user_site_access 授权）——之前只在前端过滤，接口本身没做同等限制。
+    if (profile.accessibleSiteIds) query = query.in('id', profile.accessibleSiteIds)
+    const { data, error } = await query
     if (error) throw error
     return NextResponse.json({ sites: data })
   } catch (err: unknown) {

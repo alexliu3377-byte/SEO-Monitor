@@ -255,9 +255,9 @@ export default function IndexMonitorPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.length === 0 ? (
+                {sortedVisible.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无收录数据</td>
+                    <td colSpan={6} className="table-td text-center text-gray-400 py-10">{rows.length === 0 ? '暂无收录数据' : '没有匹配的站点'}</td>
                   </tr>
                 ) : (
                   sortedVisible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((row) => {

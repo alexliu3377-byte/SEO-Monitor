@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import * as cheerio from 'cheerio'
 import * as iconv from 'iconv-lite'
 import { Element } from 'domhandler'
+import { createClient } from '@/lib/supabase-server'
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -147,6 +148,13 @@ async function fetchHotChart(): Promise<HaoyouHotItem[]> {
 }
 
 export async function GET() {
+  // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
+  // 完全没做校验，无鉴权无限流地代理抓取第三方站点，跟同目录其它图表接口的
+  // 设计意图（"要求登录"）不一致。
+  const authClient = createClient()
+  const { data: { user } } = await authClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const $ = await loadPage()
   if (!$) return NextResponse.json({ upcomingToday: [], upcoming: [], upcomingBaoliao: [], updates: [], hotItems: [] })
 
