@@ -16,13 +16,14 @@ function Spinner() {
   )
 }
 
-type TabKey = 'competitors' | 'diagnostic' | 'week' | 'month' | 'year'
+type TabKey = 'competitors' | 'diagnostic' | 'week' | 'month' | 'quarter' | 'year'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'competitors', label: '竞品成效' },
   { key: 'diagnostic', label: '站点诊断' },
   { key: 'week', label: '研究周报' },
   { key: 'month', label: '研究月报' },
+  { key: 'quarter', label: '研究季报' },
   { key: 'year', label: '研究年报' },
 ]
 
@@ -56,6 +57,7 @@ export default function ResearchPage() {
       {activeTab === 'diagnostic' && <SiteDiagnosticTab />}
       {activeTab === 'week' && <ReportTab key="week" periodType="week" />}
       {activeTab === 'month' && <ReportTab key="month" periodType="month" />}
+      {activeTab === 'quarter' && <ReportTab key="quarter" periodType="quarter" />}
       {activeTab === 'year' && <ReportTab key="year" periodType="year" />}
     </div>
   )
@@ -432,7 +434,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
 
 interface ReportListItem {
   id: string
-  period_type: 'week' | 'month' | 'year'
+  period_type: 'week' | 'month' | 'quarter' | 'year'
   period_start: string
   period_end: string
   status: 'running' | 'completed' | 'failed'
@@ -552,7 +554,7 @@ const PRIORITY_LABELS: Record<string, { label: string; bg: string; text: string 
 
 const CONFIDENCE_LABELS: Record<string, string> = { high: '高置信度', medium: '中置信度', low: '低置信度' }
 
-function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'year' }) {
+function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 'year' }) {
   const [reports, setReports] = useState<ReportListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)

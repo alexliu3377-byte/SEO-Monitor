@@ -20,6 +20,30 @@ export interface SiteResearchSummary {
   effectivenessRows: EffectivenessRow[]
 }
 
+export interface SiteTrendStats {
+  weightTrend: { record_date: string; pc_weight: number; mobile_weight: number; pc_ip: number; pc_ip_max: number; mobile_ip: number; mobile_ip_max: number }[]
+  indexTrend: { snapshot_date: string; index_count: number }[]
+}
+
+// 月/季/年报"逐层汇总"架构（2026-08-20 起）用——这两张源表（weight_history/
+// index_snapshots）按站点每天一行，体量小，不是 rank_changes/raw_keywords/
+// site_keyword_ranks 那种会被以后收紧保留期影响的大表，永久保留，可以放心
+// 为整年直接查询。只抽出 fetchSiteResearchSummary 里权重/收录这部分查询，
+// 供月/季/年报 Stage1 算 pc_weight/mobile_weight/avg_index_count/avg_mobile_ip
+// 这4个结构化数字用——月/季/年报不再调 fetchSiteResearchSummary 本体，因为
+// 那个函数还会读 rank_changes/site_keyword_ranks/raw_keywords，这三张表以后
+// 收紧保留期会让年报的整年查询被静默截断。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchSiteTrendStats(service: any, siteId: string, dateStart: string, dateEnd: string): Promise<SiteTrendStats> {
+  const [{ data: weightRows }, { data: indexRows }] = await Promise.all([
+    service.from('weight_history').select('record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+      .eq('site_id', siteId).gte('record_date', dateStart).lte('record_date', dateEnd).order('record_date'),
+    service.from('index_snapshots').select('snapshot_date, index_count')
+      .eq('site_id', siteId).gte('snapshot_date', dateStart).lte('snapshot_date', dateEnd).order('snapshot_date'),
+  ])
+  return { weightTrend: weightRows ?? [], indexTrend: indexRows ?? [] }
+}
+
 // 单站点研究任务详情页（app/api/rules/research-tasks/[id]/route.ts）和多站点研究
 // 报告（app/api/rules/multi-site-reports/[id]/analyze/route.ts）共用同一套
 // "拉这个站点这段时间已经抓到的数据、按天汇总、算排名成效分"逻辑，抽成这个

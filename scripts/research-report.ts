@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { activityStart, activityEnd } from '../lib/activity-log'
-import { fetchSiteResearchSummary, type SiteResearchSummary } from '../lib/site-research-summary'
-import { buildSiteAnalysisPrompt } from '../lib/site-research-prompt'
+import { fetchSiteResearchSummary, fetchSiteTrendStats, type SiteTrendStats } from '../lib/site-research-summary'
+import { buildSiteAnalysisPrompt, buildSiteRollupPrompt, type ChildPeriodAnalysis } from '../lib/site-research-prompt'
 import { fetchCompetitorEffectivenessSummary } from '../lib/competitor-effectiveness'
 import { fetchGroupEffectivenessSummary } from '../lib/tracking-summary'
 import { computeOpportunityGaps } from '../lib/opportunity-gap'
@@ -29,7 +29,15 @@ interface Stage1Result { summary: string; momentumKeywords: MomentumKeyword[]; f
 // 见 CLAUDE.md 要求：改动抓取规则要同步 lib/crawl-rules.ts，这个脚本本身不是
 // "抓取"，写的是 research_reports/research_report_sites 表，已在该文件加了章节。
 
-type PeriodType = 'week' | 'month' | 'year'
+type PeriodType = 'week' | 'month' | 'quarter' | 'year'
+
+// 月/季/年报"逐层汇总"架构（2026-08-20）——只有周报继续读原始数据；月报汇总
+// 周报，季报汇总月报，年报也汇总月报（不经过季报，避免1月1号那天月报→季报→
+// 年报串成一条严格顺序链，年报和季报各自独立依赖月报，互不等待）。
+const CHILD_TYPE: Record<PeriodType, PeriodType | null> = {
+  week: null, month: 'week', quarter: 'month', year: 'month',
+}
+const CHILD_LABEL: Record<string, string> = { week: '周报', month: '月报' }
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,9 +54,10 @@ function arg(args: string[], name: string): string | undefined {
   return args.find(a => a.startsWith(`--${name}=`))?.split('=')[1]
 }
 
-// 默认周期，按 period_type 分三种：
+// 默认周期，按 period_type 分四种：
 // - week：上周一~上周日
 // - month：上个月1号~最后一天（今天8月1号跑 → 覆盖7月）
+// - quarter：上一个完整季度（今天10月1号跑 → 覆盖7-9月；1月1号跑 → 覆盖上一年10-12月）
 // - year：去年1月1号~12月31号（今天2027-01-01跑 → 覆盖2026全年）
 function defaultPeriod(periodType: PeriodType): { start: string; end: string } {
   const today = new Date(Date.now() + 8 * 3600000)
@@ -70,6 +79,18 @@ function defaultPeriod(periodType: PeriodType): { start: string; end: string } {
     return { start: `${py}-${pad2(pm + 1)}-01`, end: `${py}-${pad2(pm + 1)}-${pad2(lastDay)}` }
   }
 
+  if (periodType === 'quarter') {
+    const y = today.getUTCFullYear(); const m = today.getUTCMonth() // 0-indexed，当前月
+    const currentQ = Math.floor(m / 3) // 0..3
+    const prevQ = currentQ - 1
+    const qy = prevQ < 0 ? y - 1 : y
+    const qIdx = prevQ < 0 ? 3 : prevQ
+    const startMonth = qIdx * 3 // 0-indexed
+    const endMonth = startMonth + 2
+    const lastDay = new Date(Date.UTC(qy, endMonth + 1, 0)).getUTCDate()
+    return { start: `${qy}-${pad2(startMonth + 1)}-01`, end: `${qy}-${pad2(endMonth + 1)}-${pad2(lastDay)}` }
+  }
+
   // year
   const py = today.getUTCFullYear() - 1
   return { start: `${py}-01-01`, end: `${py}-12-31` }
@@ -85,7 +106,7 @@ interface ReportRow {
 // 各站点分析页面要展示的结构化数字（权重/收录/移动IP）——2026-08-10 用户
 // 要求先摆数字再看AI的简短说明，不用AI在文字里重复这些数字。summary 里
 // 已经有这段时间的 weightTrend/indexTrend 全量数据，顺手算，不用再查一次。
-function computeSiteStats(summary: SiteResearchSummary) {
+function computeSiteStats(summary: SiteTrendStats) {
   const lastWeight = summary.weightTrend[summary.weightTrend.length - 1]
   const avg = (vals: number[]) => vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null
   return {
@@ -107,7 +128,7 @@ async function loadReport(reportId: string): Promise<ReportRow> {
 
 async function runInit(args: string[]) {
   const periodTypeArg = arg(args, 'period-type')
-  const periodType: PeriodType = (periodTypeArg === 'month' || periodTypeArg === 'year') ? periodTypeArg : 'week'
+  const periodType: PeriodType = (periodTypeArg === 'month' || periodTypeArg === 'quarter' || periodTypeArg === 'year') ? periodTypeArg : 'week'
   const periodStart = arg(args, 'period-start') || defaultPeriod(periodType).start
   const periodEnd = arg(args, 'period-end') || defaultPeriod(periodType).end
 
@@ -157,53 +178,139 @@ async function runStage1(reportId: string, shard: number, shardTotal: number) {
   let okCount = 0
   let skipCount = 0
 
-  for (const site of siteList) {
-    if (doneSiteIds.has(site.id)) { okCount++; continue }
+  if (report.period_type === 'week') {
+    for (const site of siteList) {
+      if (doneSiteIds.has(site.id)) { okCount++; continue }
 
-    // 数据拉取本身也可能失败（比如某个站点历史数据量太大导致 DB 查询超时）——
-    // 跟下面的 Gemini 调用一样，单个站点的任何失败都不能让整个分片崩掉。
-    try {
-      const summary = await fetchSiteResearchSummary(supabase, site.id, report.period_start, report.period_end)
-      const hasData = summary.weightTrend.length > 0 || summary.indexTrend.length > 0 ||
-        summary.rankChangeTrend.length > 0 || summary.newKeywordsTrend.length > 0 || summary.effectivenessRows.length > 0
-      const stats = computeSiteStats(summary)
+      // 数据拉取本身也可能失败（比如某个站点历史数据量太大导致 DB 查询超时）——
+      // 跟下面的 Gemini 调用一样，单个站点的任何失败都不能让整个分片崩掉。
+      try {
+        const summary = await fetchSiteResearchSummary(supabase, site.id, report.period_start, report.period_end)
+        const hasData = summary.weightTrend.length > 0 || summary.indexTrend.length > 0 ||
+          summary.rankChangeTrend.length > 0 || summary.newKeywordsTrend.length > 0 || summary.effectivenessRows.length > 0
+        const stats = computeSiteStats(summary)
 
-      if (!hasData) {
+        if (!hasData) {
+          await supabase.from('research_report_sites').upsert({
+            report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+            skipped: true, skip_reason: '这段时间没有抓到任何数据',
+          }, { onConflict: 'report_id,site_id' })
+          skipCount++
+          console.log(`[stage1] ${site.domain} 跳过（无数据）`)
+        } else {
+          const prompt = buildSiteAnalysisPrompt(site, summary, report.period_start, report.period_end)
+          geminiCallCount++
+          const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096, models: BULK_MODELS })
+          if (result) {
+            await supabase.from('research_report_sites').upsert({
+              report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+              skipped: false, analysis: result.summary,
+              momentum_keywords: result.momentumKeywords, findings: result.findings, ...stats,
+            }, { onConflict: 'report_id,site_id' })
+            okCount++
+            console.log(`[stage1] ${site.domain} 分析完成`)
+          } else {
+            geminiFailCount++
+            await supabase.from('research_report_sites').upsert({
+              report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+              skipped: false, error: error || 'AI 分析失败', ...stats,
+            }, { onConflict: 'report_id,site_id' })
+            console.log(`[stage1] ${site.domain} 分析失败: ${error}`)
+          }
+          await delay(4000)
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
         await supabase.from('research_report_sites').upsert({
           report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-          skipped: true, skip_reason: '这段时间没有抓到任何数据',
+          skipped: false, error: `数据拉取失败: ${msg}`,
         }, { onConflict: 'report_id,site_id' })
-        skipCount++
-        console.log(`[stage1] ${site.domain} 跳过（无数据）`)
-      } else {
-        const prompt = buildSiteAnalysisPrompt(site, summary, report.period_start, report.period_end)
-        geminiCallCount++
-        const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096, models: BULK_MODELS })
-        if (result) {
-          await supabase.from('research_report_sites').upsert({
-            report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-            skipped: false, analysis: result.summary,
-            momentum_keywords: result.momentumKeywords, findings: result.findings, ...stats,
-          }, { onConflict: 'report_id,site_id' })
-          okCount++
-          console.log(`[stage1] ${site.domain} 分析完成`)
-        } else {
-          geminiFailCount++
-          await supabase.from('research_report_sites').upsert({
-            report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-            skipped: false, error: error || 'AI 分析失败', ...stats,
-          }, { onConflict: 'report_id,site_id' })
-          console.log(`[stage1] ${site.domain} 分析失败: ${error}`)
-        }
-        await delay(4000)
+        console.log(`[stage1] ${site.domain} 数据拉取失败: ${msg}`)
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      await supabase.from('research_report_sites').upsert({
-        report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
-        skipped: false, error: `数据拉取失败: ${msg}`,
-      }, { onConflict: 'report_id,site_id' })
-      console.log(`[stage1] ${site.domain} 数据拉取失败: ${msg}`)
+    }
+  } else {
+    // 月/季/年报"逐层汇总"（2026-08-20）——不读 rank_changes/site_keyword_ranks/
+    // raw_keywords 原始明细，读下一级已完成报告的 research_report_sites（周报→
+    // 月报，月报→季报/年报），避免以后收紧这三张大表的保留期时年报/月报的整年
+    // /整月查询被静默截断。见 lib/crawl-rules.ts research-report 章节。
+    const childType = CHILD_TYPE[report.period_type]!
+    const childLabel = CHILD_LABEL[childType]!
+
+    const { data: childReportsRaw } = await supabase.from('research_reports')
+      .select('id, period_start, period_end')
+      .eq('period_type', childType).eq('status', 'completed')
+      .gte('period_start', report.period_start).lte('period_end', report.period_end)
+    const childReports = (childReportsRaw ?? []) as { id: string; period_start: string; period_end: string }[]
+    const childReportById = new Map(childReports.map(r => [r.id, r]))
+    const childReportIds = childReports.map(r => r.id)
+    console.log(`[stage1] 汇总层级：${childLabel} → ${report.period_type}，找到 ${childReportIds.length} 份已完成的${childLabel}`)
+
+    const siteIdsInShard = siteList.map(s => s.id)
+    let childSiteRows: { report_id: string; site_id: string; analysis: string | null; momentum_keywords: MomentumKeyword[] | null; findings: Finding[] | null; skipped: boolean }[] = []
+    if (childReportIds.length > 0 && siteIdsInShard.length > 0) {
+      const { data } = await supabase.from('research_report_sites')
+        .select('report_id, site_id, analysis, momentum_keywords, findings, skipped')
+        .in('report_id', childReportIds).in('site_id', siteIdsInShard)
+      childSiteRows = (data ?? []) as typeof childSiteRows
+    }
+    const rowsBySite = new Map<string, typeof childSiteRows>()
+    for (const r of childSiteRows) {
+      if (r.skipped || !r.analysis) continue
+      if (!rowsBySite.has(r.site_id)) rowsBySite.set(r.site_id, [])
+      rowsBySite.get(r.site_id)!.push(r)
+    }
+
+    for (const site of siteList) {
+      if (doneSiteIds.has(site.id)) { okCount++; continue }
+
+      try {
+        const usable: ChildPeriodAnalysis[] = (rowsBySite.get(site.id) ?? [])
+          .map(r => {
+            const child = childReportById.get(r.report_id)!
+            return { period_start: child.period_start, period_end: child.period_end, analysis: r.analysis!, momentum_keywords: r.momentum_keywords, findings: r.findings }
+          })
+          .sort((a, b) => a.period_start.localeCompare(b.period_start))
+
+        const trend = await fetchSiteTrendStats(supabase, site.id, report.period_start, report.period_end)
+        const stats = computeSiteStats(trend)
+
+        if (usable.length === 0) {
+          await supabase.from('research_report_sites').upsert({
+            report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+            skipped: true, skip_reason: `这段时间没有可用的${childLabel}分析`,
+          }, { onConflict: 'report_id,site_id' })
+          skipCount++
+          console.log(`[stage1] ${site.domain} 跳过（无可用${childLabel}）`)
+        } else {
+          const prompt = buildSiteRollupPrompt(site, childLabel, usable, report.period_start, report.period_end)
+          geminiCallCount++
+          const { result, error } = await callGeminiJSON<Stage1Result>(prompt, { maxOutputTokens: 4096, models: BULK_MODELS })
+          if (result) {
+            await supabase.from('research_report_sites').upsert({
+              report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+              skipped: false, analysis: result.summary,
+              momentum_keywords: result.momentumKeywords, findings: result.findings, ...stats,
+            }, { onConflict: 'report_id,site_id' })
+            okCount++
+            console.log(`[stage1] ${site.domain} 汇总完成（${usable.length}份${childLabel}）`)
+          } else {
+            geminiFailCount++
+            await supabase.from('research_report_sites').upsert({
+              report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+              skipped: false, error: error || 'AI 汇总失败', ...stats,
+            }, { onConflict: 'report_id,site_id' })
+            console.log(`[stage1] ${site.domain} 汇总失败: ${error}`)
+          }
+          await delay(4000)
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        await supabase.from('research_report_sites').upsert({
+          report_id: reportId, site_id: site.id, domain: site.domain, name: site.name,
+          skipped: false, error: `数据拉取失败: ${msg}`,
+        }, { onConflict: 'report_id,site_id' })
+        console.log(`[stage1] ${site.domain} 数据拉取失败: ${msg}`)
+      }
     }
   }
 
@@ -326,7 +433,7 @@ async function runStage2(reportId: string) {
     ? ownSummaries.map(g => `【${g.group_name}】${ownTextByGroup.get(g.group_name)}`).join('\n\n')
     : '（没有分组任务数据）'
 
-  const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : '这一年'
+  const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : periodType === 'quarter' ? '这一个季度' : '这一年'
   const groupNamesForSchema = ownSummaries.map(g => `"${g.group_name}": "..."`).join(', ')
 
   const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。除大环境这段外，页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文；大环境这段没有数字单独展示给用户看，需要你完整写清楚。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：

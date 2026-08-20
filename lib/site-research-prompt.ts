@@ -78,3 +78,64 @@ ${rankedList || '无'}
   ]
 }`
 }
+
+export interface ChildPeriodAnalysis {
+  period_start: string
+  period_end: string
+  analysis: string
+  momentum_keywords: { keyword: string; cluster: string; category: string; rankPosition: number | null; rankChange: number | null; volume: number; volumeChange: number }[] | null
+  findings: { observation: string; interpretation: string; confidence: 'high' | 'medium' | 'low' }[] | null
+}
+
+// 月/季/年报"逐层汇总"架构（2026-08-20）用——不读原始明细，读下一级报告
+// 已经产出的分析结果（analysis文字 + momentum_keywords结构化数据 + findings），
+// 综合出跟 buildSiteAnalysisPrompt 完全一样的输出 schema，这样 Stage2 和
+// research_report_sites 表结构、页面展示都不用跟着改。
+export function buildSiteRollupPrompt(
+  site: { domain: string; name: string },
+  childLabel: string, // '周报' | '月报'，用于prompt里描述子周期是什么级别
+  childPeriods: ChildPeriodAnalysis[],
+  dateStart: string,
+  dateEnd: string
+): string {
+  const periodsText = childPeriods.map(p => {
+    const clusters = new Map<string, ChildPeriodAnalysis['momentum_keywords']>()
+    for (const k of p.momentum_keywords ?? []) {
+      if (!clusters.has(k.cluster)) clusters.set(k.cluster, [])
+      clusters.get(k.cluster)!.push(k)
+    }
+    const clusterText = Array.from(clusters.entries())
+      .map(([cluster, kws]) => `【${cluster}】${kws!.length}词，量${kws!.reduce((a, k) => a + k.volume, 0)}，${kws![0]?.category ?? ''}`)
+      .join('；')
+    const findingsText = (p.findings ?? [])
+      .map(f => `${f.observation}（${f.interpretation}，置信度${f.confidence}）`)
+      .join('；')
+    return `【${p.period_start} ~ ${p.period_end}】\n分析：${p.analysis}${clusterText ? `\n发力词群：${clusterText}` : ''}${findingsText ? `\n发现：${findingsText}` : ''}`
+  }).join('\n\n')
+
+  return `你是 SEO Monitor 的站点研究员，专注于百度SEO策略分析。你的任务是综合这个站点这段更长时间内、已经产出的${childLabel}分析，写出这段时间的整体研究结论——不是简单拼接，而是找出跨越多个${childLabel}周期才能看出来的规律（比如持续多期都在发力的词群、还是只是某一期昙花一现）。
+
+站点：${site.domain}（${site.name}）
+研究时间范围：${dateStart} 至 ${dateEnd}（下面是这段时间内每个${childLabel}周期已经产出的分析）
+
+${periodsText || '（这段时间没有可用的下级报告分析）'}
+
+请完成两件事：
+
+1. 找出这段更长时间里真正持续在发力的词——重点关注**跨多个${childLabel}周期反复出现**的词群（说明是真实趋势，不是单期波动），也可以指出"某期突然出现但后续没有延续"这种值得注意的情况。把找到的词按语义聚类成有意义的词群，说清楚量级。真正在动的词多就多列，数据平淡就少列甚至不列，不要为了凑数硬列，最多列30个。
+
+2. 写2-5条有研究价值的发现，每条包含：具体观察（可以引用是哪个子周期的发现）、你的解释、置信度（high/medium/low）。优先写"跨周期才能看出来"的发现，而不是简单复述某一期已经说过的话。
+
+页面上已经会单独展示这个站点的权重/收录/移动IP数字，你不用复述这些数字本身。
+
+以 JSON 格式返回，不要输出任何 JSON 外的文字：
+{
+  "summary": "分析结论（中文，100-200字，页面展示用，浓缩最值得注意的1-2个点）",
+  "momentumKeywords": [
+    { "keyword": "...", "cluster": "词群名", "category": "游戏|应用|专题|资讯", "rankPosition": 数字, "rankChange": 数字（正数=上升，负数=下降，新进榜填null）, "volume": 数字, "volumeChange": 数字（没有涨跌数据就填0） }
+  ],
+  "findings": [
+    { "observation": "具体观察，引用数字", "interpretation": "你的解释", "confidence": "high|medium|low" }
+  ]
+}`
+}

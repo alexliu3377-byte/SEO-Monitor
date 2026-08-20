@@ -5,13 +5,18 @@ on:
     # 2026-08-10 三条cron从同一个时间点错开——之前三条都设08:10，1月1号那天
     # 月报年报会同时触发；顺便进一步降低整点排队延迟风险（周报07:30、年报08:30
     # 都避开了整点，月报08:00是用户自己选的整点，接受这个风险）。
-    - cron: '30 23 * * 0'  # 周报：每周一 07:30 MYT（UTC 周日 23:30，跨天）
-    - cron: '0 0 1 * *'    # 月报：每月1号 08:00 MYT
-    - cron: '30 0 1 1 *'   # 年报：每年1月1号 08:30 MYT
+    # 2026-08-20 新增季报，逐层汇总架构（周报→月报→季报/月报→年报，见
+    # scripts/research-report.ts 的 CHILD_TYPE）——季报/年报都要等当天的月报
+    # 跑完才有东西可汇总，所以往后挪留缓冲；年报和季报互相独立都依赖月报，
+    # 不用互相等待。
+    - cron: '30 23 * * 0'    # 周报：每周一 07:30 MYT（UTC 周日 23:30，跨天）
+    - cron: '0 0 1 * *'      # 月报：每月1号 08:00 MYT
+    - cron: '0 1 1 1,4,7,10 *' # 季报：1/4/7/10月1号 09:00 MYT，覆盖上一季度
+    - cron: '45 1 1 1 *'     # 年报：每年1月1号 09:45 MYT（从08:30挪后，同一天要等月报跑完）
   workflow_dispatch:
     inputs:
       periodType:
-        description: 'week / month / year'
+        description: 'week / month / quarter / year'
         required: false
         default: 'week'
       periodStart:
@@ -46,7 +51,8 @@ jobs:
             echo "type=${{ github.event.inputs.periodType }}" >> "$GITHUB_OUTPUT"
           else
             case "${{ github.event.schedule }}" in
-              '30 0 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
+              '45 1 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
+              '0 1 1 1,4,7,10 *') echo "type=quarter" >> "$GITHUB_OUTPUT" ;;
               '0 0 1 * *') echo "type=month" >> "$GITHUB_OUTPUT" ;;
               *) echo "type=week" >> "$GITHUB_OUTPUT" ;;
             esac
