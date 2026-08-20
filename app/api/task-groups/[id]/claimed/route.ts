@@ -163,6 +163,30 @@ export async function POST(
     return NextResponse.json({ error: `这个词今天已经被${claimedByName}认领了`, claimedBy: claimedByName }, { status: 409 })
   }
 
+  // 分发词批次每日名额上限（2026-08-20）——整组当天从同一批分发词里总共只能
+  // 认领 daily_limit 个，先到先得，跟上面"同词当天已被认领"是同一种"先查后插"
+  // 模式，不额外加锁。只对 source='分发词' 生效，其它认领来源不受影响。
+  if (source === '分发词') {
+    const { data: dw } = await service
+      .from('distributed_keywords')
+      .select('batch_id, daily_limit')
+      .eq('group_id', groupId).eq('keyword', keyword).maybeSingle()
+    if (dw?.batch_id && dw.daily_limit != null) {
+      const { data: batchKeywords } = await service
+        .from('distributed_keywords')
+        .select('keyword').eq('batch_id', dw.batch_id)
+      const kwList = (batchKeywords ?? []).map((r: { keyword: string }) => r.keyword)
+      const { count } = await service
+        .from('member_claimed_keywords')
+        .select('id', { count: 'exact', head: true })
+        .eq('group_id', groupId).eq('claimed_date', claimedDate)
+        .in('keyword', kwList).neq('status', 'dismissed')
+      if ((count ?? 0) >= dw.daily_limit) {
+        return NextResponse.json({ error: `这批词今天的名额（${dw.daily_limit}个）已经用完了` }, { status: 409 })
+      }
+    }
+  }
+
   const { data, error } = await service
     .from('member_claimed_keywords')
     .insert({
