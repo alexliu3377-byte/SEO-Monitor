@@ -318,13 +318,21 @@ export default function CrawlLogPage() {
     const rtTotal = rtSiteIds.length
     let rtSucceeded = 0
     if (rtTotal > 0) {
-      const { data: rtToday, error: rtTodayErr } = await supabase
-        .from('site_keyword_ranks')
-        .select('site_id')
-        .eq('stat_date', today)
-        .in('site_id', rtSiteIds)
-      if (rtTodayErr) errors.push(rtTodayErr.message)
-      rtSucceeded = new Set((rtToday || []).map((r: { site_id: string }) => r.site_id)).size
+      // 2026-08-21 修复：这里原本一次性查全部 site_keyword_ranks 当天记录再
+      // 去重数 site_id——这张表一天能有4万+行，PostgREST 默认单次查询隐性行数
+      // 上限会把结果截断（这个项目已经踩过好几次同一个坑），截断后剩下的行
+      // 可能只覆盖了一小部分站点，"成功站数"直接算少了（实测16站里被算成
+      // 只有6站，真实是15站）。改成按站点分别查 count（head:true 不拉数据只要
+      // 有没有），不受行数截断影响。
+      const results = await Promise.all(rtSiteIds.map(async (id: string) => {
+        const { count } = await supabase
+          .from('site_keyword_ranks')
+          .select('site_id', { head: true, count: 'exact' })
+          .eq('stat_date', today)
+          .eq('site_id', id)
+        return (count ?? 0) > 0
+      }))
+      rtSucceeded = results.filter(Boolean).length
     }
     const { data: rtTs, error: rtTsErr } = await supabase
       .from('site_keyword_ranks')
