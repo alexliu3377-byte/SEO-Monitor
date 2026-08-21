@@ -493,6 +493,16 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
     await delay(45000) // 站点间 45s，避免触发爱站限流
   }
 
+  // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——今天写完 rank_changes
+  // 后顺手让 keyword_signal_rollup 跟上，读取端（get_hot_rank_words/
+  // get_hot_streak_words）不再需要现场扫30天历史，避免重蹈8月13号起超时的
+  // 覆辙。幂等，失败不影响这一步已经写好的抓取数据。
+  try {
+    await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
+  } catch (e) {
+    console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+  }
+
   const durationMs = Date.now() - stepStart
   console.log(`\n  RANK 完成  ✓${ok}  ⚠${emptyCount}  ⚑${suspectCount}  ✗${failed}  耗时=${elapsed(durationMs)}`)
   if (suspectCount > 0) console.log(`  ⚑ 有 ${suspectCount} 站单侧>150但另侧=0，已标记 suspect，将由 retry-crawl 于 05:00 MYT 重抓`)

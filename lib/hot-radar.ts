@@ -105,18 +105,21 @@ export async function computeHotRadarPayload(supabase: any): Promise<HotRadarCom
     const { data: sitesRaw } = await db.from('sites').select('id, domain')
     const siteIdToDomain = new Map<string, string>((sitesRaw || []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
     const rcSince = getMY(-14)
+    // 2026-08-20 起改读 keyword_signal_rollup（跟"竞品涨排名"/"连续上涨词"同一张
+    // 增量汇总表），不再现场查 rank_changes——顺带这段"涨/跌方向"判断也纳入了
+    // 排名模式站点（site_keyword_ranks）的数据，之前只看涨跌抓取。
     for (let i = 0; i < vrKeywords.length; i += 150) {
-      const { data: rcRows } = await db.from('rank_changes')
-        .select('keyword, site_id, type, stat_date')
+      const { data: rollupRows } = await db.from('keyword_signal_rollup')
+        .select('keyword, site_id, type, last_seen')
         .in('keyword', vrKeywords.slice(i, i + 150))
-        .gte('stat_date', rcSince)
-      for (const row of (rcRows || []) as { keyword: string; site_id: string; type: string; stat_date: string }[]) {
+        .gte('last_seen', rcSince)
+      for (const row of (rollupRows || []) as { keyword: string; site_id: string; type: string; last_seen: string }[]) {
         const domain = siteIdToDomain.get(row.site_id)
         if (!domain) continue
         let entry = siteTrendMap.get(row.keyword)
         if (!entry) { entry = { sites: new Set(), latestDate: '', hasUpLatest: false, hasDownLatest: false }; siteTrendMap.set(row.keyword, entry) }
         entry.sites.add(domain)
-        const rowDate = String(row.stat_date).slice(0, 10)
+        const rowDate = String(row.last_seen).slice(0, 10)
         if (rowDate > entry.latestDate) {
           entry.latestDate = rowDate
           entry.hasUpLatest = row.type === 'rankup'

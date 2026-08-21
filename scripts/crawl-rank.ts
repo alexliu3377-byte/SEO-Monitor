@@ -264,6 +264,15 @@ async function main() {
   console.log(`  完成  总词条=${totalSaved}  失败=${totalFailed}  耗时=${elapsed(dur)}`)
   console.log(`${'✓'.repeat(60)}\n`)
 
+  // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 crawl.ts runRank()
+  // 同名调用的注释；分片跑（--group/--total-groups）时每个分片各调一次，
+  // 函数本身幂等，重复调用只是多做点重复聚合，不会产生错误结果。
+  try {
+    await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
+  } catch (e) {
+    console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+  }
+
   // End activity log
   if (activityId) {
     await activityEnd(supabase, activityId, {

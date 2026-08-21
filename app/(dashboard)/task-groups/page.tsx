@@ -67,6 +67,22 @@ function dedupeByKeyword<T extends { keyword: string }>(rows: T[]): T[] {
   })
 }
 
+// 跌排更新/跌词更新：同一个URL经常同时命中好几个词（同一个页面标题/内容
+// 里带了多个关键词），2026-08-20 用户反馈"同一个url的东西应该只显示一条，
+// 以最高搜索量的为准"——按URL合并，每个URL只保留搜索量最高的那一行代表；
+// 没有URL的行（url为空）没法归并，原样保留各自一行。
+function dedupeByUrl<T extends { url: string | null; volume: number }>(rows: T[]): T[] {
+  const best = new Map<string, T>()
+  const noUrl: T[] = []
+  for (const r of rows) {
+    if (!r.url) { noUrl.push(r); continue }
+    const key = normalizeUrl(r.url).toLowerCase()
+    const existing = best.get(key)
+    if (!existing || r.volume > existing.volume) best.set(key, r)
+  }
+  return [...Array.from(best.values()), ...noUrl]
+}
+
 function getBadge(first_date: string, last_date: string, yesterday: string): Badge {
   if (!last_date || last_date < yesterday) return null
   if (first_date >= yesterday) return 'new'
@@ -561,6 +577,7 @@ export default function TaskGroupsPage() {
   const [detailNewRows, setDetailNewRows] = useState<DetailRow[]>([])
   const [detailRankRows, setDetailRankRows] = useState<DetailRow[]>([])
   const [detailVolumeRisingRows, setDetailVolumeRisingRows] = useState<VolumeRisingDetailRow[]>([])
+  const [detailUrlSiblings, setDetailUrlSiblings] = useState<{ keyword: string; rank_position: number | null; volume: number }[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibData, setWordLibData] = useState<WordLibEntry[]>([])
@@ -725,16 +742,17 @@ export default function TaskGroupsPage() {
       const siteIds = ((siteData || []) as { id: string }[]).map(s => s.id)
       if (siteIds.length > 0) {
         const since = getMYDate(-30)
+        // 2026-08-20 改读 keyword_signal_rollup（增量维护的汇总表，见
+        // lib/hot-radar.ts 同名注释）——不再现场扫 site_keyword_ranks 30天窗口，
+        // 用列别名对齐原来的字段名，下面的 dedupeByKeyword/展示逻辑不用改。
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data } = await (supabase.from('site_keyword_ranks') as any)
-          .select('keyword, stat_date, rank_position, prev_rank, volume, url, title')
+        const { data } = await (supabase.from('keyword_signal_rollup') as any)
+          .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
           .in('site_id', siteIds)
           .eq('type', 'rankdown')
-          .eq('platform', 'mobile')
-          .gte('stat_date', since)
-          .order('stat_date', { ascending: false })
-          .order('volume', { ascending: false })
-          .limit(3000)
+          .gte('last_seen', since)
+          .order('last_seen', { ascending: false })
+          .order('max_volume', { ascending: false })
         const rawRows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
         const rows = dedupeByKeyword(rawRows)
         setSiteRankdownData(rows)
@@ -788,16 +806,15 @@ export default function TaskGroupsPage() {
       }
 
       const since = getMYDate(-30)
+      // 2026-08-20 改读 keyword_signal_rollup，理由同 loadSiteRankdown。
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: rankupRows } = await (supabase.from('site_keyword_ranks') as any)
-        .select('keyword, stat_date, rank_position, prev_rank, volume, url, title')
+      const { data: rankupRows } = await (supabase.from('keyword_signal_rollup') as any)
+        .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
         .in('site_id', competitorSiteIds)
         .eq('type', 'rankup')
-        .eq('platform', 'mobile')
-        .gte('stat_date', since)
-        .order('stat_date', { ascending: false })
-        .order('volume', { ascending: false })
-        .limit(3000)
+        .gte('last_seen', since)
+        .order('last_seen', { ascending: false })
+        .order('max_volume', { ascending: false })
       const candidates = dedupeByKeyword((rankupRows || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[])
 
       // 分批查：这批词是不是我们自己站已经有排名了（有排名≈已经收录，见
@@ -1346,9 +1363,22 @@ export default function TaskGroupsPage() {
     } finally { setSubmitting(false) }
   }
 
-  async function openDetail(keyword: string, source: string) {
+  async function openDetail(keyword: string, source: string, url?: string | null) {
     setDetailKw(keyword)
     setDetailSource(source)
+
+    // 跌排更新/跌词更新按URL合并显示后，"详情"改成看同一个URL下还命中了
+    // 哪些其它词——siteRankdownData 已经在内存里，不用发请求，直接过滤。
+    if (source === '跌排更新' || source === '跌词更新') {
+      setDetailUrlSiblings(
+        !url ? [] : siteRankdownData
+          .filter(r => r.url && normalizeUrl(r.url).toLowerCase() === normalizeUrl(url).toLowerCase())
+          .filter(r => r.keyword !== keyword)
+          .sort((a, b) => b.volume - a.volume)
+      )
+      setDetailLoading(false)
+      return
+    }
 
     const cacheKey = `${keyword}|${source}`
     const cached = detailCacheRef.current.get(cacheKey)
@@ -1764,7 +1794,7 @@ export default function TaskGroupsPage() {
           submittedKwSet.has(r.keyword.toLowerCase()) ||
           (r.url && submittedUrlSet.has(normalizeUrl(r.url).toLowerCase()))
         ).filter(r => !dismissedRecMap.has(r.keyword))
-        return applyRecommendCooldown(matched)
+        return dedupeByUrl(applyRecommendCooldown(matched))
       })()
 
       // 管理员合并视图：每个组员各自算一遍匹配（各自的历史提交记录+各自的
@@ -1782,7 +1812,7 @@ export default function TaskGroupsPage() {
             hist.kwMap.has(r.keyword.toLowerCase()) ||
             (r.url && hist.urlSet.has(normalizeUrl(r.url).toLowerCase()))
           ).filter(r => !dismissed.has(r.keyword))
-          for (const r of applyRecommendCooldown(matched, hist.kwMap)) {
+          for (const r of dedupeByUrl(applyRecommendCooldown(matched, hist.kwMap))) {
             rows.push({ ...r, _memberId: m.user_id, _memberName: m.username })
           }
         }
@@ -1860,7 +1890,7 @@ export default function TaskGroupsPage() {
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                       <td className="px-2 py-2 text-right">
-                        <button onClick={() => openDetail(r.keyword, '跌排更新')}
+                        <button onClick={() => openDetail(r.keyword, '跌排更新', r.url)}
                           className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
                       </td>
                     </tr>
@@ -2355,12 +2385,10 @@ export default function TaskGroupsPage() {
       // Available dates in data
       const availableDates = Array.from(new Set(siteRankdownData.map(r => r.stat_date))).sort().reverse()
       const selectedDate = rankdownDate || availableDates[0] || ''
-      // Filter and deduplicate by keyword for the selected date
-      const seenRd = new Set<string>()
-      const dateRows = siteRankdownData
-        .filter(r => r.stat_date === selectedDate && r.volume > 0)
-        .filter(r => { if (seenRd.has(r.keyword)) return false; seenRd.add(r.keyword); return true })
-        .sort((a, b) => b.volume - a.volume)
+      // 按URL合并（同一个URL命中多个词只显示搜索量最高那个），2026-08-20
+      const dateRows = dedupeByUrl(
+        siteRankdownData.filter(r => r.stat_date === selectedDate && r.volume > 0)
+      ).sort((a, b) => b.volume - a.volume)
       return (
         <div>
           {/* Date picker */}
@@ -2425,7 +2453,7 @@ export default function TaskGroupsPage() {
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                         <td className="px-2 py-2 text-right">
-                          <button onClick={() => openDetail(r.keyword, '跌词更新')}
+                          <button onClick={() => openDetail(r.keyword, '跌词更新', r.url)}
                             className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
                         </td>
                       </tr>
@@ -2462,6 +2490,27 @@ export default function TaskGroupsPage() {
   // Detail modal inner content
   function DetailBody() {
     if (detailLoading) return <Spinner />
+    if (detailSource === '跌排更新' || detailSource === '跌词更新') {
+      if (detailUrlSiblings.length === 0) return <p className="text-sm text-gray-400 text-center py-10">这个URL下没有其它命中的词</p>
+      return (
+        <table className="w-full">
+          <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
+            <th className="py-1.5 text-left font-medium">关键词</th>
+            <th className="py-1.5 text-center font-medium w-16">排名</th>
+            <th className="py-1.5 text-center font-medium w-16">搜索量</th>
+          </tr></thead>
+          <tbody>
+            {detailUrlSiblings.map((r, i) => (
+              <tr key={`${r.keyword}|${i}`} className="border-b border-gray-50 last:border-0">
+                <td className="py-1.5 text-sm text-gray-800">{r.keyword}</td>
+                <td className="py-1.5 text-center text-xs text-gray-600">{r.rank_position ?? <span className="text-gray-400">脱排</span>}</td>
+                <td className="py-1.5 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
     if (detailSource === '搜索上涨') {
       const byDate = new Map<string, { domain: string; type: 'rankup' | 'rankdown' }[]>()
       for (const r of detailVolumeRisingRows) {

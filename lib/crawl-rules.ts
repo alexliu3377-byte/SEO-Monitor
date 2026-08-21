@@ -206,6 +206,8 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '真实3000行截断bug（同一天验证时发现）', text: '这三个RPC函数本身没有 LIMIT，真实未截断行数分别是 get_hot_new_words 9114行/get_hot_rank_words 27617行/get_hot_streak_words 109002行——但通过PostgREST调用（.rpc()）时被静默截到3000行，跟这个项目已经踩过好几次的".select()查询硬顶3000行"是同一个限制，只是这次发生在RPC调用上。而且原本的 ORDER BY 没有唯一列兜底（比如 site_count DESC 打平时顺序不确定），真要翻页会重复/漏行——参照 lib/supabase-paginate.ts 的教训改成在每个函数 ORDER BY 末尾追加 keyword（或 keyword+domain）确保确定性，同时给三个函数都加了显式 `LIMIT 2000`（在SQL层面就把结果控制在3000这个隐性上限以内，不依赖分页去够全量——这三个函数本来就是按相关性排序的"热词榜"，取前2000名对这个场景完全够用，不需要为了"拿全量"去承担多次翻页的额外查询成本）' },
       { label: 'site_rank_keywords 死表清理（同一天，排查数据库空间时发现）', text: '排查数据库空间占用时发现 site_keyword_ranks（106MB，scripts/crawl-rank.ts 每天写入的现役表）和 site_rank_keywords（75MB，字段几乎一样只少了 prev_rank）两张名字相近的表——比对迁移函数源码确认后者是更早期建的、后来被前者取代的遗留表，早就没有任何日常抓取逻辑再写入，只有网站管理"排名/涨跌"模式切换时的迁移工具（/api/migrate-rank-site）还在指向它，而且指错了地方（迁移过去的数据进了一张不会再更新的死表）。已删除 site_rank_keywords，迁移工具的两个数据库函数改名重写为 migrate_rank_changes_to_site_keyword_ranks / migrate_site_keyword_ranks_to_rank_changes，正确指向现役表；get_hot_rank_words/get_hot_streak_words 里跟 site_rank_keywords 的 UNION 分支也同步改成 site_keyword_ranks（不能不改，删表当天就会报表不存在的错）' },
       { label: '静默失败覆盖好缓存的bug（2026-08-13 修复）', text: '用户反馈"交叉词/竞品涨排名/连续上涨词又看不到了"——排查发现 get_hot_rank_words/get_hot_streak_words 单次真实耗时约15秒，跟函数体里设的20秒 statement_timeout 余量很薄，真实负载稍高就会被 Postgres 中止报错；但 computeHotRadarPayload() 之前完全没检查这几个 RPC 调用的 error，直接 `(data || [])` 把报错静默当成"这块本来就没数据"，缓存被写成空数组覆盖掉上次的正常数据。修复：① 每个 RPC 调用加 error 检查+失败重试一次（rpcWithRetry，隔3秒重试，真实负载多是瞬时的）；② refresh 接口拿到失败的分块名单后，先读一次旧缓存，报错的那几块沿用旧值而不是用这次的空数组覆盖，只有真正算成功的块才更新——宁可某块数据暂时不是今天算的，也不要让它突然变成空白；③ maxDuration 从60秒提到90秒，给重试留够时间。' },
+      { label: '"竞品涨排名"/"连续上涨词"根治性重做（2026-08-20）', text: '08-13 修的是"别用空结果覆盖好缓存"，没解决"为什么会超时"——rank_changes 持续每天净增约5.35万行，从08-13起 get_hot_rank_words/get_hot_streak_words 实际上每天都在超时，靠上面那层保护悄悄沿用08-13当天算出来的旧数据，表现为"资料停在8月13号不再更新"但完全不报错，用户隔了一周才发现。这次改成增量维护：新表 keyword_signal_rollup（site_id+keyword+type 唯一，一行不是一天，存最近30天内出现过的日期数组 recent_dates），新函数 refresh_keyword_signal_rollup(p_date) 每天只扫当天的 rank_changes+site_keyword_ranks（两三万行级别，不是30天全量），UPSERT时把数组按30天窗口裁剪好；get_hot_rank_words/get_hot_streak_words 的 CREATE OR REPLACE 换成查这张小表，函数名/参数/返回列完全不变，调用方（lib/hot-radar.ts）不用改一行。这样查询速度只取决于"今天新增了多少行"，跟 rank_changes/site_keyword_ranks 历史总量彻底脱钩，不会再随数据变多重新变慢。顺带把之前"只读 rank_changes（涨跌）、不含 site_keyword_ranks（排名）"的缺口也补上了——两张源表 UNION 进同一张汇总表（同一个站点"排名"/"涨跌"两种模式互斥，不会同一天两边都有数据，UNION 不需要处理冲突）。"搜索量上涨"tab 判断涨跌方向的辅助查询、分组任务"涨排更新"/"跌排更新"两个tab（之前是完全独立现场查 site_keyword_ranks 30天窗口+limit(3000) 的另一套代码）都跟着一起改读这张汇总表。' },
+      { label: '写入表（2026-08-20 补充）', text: 'keyword_signal_rollup——site_id+keyword+type 主键；scripts/crawl.ts 的 runRank()、scripts/crawl-rank.ts、app/api/cron/route.ts 的 rank/rank-title 两个写入点，各自写完当天 rank_changes/site_keyword_ranks 后调一次 refresh_keyword_signal_rollup(today)（幂等，重复调用不会出错，只是多做点重复聚合）' },
     ],
   },
   {
@@ -249,6 +251,7 @@ export const RETENTION = {
   research_reports: '永久保留',
   research_report_sites: '永久保留（随 research_reports 级联删除）',
   site_diagnostics: '永久保留',
+  keyword_signal_rollup: '行本身永久保留，但 recent_dates 数组只滚动保留最近30天日期，30天没再出现的词last_seen就不再更新（不会被物理删除，只是查询会自然把它排除在"最近N天"范围外）',
   activity_log: '7天（按 logged_at）',
   activity_site_log: '7天（随 activity_log 级联删除）',
 }

@@ -385,6 +385,14 @@ export async function GET(request: Request) {
         }
       }
 
+      // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 scripts/crawl.ts
+      // runRank() 同名调用的注释。
+      try {
+        await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today })
+      } catch (e) {
+        console.error(`refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+      }
+
       if (rkAid) await activityEnd(supabase, rkAid, {
         status: rkFail > 0 ? 'fail' : rkEmpty > 0 ? 'warn' : 'done',
         ok: rkOk, empty: rkEmpty, fail: rkFail, rowsWritten: rkRows,
@@ -574,6 +582,16 @@ export async function GET(request: Request) {
           if (rtAid) await activityEnd(supabase, rtAid, { status: 'fail', ok: 0, empty: 0, fail: 1, rowsWritten: 0, durationMs: Date.now() - rtStart })
           results.push({ site: site.domain, count: -1, error: msg })
         }
+      }
+
+      // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 scripts/crawl.ts
+      // runRank() 同名调用的注释。这条路径是单站点手动重抓（siteFilter），
+      // 批量的 site_keyword_ranks 写入主要走 scripts/crawl-rank.ts（已经加过
+      // 同样的调用），这里加上是为了手动重抓单站也能让汇总表跟上。
+      try {
+        await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today })
+      } catch (e) {
+        console.error(`refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
       }
     }
 
