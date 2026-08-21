@@ -13,6 +13,7 @@ const group = parseInt(cliArgs.find(a => a.startsWith('--group='))?.split('=')[1
 const totalGroups = parseInt(cliArgs.find(a => a.startsWith('--total-groups='))?.split('=')[1] ?? '1', 10)
 const retryFailed = cliArgs.includes('--retry-failed')
 const dateOverride = cliArgs.find(a => a.startsWith('--date='))?.split('=')[1] ?? null
+const siteFilter = cliArgs.find(a => a.startsWith('--site='))?.split('=')[1] ?? null
 
 function getMalaysiaDate(offsetDays = 0): string {
   const ms = Date.now() + 8 * 60 * 60 * 1000 + offsetDays * 86400000
@@ -44,7 +45,7 @@ async function main() {
   const totalStart = Date.now()
 
   console.log(`\n${'▶'.repeat(60)}`)
-  console.log(`  RANK CRAWL (All Sites)${dateOverride ? ' [补抓]' : ''}   日期=${today}   ${ts()} MYT`)
+  console.log(`  RANK CRAWL (${siteFilter || 'All Sites'})${dateOverride ? ' [补抓]' : ''}   日期=${today}   ${ts()} MYT`)
   console.log(`${'▶'.repeat(60)}`)
 
   // Get runner IP
@@ -96,6 +97,16 @@ async function main() {
     console.log(`  重试模式：今日 rank-title 失败/空 ${failedDomains.size} 站`)
     if (failedDomains.size === 0) { console.log('  无失败站点，退出\n'); return }
     candidateSites = allSites.filter(s => failedDomains.has(s.domain))
+  }
+
+  // 单站模式（GH Actions workflow_dispatch 的 "site" 输入用这个，之前这里
+  // 完全没接，填了site也会照样跑全部站点，2026-08-21 用户反馈排查出来的）
+  if (siteFilter) {
+    candidateSites = candidateSites.filter(s => s.domain === siteFilter)
+    if (candidateSites.length === 0) {
+      console.log(`  找不到域名为 ${siteFilter} 的排名追踪站点，退出\n`)
+      return
+    }
   }
 
   const sites = totalGroups > 1

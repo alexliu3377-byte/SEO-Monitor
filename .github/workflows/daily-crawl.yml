@@ -168,7 +168,7 @@ jobs:
             DATE_ARG="--date=$DATE_INPUT"
           fi
           if [ "${{ steps.vars.outputs.step }}" = "rank-title" ]; then
-            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $DATE_ARG
+            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $SITE_ARG $DATE_ARG
           else
             npx tsx scripts/crawl.ts --step=${{ steps.vars.outputs.step }} --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} $SITE_ARG $DATE_ARG
           fi
