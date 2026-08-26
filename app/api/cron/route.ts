@@ -41,6 +41,7 @@ import {
 } from '@/lib/crawler'
 import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 interface SiteRecord {
   id: string
@@ -817,11 +818,18 @@ export async function GET(request: Request) {
       let ownRows = 0
       const window90 = getMalaysiaDate(-90)
       try {
-        const { data: claimRows } = await supabase.from('member_claimed_keywords')
+        type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
+        // 2026-08-26：跟 scripts/crawl.ts 同名注释一样的问题——全站90天内符合
+        // 条件的提交已经超过3000行硬顶，且原来没有 ORDER BY，被截断的还偏偏是
+        // 最近提交的那部分，导致92%的近期提交从未写入 site_tracking_records。
+        // 改成真分页。
+        const claims = await fetchAllRows<ClaimRow>((from, to) => (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          supabase.from('member_claimed_keywords') as any)
           .select('id, group_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submitted_at, claimed_date')
           .eq('status', 'submitted').not('page_url', 'is', null).gte('claimed_date', window90)
-        type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
-        const claims = (claimRows || []) as ClaimRow[]
+          .order('id', { ascending: true })
+          .range(from, to))
 
         if (claims.length > 0) {
           const pageUrlVariants = Array.from(new Set(claims.filter(c => c.page_url).flatMap(c => urlSubdomainVariants(c.page_url!))))

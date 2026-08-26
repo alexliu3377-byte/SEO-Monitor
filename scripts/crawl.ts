@@ -12,6 +12,7 @@ import {
 import { createAizhanHttpSession, fetchRankChangesViaHttp } from '../lib/crawler-aizhan-http'
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
+import { fetchAllRows } from '../lib/supabase-paginate'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -986,14 +987,23 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
   let ownRows = 0
   const window90 = getMalaysiaDate(-90)
   try {
-    const { data: claimRows } = await supabase
-      .from('member_claimed_keywords')
+    type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
+    // 2026-08-26 发现：全站90天内符合条件的提交已经涨到5194条，这条查询之前
+    // 没分页也没排序，直接撞上 Supabase 单次请求硬顶3000行的老问题（这个项目
+    // 反复踩过，见 lib/supabase-paginate.ts 顶部注释）——而且因为没有 ORDER BY，
+    // 被砍掉的还不是"最近的"或"最早的"，是数据库物理扫描顺序里排在后面的那
+    // 部分，实测发现最近两周新提交的词几乎全部没进到这3000条里，导致92%的
+    // 近期提交从来没被写过 site_tracking_records、成效追踪里彻底看不到，不是
+    // UI筛选问题。改成真分页（fetchAllRows）+ 按 id 排序兜底，不会再截断。
+    const claims = await fetchAllRows<ClaimRow>((from, to) => (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      supabase.from('member_claimed_keywords') as any)
       .select('id, group_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submitted_at, claimed_date')
       .eq('status', 'submitted')
       .not('page_url', 'is', null)
       .gte('claimed_date', window90)
-    type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
-    const claims = (claimRows || []) as ClaimRow[]
+      .order('id', { ascending: true })
+      .range(from, to))
 
     if (claims.length > 0) {
       // Query with www./m. variants of each page_url (widens the .in() filter),
