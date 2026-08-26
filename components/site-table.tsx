@@ -24,6 +24,7 @@ interface Site {
   is_enabled: boolean
   has_rank_data: boolean
   has_rank_title: boolean
+  track_pc_rank: boolean | null
   has_index_pages: boolean
   created_at: string
 }
@@ -36,6 +37,7 @@ interface SiteTableProps {
   onToggle: (site: Site) => void
   onToggleRank: (site: Site) => void
   onToggleRankTitle: (site: Site) => void
+  onTogglePcRank: (site: Site) => void
   onToggleIndexPages: (site: Site) => void
 }
 
@@ -55,7 +57,7 @@ const frequencyLabel: Record<string, string> = {
   daily: '每天',
 }
 
-export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle, onToggleRank, onToggleRankTitle, onToggleIndexPages }: SiteTableProps) {
+export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle, onToggleRank, onToggleRankTitle, onTogglePcRank, onToggleIndexPages }: SiteTableProps) {
   const [page, setPage] = useState(0)
   const [sortCol, setSortCol] = useState<'isEnabled' | 'hasRankData' | 'hasRankTitle' | 'hasIndexPages' | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -176,12 +178,23 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
                 </button>
               </td>
               <td className="table-td text-center">
-                <button
-                  onClick={() => onToggleRankTitle(site)}
-                  className={`relative w-9 h-[18px] rounded-full transition-colors ${site.has_rank_title ? 'bg-orange-500' : 'bg-gray-200'}`}
-                >
-                  <div className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${site.has_rank_title ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-                </button>
+                <div className="flex items-center justify-center gap-1.5">
+                  <button
+                    onClick={() => onToggleRankTitle(site)}
+                    className={`relative w-9 h-[18px] rounded-full transition-colors ${site.has_rank_title ? 'bg-orange-500' : 'bg-gray-200'}`}
+                  >
+                    <div className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${site.has_rank_title ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                  </button>
+                  {site.has_rank_title && (
+                    <button
+                      onClick={() => onTogglePcRank(site)}
+                      title={site.track_pc_rank !== false ? '同时抓PC端排名，点击关闭（只保留移动端）' : '目前只抓移动端，点击开启PC端'}
+                      className={`text-[10px] leading-none px-1 py-0.5 rounded border transition-colors ${site.track_pc_rank !== false ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                    >
+                      PC
+                    </button>
+                  )}
+                </div>
               </td>
               <td className="table-td text-center">
                 <button

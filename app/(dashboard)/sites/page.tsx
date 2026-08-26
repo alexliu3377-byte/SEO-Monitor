@@ -25,6 +25,7 @@ interface Site {
   is_enabled: boolean
   has_rank_data: boolean
   has_rank_title: boolean
+  track_pc_rank: boolean | null
   has_index_pages: boolean
   created_at: string
 }
@@ -166,6 +167,25 @@ export default function SitesPage() {
     applyToggle(site, newVal ? false : site.has_rank_data, newVal).catch(err => alert(err.message))
   }
 
+  async function handleTogglePcRank(site: Site) {
+    const currentlyOn = site.track_pc_rank !== false // 没设过(null)按默认true算，跟建表默认值一致
+    const newVal = !currentlyOn
+    try {
+      const res = await fetch('/api/sites', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...site, track_pc_rank: newVal }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || '更新失败')
+      }
+      setSites((prev) => prev.map((s) => s.id === site.id ? { ...s, track_pc_rank: newVal } : s))
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : '更新失败')
+    }
+  }
+
   async function executePendingToggle(withMigration: boolean) {
     if (!pendingToggle) return
     const { site, direction, newRankData, newRankTitle } = pendingToggle
@@ -278,6 +298,7 @@ export default function SitesPage() {
                 onToggle={handleToggle}
                 onToggleRank={handleToggleRank}
                 onToggleRankTitle={handleToggleRankTitle}
+                onTogglePcRank={handleTogglePcRank}
                 onToggleIndexPages={handleToggleIndexPages}
               />
             </>

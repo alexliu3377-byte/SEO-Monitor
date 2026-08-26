@@ -133,12 +133,14 @@ export async function fetchFirstRankedDates(service: any, urls: string[]): Promi
   if (bareUrls.length === 0) return result
   const allVariants = bareUrls.flatMap(urlSubdomainVariants)
   for (const chunk of chunkArray(allVariants, 150)) {
+    // 2026-08-26 起 M/PC 合并判定成效——去掉 platform 过滤，"这个URL最早哪天
+    // 有过排名"改成两端都算，跟 scripts/crawl.ts 的效果判断口径保持一致
+    // （否则PC端很早就排过名的URL，这里查不到历史，容易被误判成"真新排名"）。
     const { data } = await service
       .from('site_keyword_ranks')
       .select('url, stat_date')
       .in('url', chunk)
       .not('rank_position', 'is', null)
-      .eq('platform', 'mobile')
     for (const r of (data ?? []) as { url: string; stat_date: string }[]) {
       const key = bareUrl(r.url)
       const existing = result.get(key)

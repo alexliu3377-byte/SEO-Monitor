@@ -57,11 +57,11 @@ async function main() {
 
   const { data: sitesRaw, error: sitesErr } = await supabase
     .from('sites')
-    .select('id, domain')
+    .select('id, domain, track_pc_rank')
     .eq('has_rank_title', true)
   if (sitesErr) throw sitesErr
 
-  const allSites = (sitesRaw || []) as { id: string; domain: string }[]
+  const allSites = (sitesRaw || []) as { id: string; domain: string; track_pc_rank: boolean | null }[]
 
   if (allSites.length === 0) {
     console.log('  没有开启排名追踪的站点，退出')
@@ -125,7 +125,6 @@ async function main() {
     ip: ip ?? undefined,
   })
 
-  const platforms: ('mobile' | 'pc')[] = ['mobile', 'pc']
   const types: ('rankup' | 'rankdown')[] = ['rankup', 'rankdown']
 
   let totalSaved = 0
@@ -142,9 +141,13 @@ async function main() {
   console.log(`  ✓ 会话就绪 (${ts()})`)
 
   for (let i = 0; i < sites.length; i++) {
-    const { id: siteId, domain } = sites[i]
+    const { id: siteId, domain, track_pc_rank } = sites[i]
+    // 2026-08-26 新增：网站管理可以逐站关掉PC端排名抓取（竞品站点通常不需要，
+    // 只有自己站点做"成效追踪"要看M/PC合并结果才需要）——track_pc_rank 是
+    // 新加的列，默认true，不勾选就只抓mobile。
+    const platforms: ('mobile' | 'pc')[] = track_pc_rank === false ? ['mobile'] : ['mobile', 'pc']
     console.log(`\n${'─'.repeat(50)}`)
-    console.log(`  [${i + 1}/${sites.length}] ${domain}  (${ts()})`)
+    console.log(`  [${i + 1}/${sites.length}] ${domain}  (${ts()})  平台=${platforms.join('+')}`)
 
     // Clear today's existing data for this site (both platforms)
     await supabase.from('site_keyword_ranks').delete()

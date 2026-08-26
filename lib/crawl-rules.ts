@@ -97,7 +97,7 @@ export const CRAWL_RULES: RuleSection[] = [
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 18 * * * UTC = 02:30 MYT)，动态 matrix job 并行（每2个站点1个job）；retry-crawl.yml (cron 0 22 UTC = 06:00 MYT) 智能重试：setup job 查询 activity_site_log 统计今日失败/空站数，仅为失败站创建 job（每站1个），scripts/crawl-rank.ts 以 --retry-failed 模式运行只处理当日失败站点；脚本：scripts/crawl-rank.ts；支持手动 workflow_dispatch 选 step=rank-title' },
       { label: '抓取对象', text: 'sites 表中 has_rank_title=true 的站点（网站管理列表里显示为"排名"）；动态读取，每次运行重新查询' },
-      { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）+ PC端（/baidu/），各抓涨入和跌出，共 4 个组合；含标题（title）和排名页 URL（url）' },
+      { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）默认必抓；PC端（/baidu/）按站点 sites.track_pc_rank 决定抓不抓（2026-08-26 新增，默认true=抓，网站管理"排名"开关旁边有个小"PC"按钮可以逐站关掉——全站只有 platform=mobile 的数据被"成效追踪"/竞品追踪等任何功能读取过，PC端此前一直白抓白占IO，关掉对功能没有影响，只是从"能看到M/PC合并判断成效"这个新需求出发，默认还是保留PC，交给用户按站点自行取舍）；各抓涨入和跌出，开启PC时共4个组合、只抓M时2个组合；含标题（title）和排名页 URL（url）' },
       { label: '浏览器验证', text: '与 rank 步骤相同（详见 rank 小节"浏览器验证"完整历史），job 开始时用 createAizhanHttpSession() 拿一次会话 cookie（纯 fetch，一次额外往返，非 2026-07 那版约2分钟的 Playwright 验证），本 job 内全部站点/平台/涨跌组合复用同一 session；支持 --date=YYYY-MM-DD 补抓历史日期，用法同 rank 步骤' },
       { label: '并行策略', text: '排名段 1-5 同时并行（各开一个浏览器 page），段内按页顺序，每页间隔 300ms；4 个组合顺序执行，组合间隔随机 3-5 秒；站点间间隔 60 秒' },
       { label: '翻页上限', text: '每段最多 15 页；抓取全部词（不过滤 volume=0）' },
@@ -133,7 +133,8 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '竞品规则匹配', text: '规则 #1（跌后更新观察）：rankdown 词 + 近 7 天内有提交记录 → 标记 rule_id；规则 #2（批量下拉词更新）：同日期相同 4 字前缀 ≥3 个词有信号 → 标记 rule_id' },
       { label: '竞品写入表', text: 'competitor_tracking_records（按 site_id+keyword+discovery_date 唯一，upsert；同时将 >60 天的"追踪中"记录更新为"无效"；永久保留）' },
       { label: '自己站点追踪对象', text: '全部分组中 status=submitted + page_url 已填写 + claimed_date >= 90天内 的 member_claimed_keywords 记录' },
-      { label: '自己站点信号来源', text: '① 收录信号：site_indexed_pages 表 by URL（page_url）→ is_indexed / index_first_seen / index_disappeared；② 排名信号：site_keyword_ranks 表 by URL（platform=mobile，取最新 stat_date + 最佳 rank_position）→ rank_keyword / rank_position / prev_rank；匹配前双方 URL 都去掉开头的 www./m. 子域名再比较（2026-07-29 加入：组员提交 page_url 时常漏填"m."，而收录/排名数据抓的多是移动端 m. 子域名，字符串精确匹配会漏判为"未收录"）' },
+      { label: '自己站点信号来源', text: '① 收录信号：site_indexed_pages 表 by URL（page_url）→ is_indexed / index_first_seen / index_disappeared；② 排名信号：site_keyword_ranks 表 by URL（2026-08-26 起 M/PC 合并判断，去掉了 platform=mobile 过滤——取最新 stat_date + 最佳 rank_position，同一天M和PC都有数据时谁排名更好就用谁；lib/outcome-score.ts 的"真新排名"历史判断同步去掉了同一个过滤，避免PC端很早排过名的URL被误判成首次上榜）→ rank_keyword / rank_position / prev_rank；匹配前双方 URL 都去掉开头的 www./m. 子域名再比较（2026-07-29 加入：组员提交 page_url 时常漏填"m."，而收录/排名数据抓的多是移动端 m. 子域名，字符串精确匹配会漏判为"未收录"）' },
+      { label: '竞品信号仍只看M（未改）', text: '"竞品信号来源"那一条（platform=mobile）没有跟着改——用户明确表示竞品追踪不需要看PC端，只有"自己站点"这条自己站的成效判断做了M/PC合并' },
       { label: '匹配查询分批大小', text: '按 URL 变体（协议×子域名×末尾斜杠组合）查询 site_indexed_pages / site_keyword_ranks 时，.in() 每批固定 150 个变体（2026-07-29 修复：此前固定 500 个，实测会导致请求 URL 超过约 16KB 的 HTTP header 上限而报 HeadersOverflowError，且代码此前没检查该错误，导致自己站点排名/收录匹配连续多日静默返回 0 条，effectiveness 全部误判为"追踪中"）' },
       { label: '自己站点成效判断', text: '获取排名：rank_position 不为空；获取收录：已收录（is_indexed=true）但 rank_position 为空；追踪中：未收录且提交未满 90 天；无效：提交已超过 90 天且仍未获取收录/排名' },
       { label: '自己站点写入表', text: 'site_tracking_records（按 claim_id+record_date 唯一，每日 upsert 一行，积累历史曲线；永久保留）；site_tracking_rank_matches（按 claim_id+record_date+keyword 唯一，2026-07-29 加入：同一 page_url 在 site_keyword_ranks 里命中多个不同排名词时，全部匹配都写入本表供成效追踪页面展示，不像 site_tracking_records 只保留最佳一条；永久保留）' },

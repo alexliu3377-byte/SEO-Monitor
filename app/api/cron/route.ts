@@ -844,9 +844,11 @@ export async function GET(request: Request) {
           const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
           for (const chunk of chunkArray(pageUrlVariants, 150)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            // 2026-08-26 起 M/PC 合并判定成效——去掉 platform 过滤，见
+            // scripts/crawl.ts 同一处改动的注释。
             const { data: rRows, error: rankErr } = await (supabase.from('site_keyword_ranks') as any)
               .select('url, keyword, rank_position, prev_rank, volume, stat_date')
-              .in('url', chunk).not('url', 'is', null).eq('platform', 'mobile')
+              .in('url', chunk).not('url', 'is', null)
               .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
             if (rankErr) console.error(`[自己站点追踪] site_keyword_ranks 查询失败: ${JSON.stringify(rankErr)}`)
             for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
