@@ -279,12 +279,15 @@ async function main() {
   console.log(`${'✓'.repeat(60)}\n`)
 
   // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 crawl.ts runRank()
-  // 同名调用的注释；分片跑（--group/--total-groups）时每个分片各调一次，
-  // 函数本身幂等，重复调用只是多做点重复聚合，不会产生错误结果。
-  try {
-    await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
-  } catch (e) {
-    console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+  // 同名调用的注释。2026-08-26 发现：函数内部按 stat_date 处理"当天全部"数据，
+  // 跟分片无关，之前每个分片都各调一次是纯重复劳动，rank-title 一天8个分片就是
+  // 8次全量重算，是CPU/Disk IO被打满的主因之一。改成只由 group 0 调用一次。
+  if (group === 0) {
+    try {
+      await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
+    } catch (e) {
+      console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   // End activity log

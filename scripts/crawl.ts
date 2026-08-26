@@ -347,7 +347,7 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
   })
 }
 
-async function runRank(sites: SiteRecord[], today: string, activityId: string | null = null) {
+async function runRank(sites: SiteRecord[], today: string, activityId: string | null = null, group = 0) {
   const stepStart = Date.now()
   console.log(`\n${'═'.repeat(60)}`)
   console.log(`  RANK   日期=${today}   ${ts()}`)
@@ -497,10 +497,18 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
   // 后顺手让 keyword_signal_rollup 跟上，读取端（get_hot_rank_words/
   // get_hot_streak_words）不再需要现场扫30天历史，避免重蹈8月13号起超时的
   // 覆辙。幂等，失败不影响这一步已经写好的抓取数据。
-  try {
-    await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
-  } catch (e) {
-    console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+  // 2026-08-26 发现：这个函数内部是 WHERE stat_date=p_date 处理"当天全部"数据，
+  // 跟哪个分片调用它无关——之前每个 group 分片都各调一次，rank/rank-title 合计
+  // 一天十几次重复全量重算同一天的数据，是CPU/Disk IO被打满、部分调用超时导致
+  // rankWords/streakWords 反复"failedSections"的真正原因。改成只由 group 0 调用
+  // 一次，其余分片跳过（数据不会漏——不管哪个分片最后完成，group 0 一定存在且
+  // 一定会跑到这一步）。
+  if (group === 0) {
+    try {
+      await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
+    } catch (e) {
+      console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   const durationMs = Date.now() - stepStart
@@ -1208,7 +1216,7 @@ async function main() {
   }
   if (step === 'rank' || step === 'all') {
     const aid = await activityStart(supabase, { ...logBase, step: 'rank' })
-    await runRank(sites.filter(s => s.has_rank_data), today, aid)
+    await runRank(sites.filter(s => s.has_rank_data), today, aid, group)
   }
   if (step === 'index-pages') {
     const aid = await activityStart(supabase, { ...logBase, step: 'index-pages' })
