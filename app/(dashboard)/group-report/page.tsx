@@ -180,6 +180,10 @@ export default function GroupReportPage() {
   const [oFilterIndex, setOFilterIndex] = useState('')
   const [oFilterRankKw, setOFilterRankKw] = useState('')
   const [oFilterOutcome, setOFilterOutcome] = useState('')
+  // 2026-08-26 用户反馈"追踪中/无效"占了大半篇幅，想看的是有结果的——默认
+  // 隐藏，只在"全部成效"（oFilterOutcome===''）下生效，用户明确选了"追踪中"
+  // /"无效"要看这两类本身时不会被这个默认值挡住（见 loadOutcomes 里的判断）。
+  const [oHideNoResult, setOHideNoResult] = useState(true)
   const [oSortBy, setOSortBy] = useState<OutcomeSortBy>('submit_date')
   const [oSortDir, setOSortDir] = useState<'asc' | 'desc'>('desc')
   const [oPage, setOPage] = useState(0)
@@ -266,6 +270,7 @@ export default function GroupReportPage() {
     setOFilterIndex('')
     setOFilterRankKw('')
     setOFilterOutcome('')
+    setOHideNoResult(true)
     setOPage(0)
   }, [activeTabId])
 
@@ -286,6 +291,9 @@ export default function GroupReportPage() {
     if (oFilterIndex)         p.set('indexed',       oFilterIndex)
     if (oFilterRankKw)        p.set('rankKeyword',   oFilterRankKw)
     if (oFilterOutcome)       p.set('outcome',       oFilterOutcome)
+    // 用户明确选了具体成效类型（含"追踪中"/"无效"本身）时不再叠加默认隐藏，
+    // 不然选"追踪中"会被这个默认值筛成空列表。
+    if (!oFilterOutcome && oHideNoResult) p.set('hideNoResult', '1')
     p.set('sortBy',  oSortBy)
     p.set('sortDir', oSortDir)
     p.set('page',     String(oPage))
@@ -301,7 +309,7 @@ export default function GroupReportPage() {
       })
       .finally(() => setOutcomesLoading(false))
   }
-  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
+  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oHideNoResult, oSortBy, oSortDir, oPage, oPageSize])
 
   // Load tracking summary
   function scopeParams(month: string, scope: string): URLSearchParams {
@@ -408,7 +416,7 @@ export default function GroupReportPage() {
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
             const OCOLS = 'grid-cols-[48px_2fr_60px_80px_70px_88px_1.5fr_60px_76px_56px_70px_70px_70px]'
-            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd)
+            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd || !oHideNoResult)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
             // (see outcomeTotalRows) so this page never has to hold more than
@@ -497,6 +505,11 @@ export default function GroupReportPage() {
                       <option value="追踪中">追踪中</option>
                       <option value="无效">无效</option>
                     </select>
+                    <label className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border ${oFilterOutcome ? 'border-gray-100 text-gray-300' : 'border-gray-200 text-gray-500'}`}>
+                      <input type="checkbox" checked={oHideNoResult} disabled={!!oFilterOutcome}
+                        onChange={e => { setOHideNoResult(e.target.checked); setOPage(0) }} />
+                      隐藏追踪中/无效
+                    </label>
                     <input value={oFilterKw} onChange={e => { setOFilterKw(e.target.value); setOPage(0) }}
                       placeholder="搜索关键词 / 最终词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-44" />
@@ -504,7 +517,7 @@ export default function GroupReportPage() {
                       placeholder="搜索排名词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-36" />
                     {anyFilter && (
-                      <button onClick={() => { setOFilterMember(''); setOFilterOp(''); setOFilterIndex(''); setOFilterOutcome(''); setOFilterKw(''); setOFilterRankKw(''); setOFilterSubmitStart(''); setOFilterSubmitEnd(''); setOPage(0) }}
+                      <button onClick={() => { setOFilterMember(''); setOFilterOp(''); setOFilterIndex(''); setOFilterOutcome(''); setOFilterKw(''); setOFilterRankKw(''); setOFilterSubmitStart(''); setOFilterSubmitEnd(''); setOHideNoResult(true); setOPage(0) }}
                         className="text-xs text-gray-400 hover:text-red-400 px-2 py-1.5 rounded border border-gray-200 hover:border-red-200 transition-colors">
                         清除筛选
                       </button>

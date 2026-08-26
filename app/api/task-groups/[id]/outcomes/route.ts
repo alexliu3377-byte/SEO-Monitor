@@ -36,6 +36,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const filterIndex         = searchParams.get('indexed') || ''         // 'has' | 'none'
   const filterRankKw        = (searchParams.get('rankKeyword') || '').toLowerCase()
   const filterEffectiveness = searchParams.get('outcome') || ''         // '获取排名'|'获取收录'|'追踪中'|'无效'
+  // 2026-08-26 新增：默认隐藏"追踪中"/"无效"，只看有结果的——只在没有显式选
+  // 具体成效类型时前端才会传这个（见 group-report/page.tsx loadOutcomes），
+  // 只影响下面返回的明细行/分页，summary/groupSummary 两张统计卡片依旧按
+  // 全量算，不会因为这个默认值把"追踪中"卡片显示成0。
+  const hideNoResult       = searchParams.get('hideNoResult') === '1'
   const sortBy              = searchParams.get('sortBy') || 'submit_date'
   const sortDir              = searchParams.get('sortDir') || 'desc'
   const page                = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
@@ -119,8 +124,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     invalidCount:  rows.filter(r => r.effectiveness === '无效').length,
   }
 
-  const totalRows = rows.length
-  const pagedRows = rows.slice(page * pageSize, (page + 1) * pageSize)
+  // 明细行专用的过滤——放在 summary/groupSummary 算完之后，两张统计卡片
+  // 继续反映真实总量（含追踪中/无效），只有下面要分页展示的表格行受影响。
+  const displayRows = hideNoResult
+    ? rows.filter(r => r.effectiveness === '获取排名' || r.effectiveness === '获取收录')
+    : rows
+
+  const totalRows = displayRows.length
+  const pagedRows = displayRows.slice(page * pageSize, (page + 1) * pageSize)
 
   return NextResponse.json({
     rows: pagedRows, summary, groupSummary, totalRows, page, pageSize,
