@@ -8,10 +8,15 @@ export async function GET(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!['super', 'admin', 'normal'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const periodType = searchParams.get('type') || 'week'
+  // 2026-08-26 起研究中心对普通组员开放周报/月报——季报/年报继续只给 super/admin，
+  // 光在前端藏tab不够，这里也要挡，不然改一下URL的type参数就能绕过去
+  if (profile?.role === 'normal' && !['week', 'month'].includes(periodType)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { data: reports, error } = await service
     .from('research_reports')

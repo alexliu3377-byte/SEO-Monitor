@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
 import SiteAZPicker, { type AZPickerSite } from '@/components/site-az-picker'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
@@ -27,15 +26,18 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'year', label: '研究年报' },
 ]
 
+// 2026-08-26 起研究中心对普通组员开放，但只开周报/月报——竞品成效、站点诊断、
+// 季报、年报信息量更大/更偏管理决策，继续只给 super/admin。对应的后端接口
+// （/api/research/reports 及 [id]）也要跟着放宽+按 period_type 二次校验，不能
+// 只在前端藏tab，不然普通组员直接改URL参数还是能拿到季报/年报数据。
+const NORMAL_ALLOWED_TABS: TabKey[] = ['week', 'month']
+
 export default function ResearchPage() {
   const { role } = useUser()
-  const router = useRouter()
+  const isNormal = role === 'normal'
+  const visibleTabs = isNormal ? TABS.filter(t => NORMAL_ALLOWED_TABS.includes(t.key)) : TABS
 
-  useEffect(() => {
-    if (role === 'normal') router.replace('/task-groups')
-  }, [role, router])
-
-  const [activeTab, setActiveTab] = useState<TabKey>('competitors')
+  const [activeTab, setActiveTab] = useState<TabKey>(isNormal ? 'week' : 'competitors')
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -45,7 +47,7 @@ export default function ResearchPage() {
       </div>
 
       <div className="flex border-b border-gray-100 mb-6">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === t.key ? 'text-green-600 border-green-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
             {t.label}

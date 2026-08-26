@@ -8,11 +8,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!['super', 'admin', 'normal'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
   const { data: report, error } = await service.from('research_reports').select('*').eq('id', id).single()
   if (error || !report) return NextResponse.json({ error: '报告不存在' }, { status: 404 })
+  // 普通组员只放行周报/月报——见 reports/route.ts 同样的说明，防止直接拿报告id绕过tab限制
+  if (profile?.role === 'normal' && !['week', 'month'].includes(report.period_type)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   // site_analyses 现在从 research_report_sites 表读（每站点一行，2026-08-07 年报
   // 拆分片改动的一部分——分片并行写不能共享同一个 JSONB 数组列，会互相覆盖）。

@@ -33,12 +33,13 @@ const NAV_REFERENCE: { id: string; label: string }[] = [
   { id: 'ref-index-pages', label: '收录页面' },
   { id: 'ref-charts', label: '近期榜单' },
   { id: 'ref-hot-keywords', label: '热词雷达' },
+  { id: 'ref-research', label: '研究中心' },
 ]
 const NAV_ADMIN: { id: string; label: string }[] = [
   { id: 'admin-sites', label: '网站管理' },
   { id: 'admin-crawl-log', label: '抓取日志' },
   { id: 'admin-home', label: '首页快报' },
-  { id: 'admin-rules', label: '研究中心' },
+  { id: 'admin-research', label: '研究中心（其余tab）' },
 ]
 
 function Section({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
@@ -273,6 +274,15 @@ export default function GuidePage() {
               </div>
               <p className="text-sm text-gray-600">用来了解行业整体趋势、给分组任务的认领补灵感。右侧 6 个 tab（搜索量上涨/交叉词/竞品涨排名/连续上涨词/共新增词/更新词库）跟分组任务里的信号来源是同一套逻辑，只是这里是纯浏览，不能直接认领去做。理论上分组任务的词可以由管理员按分组筛选站点范围，热词雷达则看全部站点；不过现阶段各分组都还没设置筛选，两边看到的范围其实一样，这里就当参考用。</p>
             </Section>
+
+            <Section id="ref-research" className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-800">研究中心</h3>
+                <ExtLink href="/research">打开研究中心</ExtLink>
+              </div>
+              <p className="text-sm text-gray-600">"研究周报"/"研究月报"两个 tab 所有人都能看：GitHub Actions 定时自动生成（周报每周一、月报每月1号），不用手动点"开始分析"。AI 通读这段时间每个站点的完整原始数据，写成大环境 / 自己站点成效 / 竞品成效 / 综合结论几段报告，顶部横排选期数，"各站点分析"里是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
+              {canSeeAll && <p className="text-xs text-gray-400 mt-2">管理员还能看竞品成效/站点诊断/研究季报/研究年报，见下方"管理员"专区。</p>}
+            </Section>
           </div>
         </div>
 
@@ -331,7 +341,7 @@ export default function GuidePage() {
                     <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
                       <p>· <b className="text-gray-700">关键词</b>：控制上面那套 HTML 配置要不要跑。自家网站不需要靠这个发现新词（新词是组员在分组任务里自己提交的），HTML 配置可以不填；没有日期字段、或更新很少的小站，也建议关掉，硬抓只会产生垃圾数据。</p>
                       <p>· <b className="text-gray-700">涨跌</b>：抓这个站当天新涨入/跌出排名的词（有没有变化，不是具体第几名），是"竞品日收"里排名波动信号的来源。如果爱站对这个站屏蔽了涨跌数据（部分站点爱站不开放），开了也抓不到，直接关掉。</p>
-                      <p>· <b className="text-gray-700">排名</b>：抓这个站每个关键词具体排第几名。自家站点开这个是为了分组报告"成效追踪"能比对提交的词有没有排上名；竞品站点开这个是为了挖竞品排名信号（"竞品涨排名"这类 tab 的数据来源）。</p>
+                      <p>· <b className="text-gray-700">排名</b>：抓这个站每个关键词具体排第几名。自家站点开这个是为了分组报告"成效追踪"能比对提交的词有没有排上名；竞品站点开这个是为了挖竞品排名信号（"竞品涨排名"这类 tab 的数据来源）。开关旁边有个小"PC"按钮，默认关闭——只有需要同时看PC端排名的站点（一般是自己的站点，想看M/PC合并判定成效）才需要开，竞品站点不用开，开了只是白占抓取资源。</p>
                       <p>· <b className="text-gray-700">收录页面</b>：追踪到具体 URL 级别的收录状态。现在只给<b>需要追踪成效</b>（有分组在这个站点上提交、要看排名/收录结果）的站点开，不是所有站点都开。</p>
                     </div>
                   </div>
@@ -364,16 +374,16 @@ export default function GuidePage() {
                 </div>
               </Section>
 
-              <Section id="admin-rules" className="bg-white rounded-xl border border-violet-200 p-5">
+              <Section id="admin-research" className="bg-white rounded-xl border border-violet-200 p-5">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-800">研究中心</h3>
+                  <h3 className="text-sm font-semibold text-gray-800">研究中心（管理员专属的另外4个tab）</h3>
                   <ExtLink href="/research">打开研究中心</ExtLink>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">5个tab：竞品成效 / 站点诊断 / 研究周报 / 研究月报 / 研究年报——除了"站点诊断"是手动发起，其余4个都是自动产出，不用手动点"开始分析"。</p>
+                <p className="text-sm text-gray-600 mb-3">2026-08-26 起研究中心对全员开放，但只开"研究周报"/"研究月报"两个tab（说明见上面"参考工具"区）——竞品成效、站点诊断、研究季报、研究年报这4个信息量更大/更偏管理决策，继续只给管理员看。</p>
                 <div className="space-y-2 text-sm text-gray-600">
                   <p>· <b className="text-gray-700">竞品成效</b>：展示 has_rank_title（网站管理里的"排名"开关）开启的竞品站点，每天自动追踪的新增内容有没有涨排名/收录，A-Z卡片选站点+搜索框；不含自己的站点（按"分组任务"页面里配的"自己站点"字段自动排除）。右上角"管理竞品站点"可以批量勾选要追踪哪些站点，不是新建站点——域名/CSS选择器还是要去网站管理配。</p>
                   <p>· <b className="text-gray-700">站点诊断</b>：选一个站点+输入你想问的问题，AI读这个站点的全量历史数据（不是摘要）给详细策略建议——跟其它几个tab的"定时自动短点评"刻意反着来，用来深挖单个站点的具体问题。</p>
-                  <p>· <b className="text-gray-700">研究周报/月报/年报</b>：GitHub Actions 定时自动生成（周报每周一、月报每月1号、年报每年1月1号），AI 通读每个站点这段时间的完整原始数据写分析，再综合成大环境/自己站点成效/竞品成效/综合结论四段报告。顶部横排选期数，"各站点分析"里同样是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
+                  <p>· <b className="text-gray-700">研究季报/年报</b>：跟周报/月报同一套逻辑，GitHub Actions 定时自动生成（季报每季度首日、年报每年1月1号），但不是从头重新读原始数据——季报汇总当季已经生成好的月报，年报汇总当年的季报，逐层往上滚。</p>
                   <p>· <b className="text-gray-700">"成效"为什么分两段</b>：自己站点成效来自"分组任务"里组员提交内容的排名/收录追踪；竞品成效来自竞品站点自动追踪，两边数据来源完全不同，报告里刻意不混在一起写。</p>
                 </div>
               </Section>
