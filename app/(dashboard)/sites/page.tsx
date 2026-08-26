@@ -168,8 +168,7 @@ export default function SitesPage() {
   }
 
   async function handleTogglePcRank(site: Site) {
-    const currentlyOn = site.track_pc_rank !== false // 没设过(null)按默认true算，跟建表默认值一致
-    const newVal = !currentlyOn
+    const newVal = !site.track_pc_rank
     try {
       const res = await fetch('/api/sites', {
         method: 'PUT',

@@ -178,22 +178,27 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
                 </button>
               </td>
               <td className="table-td text-center">
-                <div className="flex items-center justify-center gap-1.5">
+                {/* 固定宽度盒子居中，PC小按钮的位置用一个固定宽度的槽位占好——
+                   不管这个槽位里有没有渲染按钮，主开关都锚定在盒子左边，不会
+                   因为PC按钮出不出现而左右跑位（2026-08-26 用户反馈对齐问题）。 */}
+                <div className="inline-flex items-center gap-1.5 w-[58px]">
                   <button
                     onClick={() => onToggleRankTitle(site)}
-                    className={`relative w-9 h-[18px] rounded-full transition-colors ${site.has_rank_title ? 'bg-orange-500' : 'bg-gray-200'}`}
+                    className={`relative w-9 h-[18px] rounded-full transition-colors flex-shrink-0 ${site.has_rank_title ? 'bg-orange-500' : 'bg-gray-200'}`}
                   >
                     <div className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${site.has_rank_title ? 'translate-x-[18px]' : 'translate-x-0'}`} />
                   </button>
-                  {site.has_rank_title && (
-                    <button
-                      onClick={() => onTogglePcRank(site)}
-                      title={site.track_pc_rank !== false ? '同时抓PC端排名，点击关闭（只保留移动端）' : '目前只抓移动端，点击开启PC端'}
-                      className={`text-[10px] leading-none px-1 py-0.5 rounded border transition-colors ${site.track_pc_rank !== false ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
-                    >
-                      PC
-                    </button>
-                  )}
+                  <span className="w-6 flex-shrink-0">
+                    {site.has_rank_title && (
+                      <button
+                        onClick={() => onTogglePcRank(site)}
+                        title={site.track_pc_rank ? '同时抓PC端排名，点击关闭（只保留移动端）' : '目前只抓移动端，点击开启PC端'}
+                        className={`text-[10px] leading-none px-1 py-0.5 rounded border transition-colors ${site.track_pc_rank ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
+                      >
+                        PC
+                      </button>
+                    )}
+                  </span>
                 </div>
               </td>
               <td className="table-td text-center">

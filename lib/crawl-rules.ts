@@ -97,7 +97,7 @@ export const CRAWL_RULES: RuleSection[] = [
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 18 * * * UTC = 02:30 MYT)，动态 matrix job 并行（每2个站点1个job）；retry-crawl.yml (cron 0 22 UTC = 06:00 MYT) 智能重试：setup job 查询 activity_site_log 统计今日失败/空站数，仅为失败站创建 job（每站1个），scripts/crawl-rank.ts 以 --retry-failed 模式运行只处理当日失败站点；脚本：scripts/crawl-rank.ts；支持手动 workflow_dispatch 选 step=rank-title' },
       { label: '抓取对象', text: 'sites 表中 has_rank_title=true 的站点（网站管理列表里显示为"排名"）；动态读取，每次运行重新查询' },
-      { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）默认必抓；PC端（/baidu/）按站点 sites.track_pc_rank 决定抓不抓（2026-08-26 新增，默认true=抓，网站管理"排名"开关旁边有个小"PC"按钮可以逐站关掉——全站只有 platform=mobile 的数据被"成效追踪"/竞品追踪等任何功能读取过，PC端此前一直白抓白占IO，关掉对功能没有影响，只是从"能看到M/PC合并判断成效"这个新需求出发，默认还是保留PC，交给用户按站点自行取舍）；各抓涨入和跌出，开启PC时共4个组合、只抓M时2个组合；含标题（title）和排名页 URL（url）' },
+      { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）默认必抓；PC端（/baidu/）按站点 sites.track_pc_rank 决定抓不抓（2026-08-26 新增，网站管理"排名"开关旁边有个小"PC"按钮可以逐站开关——默认关闭，全站只有 platform=mobile 的数据被"成效追踪"/竞品追踪等任何功能读取过，PC端此前一直白抓白占IO；用户自己的3个站点（sjwyx.com/qtvcd.com/f71.com）手动开了PC，配合成效追踪M/PC合并判定用，其余全部竞品站点保持关闭，同一天顺带把这13个竞品站点历史PC数据也删了，site_keyword_ranks从123万行降到90万行）；各抓涨入和跌出，开启PC时共4个组合、只抓M时2个组合；含标题（title）和排名页 URL（url）' },
       { label: '浏览器验证', text: '与 rank 步骤相同（详见 rank 小节"浏览器验证"完整历史），job 开始时用 createAizhanHttpSession() 拿一次会话 cookie（纯 fetch，一次额外往返，非 2026-07 那版约2分钟的 Playwright 验证），本 job 内全部站点/平台/涨跌组合复用同一 session；支持 --date=YYYY-MM-DD 补抓历史日期，用法同 rank 步骤' },
       { label: '并行策略', text: '排名段 1-5 同时并行（各开一个浏览器 page），段内按页顺序，每页间隔 300ms；4 个组合顺序执行，组合间隔随机 3-5 秒；站点间间隔 60 秒' },
       { label: '翻页上限', text: '每段最多 15 页；抓取全部词（不过滤 volume=0）' },
