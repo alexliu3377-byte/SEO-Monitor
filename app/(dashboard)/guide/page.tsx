@@ -281,7 +281,6 @@ export default function GuidePage() {
                 <ExtLink href="/research">打开研究中心</ExtLink>
               </div>
               <p className="text-sm text-gray-600">"研究周报"/"研究月报"两个 tab 所有人都能看：GitHub Actions 定时自动生成（周报每周一、月报每月1号），不用手动点"开始分析"。AI 通读这段时间每个站点的完整原始数据，写成大环境 / 自己站点成效 / 竞品成效 / 综合结论几段报告，顶部横排选期数，"各站点分析"里是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
-              {canSeeAll && <p className="text-xs text-gray-400 mt-2">管理员还能看竞品成效/站点诊断/研究季报/研究年报，见下方"管理员"专区。</p>}
             </Section>
           </div>
         </div>
