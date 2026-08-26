@@ -65,6 +65,16 @@ type ReportTab = 'submissions' | 'outcomes' | 'trackingSummary'
 
 const PERIOD_LABELS: Record<Period, string> = { yesterday: '昨日', week: '本周', month: '本月', custom: '自定义' }
 
+// "成效追踪"月份选择器用——一个 YYYY-MM 算出这个月的起止日期，当月还没走完
+// 时结束日期不能超过今天。
+function monthBounds(month: string, today: string): { start: string; end: string } {
+  const [y, m] = month.split('-').map(Number)
+  const start = `${month}-01`
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  const end = `${month}-${String(lastDay).padStart(2, '0')}`
+  return { start, end: end > today ? today : end }
+}
+
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   '竞品涨排名':  { bg: 'bg-purple-50',  text: 'text-purple-700' },
   '共新增词':    { bg: 'bg-blue-50',    text: 'text-blue-700' },
@@ -172,18 +182,17 @@ export default function GroupReportPage() {
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
-  const [oFilterSubmitStart, setOFilterSubmitStart] = useState('')
-  const [oFilterSubmitEnd, setOFilterSubmitEnd] = useState('')
+  // 2026-08-26 改成跟"追踪汇总"一样先选月份（‹ YYYY-MM ›），需要再收窄到
+  // 具体某一天——用户反馈之前那种起止日期两个输入框、加上一堆按钮筛选看
+  // 着乱，直接对齐追踪汇总已经验证过的交互。
+  const [oMonth, setOMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
+  const [oDay, setODay] = useState('')
   const [oFilterMember, setOFilterMember] = useState('')
   const [oFilterOp, setOFilterOp] = useState('')
   const [oFilterKw, setOFilterKw] = useState('')
   const [oFilterIndex, setOFilterIndex] = useState('')
   const [oFilterRankKw, setOFilterRankKw] = useState('')
   const [oFilterOutcome, setOFilterOutcome] = useState('')
-  // 2026-08-26 用户反馈"追踪中/无效"占了大半篇幅，想看的是有结果的——默认
-  // 隐藏，只在"全部成效"（oFilterOutcome===''）下生效，用户明确选了"追踪中"
-  // /"无效"要看这两类本身时不会被这个默认值挡住（见 loadOutcomes 里的判断）。
-  const [oHideNoResult, setOHideNoResult] = useState(true)
   const [oSortBy, setOSortBy] = useState<OutcomeSortBy>('submit_date')
   const [oSortDir, setOSortDir] = useState<'asc' | 'desc'>('desc')
   const [oPage, setOPage] = useState(0)
@@ -262,15 +271,14 @@ export default function GroupReportPage() {
 
   // Reset outcome filters when switching groups
   useEffect(() => {
-    setOFilterSubmitStart('')
-    setOFilterSubmitEnd('')
+    setOMonth(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
+    setODay('')
     setOFilterMember('')
     setOFilterOp('')
     setOFilterKw('')
     setOFilterIndex('')
     setOFilterRankKw('')
     setOFilterOutcome('')
-    setOHideNoResult(true)
     setOPage(0)
   }, [activeTabId])
 
@@ -283,17 +291,15 @@ export default function GroupReportPage() {
     if (!activeTabId || reportTab !== 'outcomes') return
     setOutcomesLoading(true)
     const p = new URLSearchParams()
-    if (oFilterSubmitStart)   p.set('submitStart',   oFilterSubmitStart)
-    if (oFilterSubmitEnd)     p.set('submitEnd',     oFilterSubmitEnd)
+    const bounds = monthBounds(oMonth, today)
+    p.set('submitStart', oDay || bounds.start)
+    p.set('submitEnd',   oDay || bounds.end)
     if (oFilterMember)        p.set('memberId',      oFilterMember)
     if (oFilterOp)            p.set('opType',        oFilterOp)
     if (oFilterKw)            p.set('keyword',       oFilterKw)
     if (oFilterIndex)         p.set('indexed',       oFilterIndex)
     if (oFilterRankKw)        p.set('rankKeyword',   oFilterRankKw)
     if (oFilterOutcome)       p.set('outcome',       oFilterOutcome)
-    // 用户明确选了具体成效类型（含"追踪中"/"无效"本身）时不再叠加默认隐藏，
-    // 不然选"追踪中"会被这个默认值筛成空列表。
-    if (!oFilterOutcome && oHideNoResult) p.set('hideNoResult', '1')
     p.set('sortBy',  oSortBy)
     p.set('sortDir', oSortDir)
     p.set('page',     String(oPage))
@@ -309,7 +315,7 @@ export default function GroupReportPage() {
       })
       .finally(() => setOutcomesLoading(false))
   }
-  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterSubmitStart, oFilterSubmitEnd, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oHideNoResult, oSortBy, oSortDir, oPage, oPageSize])
+  useEffect(loadOutcomes, [activeTabId, reportTab, oMonth, oDay, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
 
   // Load tracking summary
   function scopeParams(month: string, scope: string): URLSearchParams {
@@ -416,7 +422,16 @@ export default function GroupReportPage() {
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
             const OCOLS = 'grid-cols-[48px_2fr_60px_80px_70px_88px_1.5fr_60px_76px_56px_70px_70px_70px]'
-            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oFilterSubmitStart || oFilterSubmitEnd || !oHideNoResult)
+            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oDay)
+            const oBounds = monthBounds(oMonth, today)
+            const isCurrentOMonth = oMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
+            const shiftOMonth = (delta: number) => {
+              const [y, m] = oMonth.split('-').map(Number)
+              const d = new Date(Date.UTC(y, m - 1 + delta, 1))
+              setOMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
+              setODay('')
+              setOPage(0)
+            }
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
             // (see outcomeTotalRows) so this page never has to hold more than
@@ -469,14 +484,19 @@ export default function GroupReportPage() {
                 })()}
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-gray-500">提交日期：</span>
-                    <input type="date" value={oFilterSubmitStart} max={oFilterSubmitEnd || today}
-                      onChange={e => { setOFilterSubmitStart(e.target.value); setOPage(0) }}
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => shiftOMonth(-1)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">‹</button>
+                      <span className="text-sm font-medium text-gray-700 tabular-nums w-20 text-center">{oMonth}</span>
+                      <button onClick={() => shiftOMonth(1)} disabled={isCurrentOMonth}
+                        className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
+                    </div>
+                    <input type="date" value={oDay} min={oBounds.start} max={oBounds.end}
+                      onChange={e => { setODay(e.target.value); setOPage(0) }}
+                      title="收窄到具体某一天（可选）"
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-                    <span className="text-gray-400 text-sm">~</span>
-                    <input type="date" value={oFilterSubmitEnd} min={oFilterSubmitStart} max={today}
-                      onChange={e => { setOFilterSubmitEnd(e.target.value); setOPage(0) }}
-                      className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+                    {oDay && (
+                      <button onClick={() => { setODay(''); setOPage(0) }} className="text-gray-400 hover:text-gray-600 text-xs" title="回到整月">×</button>
+                    )}
                     <span className="w-px h-5 bg-gray-200 mx-1" />
                     {canSeeAll && report?.members && report.members.length > 1 && (
                       <select value={oFilterMember} onChange={e => { setOFilterMember(e.target.value); setOPage(0) }}
@@ -505,23 +525,12 @@ export default function GroupReportPage() {
                       <option value="追踪中">追踪中</option>
                       <option value="无效">无效</option>
                     </select>
-                    <label className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border ${oFilterOutcome ? 'border-gray-100 text-gray-300' : 'border-gray-200 text-gray-500'}`}>
-                      <input type="checkbox" checked={oHideNoResult} disabled={!!oFilterOutcome}
-                        onChange={e => { setOHideNoResult(e.target.checked); setOPage(0) }} />
-                      隐藏追踪中/无效
-                    </label>
                     <input value={oFilterKw} onChange={e => { setOFilterKw(e.target.value); setOPage(0) }}
                       placeholder="搜索关键词 / 最终词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-44" />
                     <input value={oFilterRankKw} onChange={e => { setOFilterRankKw(e.target.value); setOPage(0) }}
                       placeholder="搜索排名词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-36" />
-                    {anyFilter && (
-                      <button onClick={() => { setOFilterMember(''); setOFilterOp(''); setOFilterIndex(''); setOFilterOutcome(''); setOFilterKw(''); setOFilterRankKw(''); setOFilterSubmitStart(''); setOFilterSubmitEnd(''); setOHideNoResult(true); setOPage(0) }}
-                        className="text-xs text-gray-400 hover:text-red-400 px-2 py-1.5 rounded border border-gray-200 hover:border-red-200 transition-colors">
-                        清除筛选
-                      </button>
-                    )}
                   </div>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
