@@ -13,6 +13,9 @@ export interface AZPickerSite {
   name: string
   pcWeight?: number | null
   mobileWeight?: number | null
+  // 2026-08-26 研究报告"各站点分析"加的——数据量明显更多的站点用浅色底+
+  // 描边区分一下，不影响其它调用方（不传就是原来的纯灰边样式）。
+  highlighted?: boolean
 }
 
 const GROUPS = [
@@ -72,7 +75,11 @@ export default function SiteAZPicker({ sites, selectedId, onSelect }: {
                         key={s.id}
                         onClick={() => onSelect(s.id)}
                         className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                          isSelected ? 'border-transparent text-white font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                          isSelected
+                            ? 'border-transparent text-white font-medium'
+                            : s.highlighted
+                              ? 'border-amber-200 bg-amber-50 text-gray-600 hover:border-amber-300'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300'
                         }`}
                         style={isSelected ? { backgroundColor: color } : {}}
                       >

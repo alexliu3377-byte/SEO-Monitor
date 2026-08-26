@@ -670,15 +670,9 @@ function ReportDetailView({ reportId }: { reportId: string }) {
     id: s.site_id, domain: s.domain, name: s.name,
     pcWeight: s.pc_weight ?? siteWeights[s.site_id]?.pc ?? null,
     mobileWeight: s.mobile_weight ?? siteWeights[s.site_id]?.mobile ?? null,
+    highlighted: (s.momentum_keywords?.length ?? 0) > 0,
   }))
   const expandedSite = analyzedSites.find(s => s.site_id === expandedSiteId) ?? null
-
-  // 2026-08-26 用户反馈"各站点分析"里一堆站点不知道先看哪个——按"本期发力
-  // 词群"的词数从多到少排一份重点站点出来，数据量大的排前面，AZ picker
-  // 底下继续保留完整列表不受影响，只是加一层"看这个"的引导。
-  const momentumRanked = [...analyzedSites]
-    .filter(s => (s.momentum_keywords?.length ?? 0) > 0)
-    .sort((a, b) => (b.momentum_keywords?.length ?? 0) - (a.momentum_keywords?.length ?? 0))
 
   const sections = report.report_sections
   const envNote = sections?.environmentNote ?? sections?.environment ?? null
@@ -788,22 +782,6 @@ function ReportDetailView({ reportId }: { reportId: string }) {
           <p className="text-sm text-gray-300 text-center py-8">这段时间没有站点产出有效分析</p>
         ) : (
           <>
-            {momentumRanked.length > 0 && (
-              <div className="mb-4 pb-4 border-b border-gray-100">
-                <p className="text-xs font-medium text-amber-600 mb-1.5">本期发力较多，建议优先看</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {momentumRanked.slice(0, 10).map(s => (
-                    <button key={s.site_id} onClick={() => setExpandedSiteId(prev => prev === s.site_id ? null : s.site_id)}
-                      className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        expandedSiteId === s.site_id ? 'border-amber-400 bg-amber-50 text-amber-700 font-medium' : 'border-amber-200 bg-amber-50/40 text-amber-700 hover:bg-amber-50'
-                      }`}>
-                      {s.domain}
-                      <span className="text-[10px] text-amber-500">{s.momentum_keywords!.length}词</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
             <SiteAZPicker sites={azSites} selectedId={expandedSiteId} onSelect={id => setExpandedSiteId(prev => prev === id ? null : id)} />
             {expandedSite && (
               <div className="mt-4 pt-4 border-t border-gray-100">
