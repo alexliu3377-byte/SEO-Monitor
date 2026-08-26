@@ -462,8 +462,12 @@ export default function GroupReportPage() {
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-gray-500">提交日期：</span>
-                    <input type="date" value={oFilterSubmitStart}
-                      onChange={e => { const v = e.target.value; setOFilterSubmitStart(v); setOFilterSubmitEnd(v); setOPage(0) }}
+                    <input type="date" value={oFilterSubmitStart} max={oFilterSubmitEnd || today}
+                      onChange={e => { setOFilterSubmitStart(e.target.value); setOPage(0) }}
+                      className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+                    <span className="text-gray-400 text-sm">~</span>
+                    <input type="date" value={oFilterSubmitEnd} min={oFilterSubmitStart} max={today}
+                      onChange={e => { setOFilterSubmitEnd(e.target.value); setOPage(0) }}
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
                     <span className="w-px h-5 bg-gray-200 mx-1" />
                     {canSeeAll && report?.members && report.members.length > 1 && (

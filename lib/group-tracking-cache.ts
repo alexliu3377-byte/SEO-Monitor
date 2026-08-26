@@ -107,15 +107,30 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
   // Fetch every matched rank keyword for the whole group (not just one page) —
   // "排名"/"排名量" sort by the best position and summed volume across ALL of
   // a claim's matched keywords, not the single "best pick" scalar columns.
+  //
+  // 2026-08-26 修复：一个claim平均能匹配到二三十个排名词（活跃分组实测过
+  // 一个claim最多近30条），200个claim一批很容易凑够3000+行，之前这里没有
+  // 分页、只是单次 .in() 查询——PostgREST 单次硬顶3000行会静默截断（这个
+  // 项目反复踩过的坑，见 lib/supabase-paginate.ts 顶部注释），而且排序是
+  // 按 rank_position 全局升序（nulls last），截断时优先保留"批次里排名最好
+  // 的那些行"，同一批次里排名不是最靠前、但搜索量很大的claim反而容易被整批
+  // 挤掉——表现就是组员反馈"以前得分较高的东西不见了"：不是数据被删，是
+  // 这个claim自己的排名词整批没读到，退化成只用 site_tracking_records 那个
+  // 单一"最佳位置"标量兜底，totalRankVolume 少算了其它排名词的搜索量，
+  // 分数跟着算低了。改成跟 site_tracking_records 一样真分页（fetchAllRows），
+  // 加 id 做唯一排序兜底，不会再截断。
   type RankMatch = { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number }
   const rankMatchesMap = new Map<string, RankMatch[]>()
   for (let i = 0; i < claimIds.length; i += BATCH) {
-    const { data: matchRows } = await service
+    const chunk = claimIds.slice(i, i + BATCH)
+    const matchRows = await fetchAllRows<RankMatch & { claim_id: string; record_date: string }>((from, to) => service
       .from('site_tracking_rank_matches')
       .select('claim_id, record_date, keyword, rank_position, prev_rank_position, volume')
-      .in('claim_id', claimIds.slice(i, i + BATCH))
+      .in('claim_id', chunk)
       .order('rank_position', { ascending: true, nullsFirst: false })
-    for (const m of (matchRows ?? []) as (RankMatch & { claim_id: string; record_date: string })[]) {
+      .order('id', { ascending: true })
+      .range(from, to))
+    for (const m of matchRows) {
       const key = `${m.claim_id}|${m.record_date}`
       if (!rankMatchesMap.has(key)) rankMatchesMap.set(key, [])
       rankMatchesMap.get(key)!.push({ keyword: m.keyword, rank_position: m.rank_position, prev_rank_position: m.prev_rank_position, volume: m.volume })
