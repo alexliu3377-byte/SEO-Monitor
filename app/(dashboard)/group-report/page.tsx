@@ -65,16 +65,6 @@ type ReportTab = 'submissions' | 'outcomes' | 'trackingSummary'
 
 const PERIOD_LABELS: Record<Period, string> = { yesterday: '昨日', week: '本周', month: '本月', custom: '自定义' }
 
-// "成效追踪"月份选择器用——一个 YYYY-MM 算出这个月的起止日期，当月还没走完
-// 时结束日期不能超过今天。
-function monthBounds(month: string, today: string): { start: string; end: string } {
-  const [y, m] = month.split('-').map(Number)
-  const start = `${month}-01`
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  const end = `${month}-${String(lastDay).padStart(2, '0')}`
-  return { start, end: end > today ? today : end }
-}
-
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   '竞品涨排名':  { bg: 'bg-purple-50',  text: 'text-purple-700' },
   '共新增词':    { bg: 'bg-blue-50',    text: 'text-blue-700' },
@@ -182,18 +172,13 @@ export default function GroupReportPage() {
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
-  // 2026-08-26 改成跟"追踪汇总"一样先选月份（‹ YYYY-MM ›），需要再收窄到
-  // 具体某一天——用户反馈之前那种起止日期两个输入框、加上一堆按钮筛选看
-  // 着乱，直接对齐追踪汇总已经验证过的交互。
-  const [oMonth, setOMonth] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
-  const [oDay, setODay] = useState('')
   const [oFilterMember, setOFilterMember] = useState('')
   const [oFilterOp, setOFilterOp] = useState('')
   const [oFilterKw, setOFilterKw] = useState('')
   const [oFilterIndex, setOFilterIndex] = useState('')
   const [oFilterRankKw, setOFilterRankKw] = useState('')
   const [oFilterOutcome, setOFilterOutcome] = useState('')
-  const [oSortBy, setOSortBy] = useState<OutcomeSortBy>('submit_date')
+  const [oSortBy, setOSortBy] = useState<OutcomeSortBy>('score')
   const [oSortDir, setOSortDir] = useState<'asc' | 'desc'>('desc')
   const [oPage, setOPage] = useState(0)
   const [oPageSize, setOPageSize] = useState(20)
@@ -271,8 +256,6 @@ export default function GroupReportPage() {
 
   // Reset outcome filters when switching groups
   useEffect(() => {
-    setOMonth(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7))
-    setODay('')
     setOFilterMember('')
     setOFilterOp('')
     setOFilterKw('')
@@ -291,9 +274,6 @@ export default function GroupReportPage() {
     if (!activeTabId || reportTab !== 'outcomes') return
     setOutcomesLoading(true)
     const p = new URLSearchParams()
-    const bounds = monthBounds(oMonth, today)
-    p.set('submitStart', oDay || bounds.start)
-    p.set('submitEnd',   oDay || bounds.end)
     if (oFilterMember)        p.set('memberId',      oFilterMember)
     if (oFilterOp)            p.set('opType',        oFilterOp)
     if (oFilterKw)            p.set('keyword',       oFilterKw)
@@ -315,7 +295,7 @@ export default function GroupReportPage() {
       })
       .finally(() => setOutcomesLoading(false))
   }
-  useEffect(loadOutcomes, [activeTabId, reportTab, oMonth, oDay, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
+  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
 
   // Load tracking summary
   function scopeParams(month: string, scope: string): URLSearchParams {
@@ -422,16 +402,7 @@ export default function GroupReportPage() {
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
             const OCOLS = 'grid-cols-[48px_2fr_60px_80px_70px_88px_1.5fr_60px_76px_56px_70px_70px_70px]'
-            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw || oDay)
-            const oBounds = monthBounds(oMonth, today)
-            const isCurrentOMonth = oMonth === new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
-            const shiftOMonth = (delta: number) => {
-              const [y, m] = oMonth.split('-').map(Number)
-              const d = new Date(Date.UTC(y, m - 1 + delta, 1))
-              setOMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
-              setODay('')
-              setOPage(0)
-            }
+            const anyFilter = !!(oFilterMember || oFilterOp || oFilterIndex || oFilterOutcome || oFilterKw || oFilterRankKw)
             // outcomes already holds just the current page — pagination and
             // totals are computed server-side against the full filtered set
             // (see outcomeTotalRows) so this page never has to hold more than
@@ -484,20 +455,6 @@ export default function GroupReportPage() {
                 })()}
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => shiftOMonth(-1)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100">‹</button>
-                      <span className="text-sm font-medium text-gray-700 tabular-nums w-20 text-center">{oMonth}</span>
-                      <button onClick={() => shiftOMonth(1)} disabled={isCurrentOMonth}
-                        className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
-                    </div>
-                    <input type="date" value={oDay} min={oBounds.start} max={oBounds.end}
-                      onChange={e => { setODay(e.target.value); setOPage(0) }}
-                      title="收窄到具体某一天（可选）"
-                      className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-                    {oDay && (
-                      <button onClick={() => { setODay(''); setOPage(0) }} className="text-gray-400 hover:text-gray-600 text-xs" title="回到整月">×</button>
-                    )}
-                    <span className="w-px h-5 bg-gray-200 mx-1" />
                     {canSeeAll && report?.members && report.members.length > 1 && (
                       <select value={oFilterMember} onChange={e => { setOFilterMember(e.target.value); setOPage(0) }}
                         className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">

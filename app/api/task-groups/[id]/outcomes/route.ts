@@ -27,16 +27,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (!member) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Filters — accept both submitStart and discoverStart for backward compat
-  const filterSubmitStart   = searchParams.get('submitStart')  || searchParams.get('discoverStart') || ''
-  const filterSubmitEnd     = searchParams.get('submitEnd')    || searchParams.get('discoverEnd')   || ''
+  // 2026-08-26 去掉按日期筛选（先是提交日期、后改记录日期，都被用户反馈
+  // "看不全"——回到最简单的状态：默认不按时间分组，全量按得分排序，想找
+  // 某天的用排序列自己翻。
   const filterMember        = searchParams.get('memberId') || ''
   const filterOp            = searchParams.get('opType') || ''
   const filterKw            = (searchParams.get('keyword') || '').toLowerCase()
   const filterIndex         = searchParams.get('indexed') || ''         // 'has' | 'none'
   const filterRankKw        = (searchParams.get('rankKeyword') || '').toLowerCase()
   const filterEffectiveness = searchParams.get('outcome') || ''         // '获取排名'|'获取收录'|'追踪中'|'无效'
-  const sortBy              = searchParams.get('sortBy') || 'submit_date'
+  const sortBy              = searchParams.get('sortBy') || 'score'
   const sortDir              = searchParams.get('sortDir') || 'desc'
   const page                = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
   const pageSize            = Math.min(200, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10) || 20))
@@ -64,8 +64,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   let rows = allRows
   if (!canSeeAll) rows = rows.filter(r => r.user_id === userId)
   if (filterOp) rows = rows.filter(r => r.operation_type === filterOp)
-  if (filterSubmitStart) rows = rows.filter(r => (r.submit_date ?? '') >= filterSubmitStart)
-  if (filterSubmitEnd) rows = rows.filter(r => (r.submit_date ?? '') <= filterSubmitEnd)
 
   // Post-fetch filters (everything except the member filter — member narrowing
   // happens after groupSummary is computed, same as before).
