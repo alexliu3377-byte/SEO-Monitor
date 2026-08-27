@@ -240,54 +240,51 @@ function CompetitorsTab() {
 
 // ══════════════════════════════ 站点诊断 ══════════════════════════════
 
-interface Diagnostic { id: string; question: string | null; result: string; created_at: string }
+interface DiagnosticHistoryItem { id: string; question: string | null; result: string; created_at: string; domains: string[] }
+interface MatchedSite { id: string; domain: string; name: string; isOwnSite: boolean }
+interface DiagnosticResult {
+  id: string; question: string; result: string; created_at: string
+  matched_sites: MatchedSite[]; unmatched_domains: string[]; truncated: boolean
+}
 
-// 用户主动选一个站点+可以带一个具体问题，AI读完整历史数据后写一份策略
-// 建议——跟周报/月报/年报刻意反着来（那边数字结构化+AI只写短点评，这边
-// 按需触发、用户愿意等，输出要完整详细）。2026-08-11 新增，用户接手一个
-// 闲置很久的站点要重新安排人手时提出的需求。
+// 2026-08-27 从"先选一个站点才能问"改成直接自由提问——用户反馈发现异常时
+// 经常一次想问好几个站点（甚至纯粹问"大环境怎么样"），不想一个个点选。
+// AI自己从问题文本里识别提到了哪些站点（0个=纯大环境、1个=单站、多个=
+// 跨站点找规律），历史记录也从"必须先选站点才能看"改成默认展示+分页。
 function SiteDiagnosticTab() {
-  const [sites, setSites] = useState<AZPickerSite[]>([])
-  const [loadingSites, setLoadingSites] = useState(true)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [question, setQuestion] = useState('')
   const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<Diagnostic | null>(null)
+  const [result, setResult] = useState<DiagnosticResult | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [history, setHistory] = useState<Diagnostic[]>([])
-  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [history, setHistory] = useState<DiagnosticHistoryItem[]>([])
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyPage, setHistoryPage] = useState(0)
+  const [loadingHistory, setLoadingHistory] = useState(true)
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
 
-  useEffect(() => {
-    setLoadingSites(true)
-    fetch('/api/sites').then(r => r.json()).then(d => {
-      const list = (d.sites ?? []) as { id: string; domain: string; name: string }[]
-      setSites(list.map(s => ({ id: s.id, domain: s.domain, name: s.name })).sort((a, b) => a.domain.localeCompare(b.domain)))
-    }).finally(() => setLoadingSites(false))
-  }, [])
-
-  useEffect(() => {
-    setResult(null)
-    setErrorMsg('')
-    setExpandedHistoryId(null)
-    setQuestion('')
-    if (!selectedId) { setHistory([]); return }
+  function loadHistory() {
     setLoadingHistory(true)
-    fetch(`/api/research/site-diagnostics?site_id=${selectedId}`).then(r => r.json()).then(d => setHistory(d.diagnostics ?? [])).finally(() => setLoadingHistory(false))
-  }, [selectedId])
+    fetch(`/api/research/site-diagnostics?page=${historyPage}&pageSize=${PAGE_SIZE}`)
+      .then(r => r.json())
+      .then(d => { setHistory(d.diagnostics ?? []); setHistoryTotal(d.total ?? 0) })
+      .finally(() => setLoadingHistory(false))
+  }
+  useEffect(loadHistory, [historyPage])
 
   async function runDiagnostic() {
-    if (!selectedId || running) return
+    if (!question.trim() || running) return
     setRunning(true); setErrorMsg(''); setResult(null)
     try {
       const res = await fetch('/api/research/site-diagnostics', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_id: selectedId, question: question.trim() || undefined }),
+        body: JSON.stringify({ question: question.trim() }),
       })
       const data = await res.json()
       if (!res.ok) { setErrorMsg(data.error || '诊断失败'); return }
       setResult(data)
-      setHistory(prev => [{ id: data.id, question: data.question, result: data.result, created_at: data.created_at }, ...prev])
+      setQuestion('')
+      if (historyPage === 0) loadHistory()
+      else setHistoryPage(0)
     } catch {
       setErrorMsg('诊断失败（网络异常），请重试')
     } finally {
@@ -297,52 +294,71 @@ function SiteDiagnosticTab() {
 
   return (
     <div className="space-y-5">
-      <p className="text-sm text-gray-400">选一个站点，可以填一个具体问题（比如"要怎么安排人手"），AI会读这个站点近90天完整历史数据+大环境对比+分组任务团队现状，写一份策略建议。数据量大时可能要1-3分钟，请耐心等待。</p>
-
-      {loadingSites ? <Spinner /> : (
-        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
-      )}
-
-      {selectedId && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-          <textarea value={question} onChange={e => setQuestion(e.target.value)}
-            placeholder="你想问什么？（留空则做通用诊断）"
-            rows={3}
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
-          <button onClick={runDiagnostic} disabled={running}
-            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
-            {running ? 'AI正在读取历史数据，可能需要1-3分钟…' : '开始诊断'}
-          </button>
-          {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
-        </div>
-      )}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <p className="text-sm text-gray-400">直接问问题，可以提到一个站点、好几个站点、或者不提站点纯问大环境——AI会自动识别问题里的域名，读相关站点近90天完整历史数据+大环境对比给出分析。提到多个站点时，除了逐站分析还会帮你找跨站点的共同规律。数据量大时可能要1-3分钟，请耐心等待。</p>
+        <textarea value={question} onChange={e => setQuestion(e.target.value)}
+          placeholder={'例如：\n这两个大站点ip下滑\nsj.zol.com.cn\nuzzf.com\n小站ip下滑\npc768.com\n\n或者直接问："最近整体大环境怎么样"'}
+          rows={5}
+          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+        <button onClick={runDiagnostic} disabled={running || !question.trim()}
+          className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+          {running ? 'AI正在读取历史数据，可能需要1-3分钟…' : '开始诊断'}
+        </button>
+        {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
+      </div>
 
       {result && (
         <div className="bg-white rounded-xl border border-green-200 p-5">
           <p className="text-sm font-semibold text-green-700 mb-2">诊断结果</p>
-          {result.question && <p className="text-xs text-gray-400 mb-2">问题：{result.question}</p>}
+          <p className="text-xs text-gray-400 mb-2">问题：{result.question}</p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {result.matched_sites.length === 0 && result.unmatched_domains.length === 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-200">大环境（未提及具体站点）</span>
+            )}
+            {result.matched_sites.map(s => (
+              <span key={s.id} className={`text-xs px-2 py-0.5 rounded-full border ${s.isOwnSite ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
+                {s.domain}{s.isOwnSite ? '（自己站点）' : '（参考）'}
+              </span>
+            ))}
+            {result.unmatched_domains.map(d => (
+              <span key={d} className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200" title="系统里没有追踪这个域名，如需要请先去网站管理添加">
+                {d}（未追踪）
+              </span>
+            ))}
+          </div>
+          {result.truncated && <p className="text-xs text-amber-600 mb-2">⚠ 问题里提到的站点超过15个，只分析了前15个</p>}
           <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{result.result}</p>
         </div>
       )}
 
-      {selectedId && !loadingHistory && history.filter(h => h.id !== result?.id).length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <p className="text-sm font-semibold text-gray-700 mb-3">历史诊断记录</p>
-          <div className="space-y-2">
-            {history.filter(h => h.id !== result?.id).map(h => (
-              <div key={h.id} className="border-b border-gray-50 pb-2 last:border-0">
-                <button onClick={() => setExpandedHistoryId(prev => prev === h.id ? null : h.id)}
-                  className="w-full text-left text-xs text-gray-500 hover:text-gray-700">
-                  {h.created_at.slice(0, 16).replace('T', ' ')} {h.question ? `· ${h.question}` : '（通用诊断）'}
-                </button>
-                {expandedHistoryId === h.id && (
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mt-2">{h.result}</p>
-                )}
-              </div>
-            ))}
-          </div>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 pt-4 pb-1">
+          <p className="text-sm font-semibold text-gray-700">历史诊断记录</p>
         </div>
-      )}
+        {loadingHistory ? <Spinner /> : history.length === 0 ? (
+          <p className="text-sm text-gray-300 text-center py-8">还没有诊断记录，去上面问点什么吧</p>
+        ) : (
+          <>
+            <div className="px-5 pb-3 space-y-2">
+              {history.map(h => (
+                <div key={h.id} className="border-b border-gray-50 pb-2 last:border-0">
+                  <button onClick={() => setExpandedHistoryId(prev => prev === h.id ? null : h.id)}
+                    className="w-full text-left text-xs text-gray-500 hover:text-gray-700">
+                    <span className="text-gray-400">{h.created_at.slice(0, 16).replace('T', ' ')}</span>
+                    {' · '}
+                    <span className="text-gray-600">{h.domains.length > 0 ? h.domains.join('、') : '大环境'}</span>
+                    {h.question && <span> · {h.question.length > 40 ? `${h.question.slice(0, 40)}…` : h.question}</span>}
+                  </button>
+                  {expandedHistoryId === h.id && (
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mt-2">{h.result}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <SimplePagination page={historyPage} total={historyTotal} onChange={setHistoryPage} />
+          </>
+        )}
+      </div>
     </div>
   )
 }

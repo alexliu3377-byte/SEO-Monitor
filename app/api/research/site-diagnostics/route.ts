@@ -1,13 +1,16 @@
-export const maxDuration = 180
+export const maxDuration = 240
 
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchSiteResearchSummary } from '@/lib/site-research-summary'
 import { computeEnvironmentStats } from '@/lib/environment-stats'
-import { fetchGroupEffectivenessSummary } from '@/lib/tracking-summary'
+import { fetchGroupEffectivenessSummary, fetchOwnSiteDomains } from '@/lib/tracking-summary'
 import { computeOpportunityGaps } from '@/lib/opportunity-gap'
-import { buildSiteDiagnosticPrompt } from '@/lib/site-diagnostic-prompt'
+import { extractDomainTokens, resolveDomains, type ResolvedSite } from '@/lib/domain-lookup'
+import { buildDiagnosticPrompt, type DiagnosticSiteEntry } from '@/lib/site-diagnostic-prompt'
 import { callGeminiJSON, QUALITY_MODELS } from '@/lib/gemini'
+
+const MAX_SITES = 15
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -24,62 +27,87 @@ async function requireAdmin() {
   return { user, service }
 }
 
-// 研究中心"站点诊断"——用户选一个站点（可以带一个具体问题），读这个站点近
-// 90天完整历史数据 + 大环境档位对比 + 关联分组任务团队现状 + 机会缺口（2026-08-12
-// 接入 lib/opportunity-gap.ts，portfolio-wide算出来的、竞品赢但全公司零覆盖的
-// 词，AI自己判断哪些跟这个站的内容调性搭），一次性喂给 Gemini 写一份策略建议。
-// 2026-08-11 新增，用户接手一个闲置很久的站点（f71.com）要重新安排人手时提出
-// 的需求——不是定时报告，是按需触发、用户愿意等（maxDuration 给到180秒），
-// 输出也不追求简短，要写得完整有据。
+// 研究中心"站点诊断"——2026-08-27 起用户直接自由提问，不用先选站点：AI自己从
+// 问题文本里识别提到了哪些站点（正则抓域名 token 去 sites 表匹配），0个=纯
+// "大环境"问题、1个=单站诊断、多个=跨站点找规律一起分析。见
+// lib/site-diagnostic-prompt.ts 顶部注释，同一次改动修了个真实bug：旧版对
+// 任何站点都会建议"人手安排"，哪怕这个站根本不是用户自己运营的。
 export async function POST(req: Request) {
   const ctx = await requireAdmin()
   if (ctx.error) return ctx.error
   const { service, user } = ctx
 
-  const { site_id, question } = await req.json() as { site_id?: string; question?: string }
-  if (!site_id) return NextResponse.json({ error: '缺少 site_id' }, { status: 400 })
-
-  const { data: site, error: siteErr } = await service
-    .from('sites')
-    .select('id, domain, name, is_enabled, has_rank_data, has_rank_title, has_index_pages, focus_level')
-    .eq('id', site_id).single()
-  if (siteErr || !site) return NextResponse.json({ error: '站点不存在' }, { status: 404 })
+  const { question } = await req.json() as { question?: string }
+  if (!question || !question.trim()) return NextResponse.json({ error: '请输入问题' }, { status: 400 })
 
   const dateEnd = getMY()
   const dateStart = getMY(-90)
 
-  const [summary, envStats, groupsRaw, gapResult] = await Promise.all([
-    fetchSiteResearchSummary(service, site_id, dateStart, dateEnd),
+  const tokens = extractDomainTokens(question)
+  const { matched: matchedAll, unmatched } = await resolveDomains(service, tokens)
+  const truncated = matchedAll.length > MAX_SITES
+  const matched = matchedAll.slice(0, MAX_SITES)
+
+  const [ownDomains, envStats, gapResult] = await Promise.all([
+    fetchOwnSiteDomains(service),
     computeEnvironmentStats(service, dateEnd),
-    service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
-      .then((r: { data: { id: string; name: string; site_domains: string[] }[] | null }) => r.data ?? []),
     computeOpportunityGaps(service, dateStart, dateEnd),
   ])
 
-  const siteTier = envStats?.siteTiers.get(site_id) ?? null
+  // 每个站点单独 try/catch，某一个站点拉数据失败不影响其它站点（照抄
+  // scripts/research-report.ts Stage1 对多站点的容错模式）。
+  const entries: DiagnosticSiteEntry[] = (await Promise.all(matched.map(async (site: ResolvedSite): Promise<DiagnosticSiteEntry | null> => {
+    try {
+      const isOwnSite = ownDomains.has(site.domain)
+      const summary = await fetchSiteResearchSummary(service, site.id, dateStart, dateEnd)
+      const siteTier = envStats?.siteTiers.get(site.id) ?? null
 
-  const groups = await Promise.all(
-    groupsRaw.map(async (g: { id: string; name: string }) => {
-      const [effectiveness, { count }] = await Promise.all([
-        fetchGroupEffectivenessSummary(service, g.id, dateStart, dateEnd),
-        service.from('task_group_members').select('user_id', { count: 'exact', head: true }).eq('group_id', g.id),
-      ])
-      return { group_name: g.name, memberCount: count ?? 0, ...effectiveness }
-    })
-  )
+      let groups: DiagnosticSiteEntry['groups'] = []
+      if (isOwnSite) {
+        const { data: groupsRaw } = await service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
+        groups = await Promise.all(
+          ((groupsRaw ?? []) as { id: string; name: string }[]).map(async (g) => {
+            const [effectiveness, { count }] = await Promise.all([
+              fetchGroupEffectivenessSummary(service, g.id, dateStart, dateEnd),
+              service.from('task_group_members').select('user_id', { count: 'exact', head: true }).eq('group_id', g.id),
+            ])
+            return { group_name: g.name, memberCount: count ?? 0, ...effectiveness }
+          })
+        )
+      }
 
-  const prompt = buildSiteDiagnosticPrompt(site, summary, dateStart, dateEnd, envStats, siteTier, groups, gapResult.gaps, question ?? null)
-  const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 4096, models: QUALITY_MODELS })
+      return {
+        site: {
+          domain: site.domain, name: site.name, is_enabled: site.is_enabled,
+          has_rank_data: site.has_rank_data, has_rank_title: site.has_rank_title,
+          has_index_pages: site.has_index_pages, focus_level: site.focus_level,
+        },
+        isOwnSite, summary, siteTier, groups,
+      }
+    } catch (e) {
+      console.error(`站点诊断：${site.domain} 数据拉取失败`, e)
+      return null
+    }
+  }))).filter((e): e is DiagnosticSiteEntry => e !== null)
+
+  const prompt = buildDiagnosticPrompt(entries, unmatched, envStats, gapResult.gaps, question, dateStart, dateEnd)
+  const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 8192, models: QUALITY_MODELS })
   if (!result) return NextResponse.json({ error: error || 'AI 诊断失败' }, { status: 500 })
 
+  const siteIds = matched.map(s => s.id)
   const { data: saved, error: saveErr } = await service
     .from('site_diagnostics')
-    .insert({ site_id, question: question || null, result: result.diagnosis, created_by: user.id })
+    .insert({ site_ids: siteIds, question, result: result.diagnosis, created_by: user.id })
     .select('id, created_at')
     .single()
   if (saveErr) return NextResponse.json({ error: saveErr.message }, { status: 500 })
 
-  return NextResponse.json({ id: saved.id, created_at: saved.created_at, question: question || null, result: result.diagnosis })
+  return NextResponse.json({
+    id: saved.id, created_at: saved.created_at, question, result: result.diagnosis,
+    matched_sites: matched.map(s => ({ id: s.id, domain: s.domain, name: s.name, isOwnSite: ownDomains.has(s.domain) })),
+    unmatched_domains: unmatched,
+    truncated,
+  })
 }
 
 export async function GET(req: Request) {
@@ -88,16 +116,28 @@ export async function GET(req: Request) {
   const { service } = ctx
 
   const { searchParams } = new URL(req.url)
-  const siteId = searchParams.get('site_id')
-  if (!siteId) return NextResponse.json({ error: '缺少 site_id' }, { status: 400 })
+  const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
+  const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10) || 20))
 
-  const { data, error } = await service
+  const { data, count, error } = await service
     .from('site_diagnostics')
-    .select('id, question, result, created_at')
-    .eq('site_id', siteId)
+    .select('id, question, result, created_at, site_ids', { count: 'exact' })
     .order('created_at', { ascending: false })
-    .limit(20)
+    .range(page * pageSize, (page + 1) * pageSize - 1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ diagnostics: data ?? [] })
+  const rows = (data ?? []) as { id: string; question: string | null; result: string; created_at: string; site_ids: string[] }[]
+  const allSiteIds = Array.from(new Set(rows.flatMap(r => r.site_ids ?? [])))
+  const domainMap = new Map<string, string>()
+  if (allSiteIds.length > 0) {
+    const { data: siteRows } = await service.from('sites').select('id, domain').in('id', allSiteIds)
+    for (const s of (siteRows ?? []) as { id: string; domain: string }[]) domainMap.set(s.id, s.domain)
+  }
+
+  const diagnostics = rows.map(r => ({
+    id: r.id, question: r.question, result: r.result, created_at: r.created_at,
+    domains: (r.site_ids ?? []).map(id => domainMap.get(id)).filter((d): d is string => !!d),
+  }))
+
+  return NextResponse.json({ diagnostics, total: count ?? 0, page, pageSize })
 }
