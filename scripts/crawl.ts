@@ -726,7 +726,7 @@ async function runIndexPages(sites: SiteRecord[], today: string, activityId: str
   })
 }
 
-async function runTracking(sites: SiteRecord[], today: string, activityId: string | null = null) {
+async function runTracking(sites: SiteRecord[], today: string, activityId: string | null = null, group = 0) {
   const stepStart = Date.now()
   console.log(`\n${'═'.repeat(60)}`)
   console.log(`  TRACKING   日期=${today}   ${ts()}`)
@@ -984,9 +984,15 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
   }
 
   // ── Own-site tracking ─────────────────────────────────────────────────────
+  // 2026-08-26 发现：这一段跟"竞品追踪"那部分（上面的 for 循环，天然按 sites
+  // 参数分片）不一样，没有按分片过滤，每个分片都会把全站claims原样重新处理
+  // 一遍——tracking步骤SPG=5，有几个分片就重复写几次同样的 site_tracking_records
+  // /site_tracking_rank_matches。回补今天5194条积压时被撞见：5个分片并发各自
+  // 处理5195条，直接把Supabase Postgres/API Gateway打出一波错误尖峰。改成只
+  // 让 group 0 跑一次，跟昨天 refresh_keyword_signal_rollup 那次改法同一个模式。
   let ownRows = 0
   const window90 = getMalaysiaDate(-90)
-  try {
+  if (group === 0) try {
     type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
     // 2026-08-26 发现：全站90天内符合条件的提交已经涨到5194条，这条查询之前
     // 没分页也没排序，直接撞上 Supabase 单次请求硬顶3000行的老问题（这个项目
@@ -1258,7 +1264,7 @@ async function main() {
   }
   if (step === 'tracking') {
     const aid = await activityStart(supabase, { ...logBase, step: 'tracking' })
-    await runTracking(sites.filter(s => s.has_rank_title), today, aid)
+    await runTracking(sites.filter(s => s.has_rank_title), today, aid, group)
   }
 
   console.log(`\n${'✓'.repeat(60)}`)

@@ -124,7 +124,8 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '成效追踪（竞品 + 自己站点）',
     badge: 'step=tracking · GitHub Actions · 06:45 MYT（cron 22:45 UTC，index-pages retry 完成后）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 45 22 * * * UTC = 06:45 MYT)，在所有主抓取和重试（含 index-pages retry 06:30 MYT）完成后运行；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 45 22 * * * UTC = 06:45 MYT)，在所有主抓取和重试（含 index-pages retry 06:30 MYT）完成后运行；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可；tracking 步骤按竞品站点数分片（SPG=5）' },
+      { label: '自己站点提交查询（2026-08-26 修复两处问题）', text: '① 分页：查全站90天内 status=submitted 的提交之前没分页，全站量超3000行会被 Supabase 硬顶截断，且没有排序时被截的偏偏是最近提交的部分（回补前实测92%的近两周提交从未写入 site_tracking_records）——已改成 fetchAllRows 真分页；② 分片重复：这部分处理的是全站claims、不是按分片的sites参数过滤，之前每个分片都会重新处理一遍全量claims（tracking步骤SPG=5，有几个分片就重复写几次同样的数据）——手动回补当天5194条积压时被5个分片并发放大、直接打出一波 Supabase Postgres/API Gateway 错误尖峰，已改成只由 group 0 处理一次，跟同一天 rank/rank-title 步骤那次同款修复一样' },
       { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同；网站管理列表里显示为"排名"）' },
       { label: '竞品信号来源', text: '① 排名信号（by keyword + by URL）：site_keyword_ranks 表中 stat_date=today + platform=mobile 的当日涨跌词；还通过 site_keyword_ranks.url 与 raw_keywords.source_url 交叉匹配（URL 优先级高，能捕获 keyword 名称不一致的案例）；② 收录信号：site_indexed_pages 表中 first_seen_date=today 的新收录 URL，通过 source_url 反查 raw_keywords 得到关键词' },
       { label: '竞品过滤条件', text: '信号词必须同时存在于 raw_keywords（60天内有提交记录）才会被记录；无提交记录的信号词跳过' },
