@@ -21,7 +21,12 @@ jobs:
         id: gen
         run: |
           RECHECK="${{ github.event.inputs.recheck_disappeared || 'false' }}"
-          URLS_PER_JOB=20
+          # 2026-08-28：原来20个URL一组，默认每周六的常规路径(verify_needed=true)
+          # 现在实测620条待验证URL，ceil(620/20)=31个job，账号是GitHub Free同时
+          # 最多跑20个job，这个步骤自己一个人就超了。调到50个一组
+          # （ceil(620/50)=13个job，留足未来增长的余量），每个job处理URL之间还
+          # 是4秒间隔，50个顺序跑约3-4分钟，远低于30分钟的job超时上限。
+          URLS_PER_JOB=50
 
           if [ "$RECHECK" = "true" ]; then
             COUNT=$(curl -sf \

@@ -85,8 +85,13 @@ jobs:
 
           echo "Step=${STEP} 今日失败/空站: ${FAILED_COUNT}"
 
-          # 1 job per failed site (max parallelism); fallback to 1 no-op job if none
-          TOTAL=$(python3 -c "print(max(1, ${FAILED_COUNT}))")
+          # 2026-08-28：原来是1个失败站点=1个job（追求最大并行），平时失败站点
+          # 少没问题，但账号是GitHub Free、同时最多跑20个job——万一某天大批量
+          # 站点同时失败/超时（比如爱站限流），这里也会跟主抓取一样瞬间炸出一堆
+          # job抢并发额度、排队更久。改成5个失败站点一组，平时(≤5个失败)体感
+          # 不变（还是1个job），只在异常大批量失败时才会自动收敛job数。
+          RETRY_SPG=5
+          TOTAL=$(python3 -c "import math; print(max(1, math.ceil(${FAILED_COUNT}/${RETRY_SPG})))")
           MATRIX=$(python3 -c "import json; print(json.dumps({'group': list(range(${TOTAL}))}))")
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
           echo "total=${TOTAL}" >> $GITHUB_OUTPUT
