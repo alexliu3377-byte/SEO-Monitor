@@ -965,11 +965,6 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
                 </table>
               </div>
             )}
-            {result.noDataKeywords.length > 0 && (
-              <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-400">
-                没查到任何排名数据（{result.noDataKeywords.length}个）：{result.noDataKeywords.join('、')}
-              </div>
-            )}
           </div>
         </>
       )}
