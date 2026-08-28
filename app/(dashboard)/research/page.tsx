@@ -892,12 +892,20 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
             <span className="text-xs text-gray-400">{showSuggestions ? '收起 ▲' : '展开 ▼'}</span>
           </button>
           {showSuggestions && (
-            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2 -mt-2">
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 -mt-2">
               <p className="text-xs text-gray-400">该数据源对部分敏感/受限话题词经常无结果，仅供参考，不如下方真实排名数据可靠。</p>
               {result.groupResults.map(g => (
-                <p key={g.groupName} className="text-xs text-gray-500">
-                  <span className="font-medium text-gray-600">{g.groupName}</span>：{g.expansions.length > 0 ? g.expansions.join('、') : '没有挖到下拉词'}
-                </p>
+                <div key={g.groupName}>
+                  {g.expansions.length === 0 ? (
+                    <p className="text-xs text-gray-400">没有挖到下拉词</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {g.expansions.map(word => (
+                        <span key={word} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{word}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )}
