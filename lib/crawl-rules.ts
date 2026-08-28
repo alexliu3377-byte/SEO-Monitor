@@ -20,7 +20,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '关键词抓取',
     badge: 'step=keywords · GitHub Actions · 目标 01:05 MYT（cron 00:05 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每10个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约10个站点（2026-08-28 从每组5个调到10个——账号是 GitHub Free，同时最多跑20个job，站点数涨到81个后每组5个会切出17个job、加上weight/rank同期都在20左右，几个步骤前后脚排队时经常撞上并发上限，导致任务一天比一天晚才跑，用户反馈"8点多才跑"实测确认过；调大分组后单步job数降到约9个，留足余量）；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟，也曾因并发超限累积到数小时），实际执行时间约 00:30-01:30 MYT 之间（并发正常时）。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。失败/空站由 retry-crawl.yml (cron 30 20 UTC = 04:30 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每6个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约6个站点（2026-08-28 从每组5个调到6个——账号是 GitHub Free，同时最多跑20个job，站点数涨到81个后每组5个会切出17个job、加上weight/rank同期都在20左右，几个步骤前后脚排队时经常撞上并发上限，导致任务一天比一天晚才跑，用户反馈"8点多才跑"实测确认过；调大分组后单步job数降到约14个，留足余量。用户明确要求分组别调太大（原计划调到10）——单个job处理的站点越多，一旦触发限流或中途异常，一次失败牵连的站点也越多，6个是"job数够低、单job风险也不大"的折中）；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟，也曾因并发超限累积到数小时），实际执行时间约 00:30-01:30 MYT 之间（并发正常时）。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。失败/空站由 retry-crawl.yml (cron 30 20 UTC = 04:30 MYT) 自动补抓' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 list_url 已填写的站点；is_enabled 由用户在网站管理"关键词数据"开关控制，关闭后跳过关键词抓取但权重/排名照常运行' },
       { label: '文章链接抓取', text: '各来源可在"文章链接CSS选择器"（url_selectors 字段，||| 分隔多来源）填写指定 CSS 选择器；填写后爬虫用该选择器在每条记录的容器内查找 <a> 元素并写入 raw_keywords.source_url；留空则 source_url 为 null；支持完整URL和相对路径（相对路径自动补全域名）' },
       { label: '频率规则', text: '所有站点均为 daily（每天）' },
@@ -38,7 +38,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '权重+收录',
     badge: 'step=weight · GitHub Actions · 目标 01:30 MYT（cron 00:30 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 16 * * * UTC = 00:30 MYT 当天)，动态 matrix job 并行（每10个站点1个job，2026-08-28 从每组4个调到10个，理由见"关键词抓取"章节同名说明——账号并发上限20个job）；实际执行脚本：scripts/crawl.ts；实际执行约 01:30 MYT（并发正常时）。失败站由 retry-crawl.yml (cron 0 21 UTC = 05:00 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 16 * * * UTC = 00:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 01:30 MYT（并发正常时）。失败站由 retry-crawl.yml (cron 0 21 UTC = 05:00 MYT) 自动补抓' },
       { label: '数据来源', text: '爱站 aizhan.com，抓取 PC/移动权重、收录数、来路IP区间' },
       { label: '限流保护', text: '失败后等30秒重试，最多3次（共3次尝试，每次换新UA）；站点间隔3秒' },
       { label: '写入表', text: 'weight_history（pc/mobile权重+IP区间，按 site_id+record_date upsert）/ index_snapshots（收录数，按 site_id+snapshot_date upsert）' },
@@ -50,7 +50,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '排名变动',
     badge: 'step=rank · GitHub Actions · 目标 02:30 MYT（cron 01:30 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每10个站点1个job，2026-08-28 从每组4个调到10个，理由见"关键词抓取"章节同名说明——账号并发上限20个job）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT（并发正常时）。失败/空站由 retry-crawl.yml (cron 30 21 UTC = 05:30 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT（并发正常时）。失败/空站由 retry-crawl.yml (cron 30 21 UTC = 05:30 MYT) 自动补抓' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关（列表里显示为"涨跌"），cron 不会自动修改该字段' },
       { label: '数据来源', text: '爱站移动端 baidurank.aizhan.com/mobile/…，抓涨入词与跌出词及搜索量' },
       { label: '浏览器验证', text: '爱站的挑战机制自 2026-06 起变过三次，历史记录：① 2026-06-19 起，简单 JS 挑战（响应体内嵌 document.cookie="C3VK=...";window.open(...)，无真实跳转）；② 2026-07 起升级为约2分钟的浏览器指纹深度挑战（_jsc_sbu 环境探测，纯 fetch 无法通过），抓取一度改用 Playwright headless Chromium（createAizhanBrowserSession()，job 开始时过一次约2分钟验证，全 job 复用同一浏览器 context；若150秒内未通过则 AIZHAN_CHALLENGE_TIMEOUT 直接崩溃退出，且这类崩溃发生在任何单站日志写入之前，导致 retry-crawl.yml 的"按失败站点重试"完全查不到失败记录、白跑一次——2026-08-02 实测 07-31/08-01 两个 MYT 日期的 rank+rank-title 全站数据因此双双丢失且未被自动补上）；③ 2026-08 起验证又变简单，退回① 那种量级（一次请求内含 302+Set-Cookie 或内嵌 document.cookie 两种形式之一，均无需执行JS，一次额外往返即可拿到有效 cookie）。当前实现（lib/crawler-aizhan-http.ts，createAizhanHttpSession()）是纯 fetch，同时处理这两种 cookie 下发形式，整个抓取过程复用同一个 session（cookie 会随每次响应的 Set-Cookie / 内嵌值持续刷新，不会中途过期）。lib/crawler-browser.ts 的 Playwright 方案保留未删，若爱站之后重新上强度，换回来只需改 scripts/crawl.ts / scripts/crawl-rank.ts 里这一行 import' },

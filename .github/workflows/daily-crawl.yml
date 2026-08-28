@@ -65,19 +65,20 @@ jobs:
             fi
             # 2026-08-28：keywords/rank/weight/默认(all) 这几个步骤共用同一批81个
             # 站点（is_enabled/has_rank_data/has_index_pages 任一开着），SPG从
-            # 4-5调到8-10——账号是GitHub Free，同时最多只能跑20个job，SPG=4时
+            # 4-5调到6——账号是GitHub Free，同时最多只能跑20个job，SPG=4时
             # rank/weight 单步就切出21个job（加setup job共22个），单这一步就超过
-            # 20的上限，导致job排队、一天比一天晚（用户反馈"任务8点多才跑"）。
+            # 20的上限，导致job排队、一天比一天晚（用户反馈"任务8点多才跑"）；
+            # SPG=6时约14个job，留足余量，用户明确要求分组不用调到8-10那么大。
             # rank-title/tracking/index-pages 站点池小（16/16/3个），本来job数就
             # 远低于20，不用跟着调。
             case "$STEP" in
-              keywords)    SPG=10 ;;
-              rank)        SPG=10 ;;
-              weight)      SPG=10 ;;
+              keywords)    SPG=6 ;;
+              rank)        SPG=6 ;;
+              weight)      SPG=6 ;;
               index-pages) SPG=1 ;;
               rank-title)  SPG=2 ;;
               tracking)    SPG=5 ;;
-              *)           SPG=10 ;;
+              *)           SPG=6 ;;
             esac
             # rank-title / index-pages / tracking 单独查询各自的开关字段；其余查询有任意抓取开关的站点
             if [ "$STEP" = "rank-title" ] || [ "$STEP" = "tracking" ]; then
