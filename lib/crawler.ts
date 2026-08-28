@@ -1045,9 +1045,18 @@ async function fetchBaiduSuggestionRaw(keyword: string): Promise<string[]> {
         'User-Agent': randomUA(),
         Referer: 'https://www.baidu.com',
       },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     })
-    const text = await res.text()
+    // 这个接口实测返回的是 GBK 编码（响应头 content-type: text/javascript;
+    // charset=gbk），直接用 res.text() 会按 UTF-8 解码导致中文乱码——跟
+    // fetchHtmlDecoded() 同样的坑，这里照抄它从 content-type 读 charset、
+    // 用 iconv 按正确编码解码的做法（2026-08-28 用户反馈"下拉词"结果显示
+    // 一堆方块乱码，实测确认是这个原因）。
+    const buffer = Buffer.from(await res.arrayBuffer())
+    const ctCharset = (res.headers.get('content-type') || '').match(/charset=([^\s;]+)/i)?.[1]?.toLowerCase()
+    const raw = ctCharset || 'gbk'
+    const charset = (raw === 'gb2312' || raw === 'gb18030') ? 'gbk' : raw
+    const text = iconv.decode(buffer, charset)
 
     // Parse JSONP response: window.bd__cbs__callback({...})
     const match = text.match(/\((\{.*?\})\)/)
