@@ -386,287 +386,538 @@ interface Discovery {
   first_seen_at: string; last_seen_at: string; status: string
 }
 
-type CommercialSubView = 'list' | 'coverage' | 'discoveries'
-const SUB_VIEWS: { key: CommercialSubView; label: string }[] = [
-  { key: 'list', label: '词组库' },
-  { key: 'coverage', label: '排名覆盖' },
-  { key: 'discoveries', label: '新词发现' },
-]
+type CommercialSubView = 'list' | 'detail' | 'discoveries'
+type DiscoveryStatus = 'pending' | 'accepted' | 'ignored'
+const ALIAS_SPLIT_RE = /[\n,，、]+/
+
+function parseAliasInput(text: string): string[] {
+  return text.split(ALIAS_SPLIT_RE).map(s => s.trim()).filter(Boolean)
+}
+
+// 按 group_name 归拢（没有 group_name 的老数据兜底成自己是自己的组）
+function groupKeywords(keywords: CommercialKeyword[]): [string, CommercialKeyword[]][] {
+  const map = new Map<string, CommercialKeyword[]>()
+  for (const k of keywords) {
+    const g = k.group_name || k.keyword
+    if (!map.has(g)) map.set(g, [])
+    map.get(g)!.push(k)
+  }
+  return Array.from(map.entries())
+}
 
 // 维护一份"商业词"清单 + 挖下拉词变体 + 查这批词（含变体）现在谁拿到了排名，
 // 外加从每天真实抓取的排名标题里被动积累"新词发现"证据。2026-08-28 新增，
-// 用户想找"这批有商业价值的词，别人网站做得怎么样、多少排名、什么标题"，
-// 同时想发现同一个商业概念的不同说法。同一天补了"概念分组"——同一行贴多个
-// 别名（比如"纸飞机、telegram、telegreat"）算同一组，查覆盖时按组归拢展示。
-// 又同一天加了"新词发现"：百度下拉词对敏感话题词经常返回空/文不对题（实测
-// 验证过），改成从 rank-title 抓取的真实标题里找"已知别名+未知词共现"的证据
-// （scripts/crawl-rank.ts 的 upsertDiscovery），人工审核后决定要不要收编进清单。
+// 同一天陆续加了"概念分组"（同一行贴多个别名算一组）和"新词发现"（百度
+// 下拉词对敏感话题词经常返回空/文不对题，改成从 rank-title 抓取的真实标题
+// 里找"已知别名+未知词共现"的证据，人工审核后决定收不收编）。这版是UI重构：
+// 原来三个胶囊tab+大段说明文字+常驻textarea像内部调试工具，改成"词组库→
+// 词组详情(含排名覆盖)→新词发现"的工作台流程，参考ChatGPT给的重构建议，
+// 但顶部统计栏刻意只放查库就有的数字（不放全局覆盖总数，避免每次开页面都要
+// 现查全部词组很慢）、新词发现只看最新一次命中示例（不额外加证据流水表）。
 function CommercialKeywordsTab() {
   const [subView, setSubView] = useState<CommercialSubView>('list')
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
 
   const [keywords, setKeywords] = useState<CommercialKeyword[]>([])
   const [loadingList, setLoadingList] = useState(true)
-  const [pasteText, setPasteText] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false)
+  const [showBulkModal, setShowBulkModal] = useState(false)
 
-  const [running, setRunning] = useState(false)
-  const [runError, setRunError] = useState('')
-  const [result, setResult] = useState<CoverageResult | null>(null)
-  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  const [listSearch, setListSearch] = useState('')
+  const [listSort, setListSort] = useState<'pending' | 'aliases' | 'recent' | 'name'>('pending')
+  const [listPage, setListPage] = useState(0)
 
-  const [discoveries, setDiscoveries] = useState<Discovery[]>([])
-  const [loadingDiscoveries, setLoadingDiscoveries] = useState(false)
-  const [discoveryStatus, setDiscoveryStatus] = useState<'pending' | 'accepted' | 'ignored'>('pending')
-  const [discoveryError, setDiscoveryError] = useState('')
-  const [acceptingId, setAcceptingId] = useState<string | null>(null)
-  const [acceptAlias, setAcceptAlias] = useState('')
-  const [acceptGroup, setAcceptGroup] = useState('')
+  const [pendingByGroup, setPendingByGroup] = useState<Map<string, number>>(new Map())
 
   function loadList() {
     setLoadingList(true)
     fetch('/api/research/commercial-keywords').then(r => r.json()).then(d => setKeywords(d.keywords ?? [])).finally(() => setLoadingList(false))
   }
-  useEffect(loadList, [])
-
-  // 按 group_name 归拢展示（没有 group_name 的老数据兜底成自己是自己的组）
-  const groupedList = (() => {
-    const map = new Map<string, CommercialKeyword[]>()
-    for (const k of keywords) {
-      const g = k.group_name || k.keyword
-      if (!map.has(g)) map.set(g, [])
-      map.get(g)!.push(k)
-    }
-    return Array.from(map.entries())
-  })()
-
-  async function saveKeywords() {
-    if (!pasteText.trim() || saving) return
-    setSaving(true); setSaveError('')
-    try {
-      const res = await fetch('/api/research/commercial-keywords', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: pasteText }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setSaveError(data.error || '保存失败'); return }
-      setPasteText('')
-      loadList()
-    } catch {
-      setSaveError('保存失败（网络异常）')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function removeKeyword(id: string) {
-    await fetch('/api/research/commercial-keywords', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  function loadPendingSummary() {
+    fetch('/api/research/commercial-keywords/discoveries?status=pending').then(r => r.json()).then(d => {
+      const rows = (d.discoveries ?? []) as Discovery[]
+      const map = new Map<string, number>()
+      for (const r of rows) map.set(r.group_name, (map.get(r.group_name) ?? 0) + 1)
+      setPendingByGroup(map)
     })
-    setKeywords(prev => prev.filter(k => k.id !== id))
   }
+  useEffect(() => { loadList(); loadPendingSummary() }, [])
+
+  const groupedList = groupKeywords(keywords)
+  const totalPending = Array.from(pendingByGroup.values()).reduce((a, b) => a + b, 0)
+
+  const filteredGroups = groupedList
+    .filter(([groupName, members]) => {
+      if (!listSearch.trim()) return true
+      const q = listSearch.trim().toLowerCase()
+      return groupName.toLowerCase().includes(q) || members.some(m => m.keyword.toLowerCase().includes(q))
+    })
+    .sort((a, b) => {
+      if (listSort === 'pending') return (pendingByGroup.get(b[0]) ?? 0) - (pendingByGroup.get(a[0]) ?? 0)
+      if (listSort === 'aliases') return b[1].length - a[1].length
+      if (listSort === 'recent') {
+        const latest = (ms: CommercialKeyword[]) => Math.max(...ms.map(m => new Date(m.created_at).getTime()))
+        return latest(b[1]) - latest(a[1])
+      }
+      return a[0].localeCompare(b[0])
+    })
+  const listTotalPages = Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE))
+  const clampedListPage = Math.min(listPage, listTotalPages - 1)
+  const pagedGroups = filteredGroups.slice(clampedListPage * PAGE_SIZE, (clampedListPage + 1) * PAGE_SIZE)
 
   async function removeGroup(groupName: string) {
+    if (!window.confirm(`确定要删除词组「${groupName}」吗？组内全部别名都会一起删掉，此操作不可撤销。`)) return
     await fetch('/api/research/commercial-keywords', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
     })
     setKeywords(prev => prev.filter(k => (k.group_name || k.keyword) !== groupName))
+    if (selectedGroup === groupName) { setSubView('list'); setSelectedGroup(null) }
   }
 
-  async function clearAll() {
-    if (!window.confirm(`确定要清空全部 ${keywords.length} 个商业词吗？此操作不可撤销。`)) return
-    await fetch('/api/research/commercial-keywords', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }),
-    })
-    setKeywords([])
-  }
-
-  async function runCoverage() {
-    if (running || keywords.length === 0) return
-    setRunning(true); setRunError(''); setResult(null)
-    try {
-      const res = await fetch('/api/research/commercial-keywords/coverage', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) { setRunError(data.error || '查询失败'); return }
-      setResult(data)
-    } catch {
-      setRunError('查询失败（网络异常），请重试')
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  function loadDiscoveries(status: 'pending' | 'accepted' | 'ignored') {
-    setLoadingDiscoveries(true); setDiscoveryError('')
-    fetch(`/api/research/commercial-keywords/discoveries?status=${status}`)
-      .then(r => r.json())
-      .then(d => setDiscoveries(d.discoveries ?? []))
-      .catch(() => setDiscoveryError('加载失败（网络异常）'))
-      .finally(() => setLoadingDiscoveries(false))
-  }
-  useEffect(() => { if (subView === 'discoveries') loadDiscoveries(discoveryStatus) }, [subView, discoveryStatus])
-
-  function openAcceptForm(d: Discovery) {
-    setAcceptingId(d.id)
-    setAcceptAlias(d.source_keyword)
-    setAcceptGroup(d.group_name)
-  }
-
-  async function confirmAccept(id: string) {
-    if (!acceptAlias.trim() || !acceptGroup.trim()) return
-    setDiscoveryError('')
-    try {
-      const res = await fetch('/api/research/commercial-keywords/discoveries', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'accept', alias: acceptAlias.trim(), groupName: acceptGroup.trim() }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setDiscoveryError(data.error || '操作失败'); return }
-      setAcceptingId(null)
-      setDiscoveries(prev => prev.filter(d => d.id !== id))
-      loadList()
-    } catch {
-      setDiscoveryError('操作失败（网络异常）')
-    }
-  }
-
-  async function ignoreDiscovery(id: string) {
-    setDiscoveryError('')
-    try {
-      const res = await fetch('/api/research/commercial-keywords/discoveries', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'ignore' }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setDiscoveryError(data.error || '操作失败'); return }
-      setDiscoveries(prev => prev.filter(d => d.id !== id))
-    } catch {
-      setDiscoveryError('操作失败（网络异常）')
-    }
+  function openGroupDetail(groupName: string) {
+    setSelectedGroup(groupName)
+    setSubView('detail')
   }
 
   return (
     <div className="space-y-5">
+      {/* 顶部统计条 + 主操作 */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-gray-500">词组 <span className="font-semibold text-gray-800">{groupedList.length}</span> 组</span>
+          <span className="text-gray-300">·</span>
+          <span className="text-gray-500">别名 <span className="font-semibold text-gray-800">{keywords.length}</span> 个</span>
+          <span className="text-gray-300">·</span>
+          <button onClick={() => setSubView('discoveries')} className="text-gray-500 hover:text-gray-800">
+            待审核 <span className={`font-semibold ${totalPending > 0 ? 'text-orange-500' : 'text-gray-800'}`}>{totalPending}</span> 个
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowBulkModal(true)}
+            className="px-3 py-1.5 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">批量导入</button>
+          <button onClick={() => setShowNewGroupModal(true)}
+            className="px-3 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">+ 新增词组</button>
+        </div>
+      </div>
+
       <div className="flex gap-1.5">
-        {SUB_VIEWS.map(v => (
-          <button key={v.key} onClick={() => setSubView(v.key)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${subView === v.key ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
-            {v.label}
+        {([['list', '词组库'], ['discoveries', '新词发现']] as const).map(([key, label]) => (
+          <button key={key} onClick={() => setSubView(key)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${subView === key || (key === 'list' && subView === 'detail') ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
+            {label}
           </button>
         ))}
       </div>
 
       {subView === 'list' && (
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-        <p className="text-sm text-gray-400">维护一份有商业价值、想重点盯的关键词清单。同一行可以贴多个别名（同一个概念的不同叫法），用顿号或逗号隔开——查覆盖时会先给每个别名各挖一遍百度下拉词（发现更多说法），再把整组词一起拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点（网站管理里"排名"开关开着的那批）——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
-        <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
-          placeholder={'一行一组，同一组内用顿号/逗号隔开多个别名，例如：\n纸飞机、telegram、telegreat、telegraph\nLetstalk'} rows={4}
-          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
-        <div className="flex items-center gap-2">
-          <button onClick={saveKeywords} disabled={saving || !pasteText.trim()}
-            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
-            {saving ? '保存中…' : '保存到清单'}
-          </button>
-          {saveError && <p className="text-xs text-red-600">{saveError}</p>}
-        </div>
-
-        {loadingList ? <Spinner /> : keywords.length === 0 ? (
-          <p className="text-sm text-gray-300 text-center py-4">清单是空的，先贴几个商业词</p>
-        ) : (
-          <div className="pt-2 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-400">已保存 {keywords.length} 个（{groupedList.length} 组）</span>
-              <button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-500">清空全部</button>
-            </div>
-            <div className="space-y-1.5">
-              {groupedList.map(([groupName, members]) => (
-                <div key={groupName} className="flex items-center gap-1.5 flex-wrap px-2 py-1.5 rounded-lg bg-gray-50/60 border border-gray-100">
-                  {members.length > 1 && (
-                    <button onClick={() => removeGroup(groupName)} title="删除整组"
-                      className="text-[10px] text-gray-400 hover:text-red-500 px-1.5 py-0.5 rounded border border-gray-200 flex-shrink-0">删除组</button>
-                  )}
-                  {members.map(k => (
-                    <span key={k.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-white text-gray-600 border border-gray-200">
-                      {k.keyword}
-                      <button onClick={() => removeKeyword(k.id)} className="text-gray-400 hover:text-red-500">×</button>
-                    </span>
-                  ))}
-                </div>
-              ))}
-            </div>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <input value={listSearch} onChange={e => { setListSearch(e.target.value); setListPage(0) }}
+              placeholder="搜索组名或别名…"
+              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+            <select value={listSort} onChange={e => setListSort(e.target.value as typeof listSort)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none">
+              <option value="pending">待审核最多</option>
+              <option value="aliases">别名数量</option>
+              <option value="recent">最近新增</option>
+              <option value="name">名称</option>
+            </select>
           </div>
-        )}
-      </div>
+
+          {loadingList ? <Spinner /> : filteredGroups.length === 0 ? (
+            <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
+              <p className="text-sm text-gray-400">
+                {keywords.length === 0 ? '还没有商业词组，点右上角「+ 新增词组」开始' : '没有匹配的词组'}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-50">
+              {pagedGroups.map(([groupName, members]) => {
+                const pending = pendingByGroup.get(groupName) ?? 0
+                const visible = members.slice(0, 5)
+                const rest = members.length - visible.length
+                return (
+                  <div key={groupName} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <button onClick={() => openGroupDetail(groupName)} className="min-w-0 flex-1 text-left group">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-gray-800 group-hover:text-green-600">{groupName}</span>
+                        {pending > 0 && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-orange-50 text-orange-500">待审核 {pending}</span>}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                        {visible.map(m => (
+                          <span key={m.id} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{m.keyword}</span>
+                        ))}
+                        {rest > 0 && <span className="text-[11px] text-gray-400">还有 {rest} 个</span>}
+                      </div>
+                    </button>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button onClick={() => openGroupDetail(groupName)}
+                        className="px-2.5 py-1 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">查看详情</button>
+                      <GroupOverflowMenu onDelete={() => removeGroup(groupName)} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {filteredGroups.length > 0 && (
+            <SimplePagination page={clampedListPage} total={filteredGroups.length} onChange={setListPage} />
+          )}
+        </div>
       )}
 
-      {subView === 'coverage' && (
-      <div className="space-y-5">
+      {subView === 'detail' && selectedGroup && (
+        <GroupDetailView
+          groupName={selectedGroup}
+          members={(groupedList.find(([g]) => g === selectedGroup)?.[1] ?? [])}
+          onBack={() => { setSubView('list'); setSelectedGroup(null) }}
+          onKeywordsChanged={loadList}
+          onGroupRenamed={(newName) => setSelectedGroup(newName)}
+          onGroupDeleted={() => { setSubView('list'); setSelectedGroup(null); loadList() }}
+          onViewAllDiscoveries={() => setSubView('discoveries')}
+        />
+      )}
+
+      {subView === 'discoveries' && (
+        <DiscoveriesView onAccepted={() => { loadList(); loadPendingSummary() }} onIgnored={loadPendingSummary} />
+      )}
+
+      {showNewGroupModal && (
+        <NewGroupModal onClose={() => setShowNewGroupModal(false)} onCreated={() => { setShowNewGroupModal(false); loadList() }} />
+      )}
+      {showBulkModal && (
+        <BulkImportModal onClose={() => setShowBulkModal(false)} onSaved={() => { setShowBulkModal(false); loadList() }} />
+      )}
+    </div>
+  )
+}
+
+function GroupOverflowMenu({ onDelete }: { onDelete: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(o => !o)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded hover:bg-gray-50">⋯</button>
+      {open && (
+        <div className="absolute right-0 top-7 z-10 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-24">
+          <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50">删除组</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 新增词组：概念名称 + 别名标签输入，拼成"概念名称、alias1、alias2"一行文本
+// 复用现成的 POST（不传groupName，走"一行一组，第一个词当组名"的既有解析）。
+function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [conceptName, setConceptName] = useState('')
+  const [aliases, setAliases] = useState<string[]>([])
+  const [aliasInput, setAliasInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function commitAliasInput() {
+    const parsed = parseAliasInput(aliasInput)
+    if (parsed.length > 0) setAliases(prev => Array.from(new Set([...prev, ...parsed])))
+    setAliasInput('')
+  }
+
+  async function save() {
+    if (!conceptName.trim() || saving) return
+    setSaving(true); setError('')
+    try {
+      const line = [conceptName.trim(), ...aliases].join('、')
+      const res = await fetch('/api/research/commercial-keywords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: line }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || '保存失败'); return }
+      onCreated()
+    } catch {
+      setError('保存失败（网络异常）')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-800">新增词组</h3>
+        <div className="space-y-1.5">
+          <label className="text-xs text-gray-500">概念名称</label>
+          <input value={conceptName} onChange={e => setConceptName(e.target.value)} placeholder="例如：纸飞机"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-gray-500">已知别名（可选，回车/逗号/顿号分隔多个）</label>
+          <div className="flex flex-wrap gap-1.5 border border-gray-200 rounded-lg px-2 py-1.5 focus-within:ring-2 focus-within:ring-green-400">
+            {aliases.map(a => (
+              <span key={a} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+                {a}
+                <button onClick={() => setAliases(prev => prev.filter(x => x !== a))} className="text-gray-400 hover:text-red-500">×</button>
+              </span>
+            ))}
+            <input value={aliasInput} onChange={e => setAliasInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ',' || e.key === '、') { e.preventDefault(); commitAliasInput() } }}
+              onBlur={commitAliasInput}
+              placeholder="例如：telegram, telegreat, telegraph"
+              className="flex-1 min-w-[120px] text-sm focus:outline-none text-gray-700" />
+          </div>
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">取消</button>
+          <button onClick={save} disabled={saving || !conceptName.trim()}
+            className="px-4 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50">
+            {saving ? '保存中…' : '保存词组'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 批量导入：原来常驻页面的textarea批量粘贴流程，原样搬进Modal。
+function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [pasteText, setPasteText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save() {
+    if (!pasteText.trim() || saving) return
+    setSaving(true); setError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: pasteText }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || '保存失败'); return }
+      onSaved()
+    } catch {
+      setError('保存失败（网络异常）')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3" onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-800">批量导入</h3>
+        <p className="text-xs text-gray-400">一行一组，同一组内用顿号/逗号隔开多个别名，单次最多100个词（含别名展开后）。</p>
+        <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
+          placeholder={'纸飞机、telegram、telegreat、telegraph\nLetstalk'} rows={8}
+          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">取消</button>
+          <button onClick={save} disabled={saving || !pasteText.trim()}
+            className="px-4 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50">
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 词组详情：取代原来独立的"排名覆盖"tab。进入即自动查（只查这一个组的别名，
+// 比原来"一次查全部组"快很多），百度联想降级成默认折叠的辅助区。
+function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGroupRenamed, onGroupDeleted, onViewAllDiscoveries }: {
+  groupName: string; members: CommercialKeyword[]
+  onBack: () => void; onKeywordsChanged: () => void; onGroupRenamed: (newName: string) => void
+  onGroupDeleted: () => void; onViewAllDiscoveries: () => void
+}) {
+  const [result, setResult] = useState<CoverageResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState(groupName)
+  const [addAliasInput, setAddAliasInput] = useState('')
+
+  const [filterOwn, setFilterOwn] = useState<'all' | 'own' | 'ref'>('all')
+  const [filterPlatform, setFilterPlatform] = useState<'all' | 'mobile' | 'pc'>('all')
+  const [filterAlias, setFilterAlias] = useState('')
+  const [rankSortDir, setRankSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const [groupDiscoveries, setGroupDiscoveries] = useState<Discovery[]>([])
+
+  function runCoverage() {
+    setLoading(true); setError(''); setResult(null)
+    fetch('/api/research/commercial-keywords/coverage', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
+    }).then(async r => {
+      const data = await r.json()
+      if (!r.ok) { setError(data.error || '查询失败'); return }
+      setResult(data)
+    }).catch(() => setError('查询失败（网络异常），请重试'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { runCoverage(); setRenameValue(groupName) }, [groupName])
+  useEffect(() => {
+    fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}`)
+      .then(r => r.json()).then(d => setGroupDiscoveries((d.discoveries ?? []).slice(0, 5)))
+  }, [groupName])
+
+  async function confirmRename() {
+    if (!renameValue.trim() || renameValue.trim() === groupName) { setRenaming(false); return }
+    const res = await fetch('/api/research/commercial-keywords', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupName, newGroupName: renameValue.trim() }),
+    })
+    if (res.ok) {
+      onGroupRenamed(renameValue.trim())
+      onKeywordsChanged()
+    }
+    setRenaming(false)
+  }
+
+  async function removeAlias(id: string) {
+    await fetch('/api/research/commercial-keywords', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+    })
+    onKeywordsChanged()
+  }
+
+  async function addAlias() {
+    const parsed = parseAliasInput(addAliasInput)
+    if (parsed.length === 0) return
+    await fetch('/api/research/commercial-keywords', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: parsed.join('\n'), groupName }),
+    })
+    setAddAliasInput('')
+    onKeywordsChanged()
+  }
+
+  async function deleteGroup() {
+    if (!window.confirm(`确定要删除词组「${groupName}」吗？组内全部别名都会一起删掉，此操作不可撤销。`)) return
+    await fetch('/api/research/commercial-keywords', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
+    })
+    onGroupDeleted()
+  }
+
+  const filteredCoverage = (result?.coverage ?? [])
+    .filter(c => filterOwn === 'all' || (filterOwn === 'own' ? c.isOwnSite : !c.isOwnSite))
+    .filter(c => filterPlatform === 'all' || c.platform.toLowerCase().includes(filterPlatform === 'pc' ? 'pc' : 'mobile') || c.platform.toLowerCase() === (filterPlatform === 'pc' ? 'pc' : 'm'))
+    .filter(c => !filterAlias || c.keyword === filterAlias)
+    .sort((a, b) => {
+      const av = a.rankPosition, bv = b.rankPosition
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      return rankSortDir === 'asc' ? av - bv : bv - av
+    })
+
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="text-xs text-gray-400 hover:text-gray-700">‹ 返回词组库</button>
+
       <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-        <p className="text-sm text-gray-400">对词组库里的每个别名挖一遍百度下拉词，再把整批词（含下拉词变体）拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
-        <button onClick={runCoverage} disabled={running || keywords.length === 0}
-          className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
-          {running ? '正在挖下拉词+查排名，可能需要几十秒到几分钟…' : '查覆盖'}
-        </button>
-        {keywords.length === 0 && <p className="text-xs text-gray-300">词组库是空的，先去"词组库"贴几个商业词</p>}
-        {runError && <p className="text-xs text-red-600">{runError}</p>}
+        <div className="flex items-start justify-between gap-3">
+          {renaming ? (
+            <div className="flex items-center gap-2">
+              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') setRenaming(false) }}
+                className="text-lg font-semibold border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800" />
+              <button onClick={confirmRename} className="text-xs text-green-600 hover:underline">保存</button>
+              <button onClick={() => setRenaming(false)} className="text-xs text-gray-400 hover:underline">取消</button>
+            </div>
+          ) : (
+            <button onClick={() => setRenaming(true)} className="text-lg font-semibold text-gray-800 hover:text-green-600 text-left">
+              {groupName} <span className="text-xs text-gray-300 font-normal">（点击改名）</span>
+            </button>
+          )}
+          <button onClick={deleteGroup} className="text-xs text-gray-400 hover:text-red-500 flex-shrink-0">删除组</button>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {members.map(m => (
+            <span key={m.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+              {m.keyword}
+              <button onClick={() => removeAlias(m.id)} className="text-gray-400 hover:text-red-500">×</button>
+            </span>
+          ))}
+          <input value={addAliasInput} onChange={e => setAddAliasInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
+            onBlur={() => { if (addAliasInput.trim()) addAlias() }}
+            placeholder="+ 添加别名"
+            className="text-xs px-2.5 py-1 rounded-full border border-dashed border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-600 w-28" />
+        </div>
       </div>
 
-      {result && (
+      {loading ? <Spinner /> : error ? (
+        <p className="text-sm text-red-600">{error}</p>
+      ) : result && (
         <>
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <p className="text-sm font-semibold text-gray-700 mb-3">下拉词挖掘结果（共检查 {result.totalKeywordsChecked} 个词，含清单里的别名本身）</p>
-            <div className="space-y-1.5">
+          <button onClick={() => setShowSuggestions(o => !o)}
+            className="w-full bg-white rounded-xl border border-gray-200 px-5 py-3 flex items-center justify-between text-left hover:bg-gray-50/60 transition-colors">
+            <span className="text-sm text-gray-600">辅助发现 · 百度联想 —— 本组共发现 {result.groupResults.reduce((a, g) => a + g.expansions.length, 0)} 个联想词</span>
+            <span className="text-xs text-gray-400">{showSuggestions ? '收起 ▲' : '展开 ▼'}</span>
+          </button>
+          {showSuggestions && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2 -mt-2">
+              <p className="text-xs text-gray-400">该数据源对部分敏感/受限话题词经常无结果，仅供参考，不如下方真实排名数据可靠。</p>
               {result.groupResults.map(g => (
-                <div key={g.groupName} className="border-b border-gray-50 pb-1.5 last:border-0">
-                  <button onClick={() => setExpandedGroup(prev => prev === g.groupName ? null : g.groupName)}
-                    className="w-full text-left text-xs text-gray-600 hover:text-gray-800">
-                    <span className="font-medium">{g.groupName}</span>
-                    <span className="text-gray-400"> · 别名 {g.members.length} 个 · 挖到 {g.expansions.length} 个下拉词</span>
-                  </button>
-                  {expandedGroup === g.groupName && (
-                    <div className="text-xs text-gray-500 mt-1 leading-relaxed space-y-0.5">
-                      <p>别名：{g.members.join('、')}</p>
-                      <p>下拉词：{g.expansions.length > 0 ? g.expansions.join('、') : '没有挖到下拉词'}</p>
-                    </div>
-                  )}
-                </div>
+                <p key={g.groupName} className="text-xs text-gray-500">
+                  <span className="font-medium text-gray-600">{g.groupName}</span>：{g.expansions.length > 0 ? g.expansions.join('、') : '没有挖到下拉词'}
+                </p>
               ))}
             </div>
-          </div>
+          )}
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700">覆盖明细</span>
-              <span className="text-xs text-gray-400">{result.coverage.length} 条，按排名从好到差</span>
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm font-semibold text-gray-700">排名覆盖 · {filteredCoverage.length} 条</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <select value={filterOwn} onChange={e => setFilterOwn(e.target.value as typeof filterOwn)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                  <option value="all">全部站点</option><option value="own">自己</option><option value="ref">竞品</option>
+                </select>
+                <select value={filterPlatform} onChange={e => setFilterPlatform(e.target.value as typeof filterPlatform)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                  <option value="all">PC+M</option><option value="mobile">M</option><option value="pc">PC</option>
+                </select>
+                <select value={filterAlias} onChange={e => setFilterAlias(e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                  <option value="">全部别名</option>
+                  {members.map(m => <option key={m.id} value={m.keyword}>{m.keyword}</option>)}
+                </select>
+              </div>
             </div>
-            {result.coverage.length === 0 ? (
-              <p className="text-sm text-gray-300 text-center py-8">这批词现在没有任何"排名"模式站点拿到排名</p>
+            {filteredCoverage.length === 0 ? (
+              <p className="text-sm text-gray-300 text-center py-8">没有匹配的排名数据</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
                       <th className="text-left px-4 py-2 font-medium">关键词</th>
-                      <th className="text-left px-4 py-2 font-medium">所属概念</th>
                       <th className="text-left px-4 py-2 font-medium">站点</th>
-                      <th className="text-right px-4 py-2 font-medium">排名</th>
-                      <th className="text-left px-4 py-2 font-medium">标题</th>
                       <th className="text-left px-4 py-2 font-medium">平台</th>
+                      <th className="text-right px-4 py-2 font-medium cursor-pointer select-none" onClick={() => setRankSortDir(d => d === 'asc' ? 'desc' : 'asc')}>
+                        排名 {rankSortDir === 'asc' ? '▲' : '▼'}
+                      </th>
+                      <th className="text-left px-4 py-2 font-medium">标题</th>
+                      <th className="text-left px-4 py-2 font-medium">URL</th>
                       <th className="text-left px-4 py-2 font-medium">数据日期</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {result.coverage.map((c, i) => (
+                    {filteredCoverage.map((c, i) => (
                       <tr key={i} className="text-gray-700">
                         <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span>{c.isExpansion && <span className="text-[10px] text-blue-500 ml-1">下拉</span>}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400 max-w-[140px]"><span className="block truncate">{c.groupName}</span></td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">
                           {c.domain}
                           <span className={`ml-1 px-1 py-0.5 rounded text-[10px] ${c.isOwnSite ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400'}`}>{c.isOwnSite ? '自己' : '竞品'}</span>
                         </td>
-                        <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{c.rankPosition ?? '—'}</td>
-                        <td className="px-4 py-2 max-w-[220px]"><span className="block truncate" title={c.title ?? ''}>{c.title ?? '—'}</span></td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">{c.platform}</td>
+                        <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{c.rankPosition ?? '—'}</td>
+                        <td className="px-4 py-2 max-w-[240px]"><span className="block truncate" title={c.title ?? ''}>{c.title ?? '—'}</span></td>
+                        <td className="px-4 py-2 text-xs whitespace-nowrap">
+                          {c.url ? <a href={c.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">↗</a> : '—'}
+                        </td>
                         <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">{c.statDate}</td>
                       </tr>
                     ))}
@@ -682,79 +933,158 @@ function CommercialKeywordsTab() {
           </div>
         </>
       )}
-      </div>
-      )}
 
-      {subView === 'discoveries' && (
-      <div className="space-y-5">
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-          <p className="text-sm text-gray-400">抓排名标题时（rank-title步骤，16个"排名"模式站点），顺手检查标题里有没有出现词组库里已知的别名文字；命中了但这条关键词本身还不是已知别名，就是一个新词候选，累积在这里等你审核——不是一次性挖干净，是每天抓取慢慢攒出来的。</p>
-          <div className="flex items-center gap-1.5">
-            {(['pending', 'accepted', 'ignored'] as const).map(s => (
-              <button key={s} onClick={() => setDiscoveryStatus(s)}
-                className={`px-3 py-1 text-xs rounded-full border transition-colors ${discoveryStatus === s ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
-                {s === 'pending' ? '待审核' : s === 'accepted' ? '已加入' : '已忽略'}
-              </button>
-            ))}
+      {groupDiscoveries.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-700">这个组的新词发现</span>
+            <button onClick={onViewAllDiscoveries} className="text-xs text-gray-400 hover:text-gray-700">查看全部 →</button>
           </div>
-          {discoveryError && <p className="text-xs text-red-600">{discoveryError}</p>}
+          {groupDiscoveries.map(d => (
+            <p key={d.id} className="text-xs text-gray-500">
+              <span className="font-medium text-gray-700">{d.source_keyword}</span> · {d.site_domains?.length ?? 0}个站点 · 出现{d.seen_count}次 · 最佳排名{d.best_rank_position ?? '—'}
+            </p>
+          ))}
         </div>
+      )}
+    </div>
+  )
+}
 
-        {loadingDiscoveries ? <Spinner /> : discoveries.length === 0 ? (
-          <p className="text-sm text-gray-300 text-center py-8">
-            {discoveryStatus === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : discoveryStatus === 'accepted' ? '还没有已加入的新词' : '还没有已忽略的新词'}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {discoveries.map(d => (
-              <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-gray-800">{d.source_keyword}</span>
-                      <span className="text-xs text-gray-400">→ 命中概念组「{d.group_name}」（标题含"{d.matched_alias}"）</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">
-                      站点数 {d.site_domains?.length ?? 0} · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'} · 最新命中 {d.domain ?? '—'}（{d.last_seen_at.slice(0, 10)}）
-                    </p>
-                    {d.title && (
-                      <p className="text-xs text-gray-500 mt-1 truncate" title={d.title}>
-                        标题：{d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{d.title}</a> : d.title}
-                      </p>
-                    )}
+// 新词发现审核工作台。默认待审核；已加入/已忽略数量只在切到那个tab时才查，
+// 避免一次性拉三份列表。
+function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; onIgnored: () => void }) {
+  const [status, setStatus] = useState<DiscoveryStatus>('pending')
+  const [discoveries, setDiscoveries] = useState<Discovery[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [countCache, setCountCache] = useState<Partial<Record<DiscoveryStatus, number>>>({})
+  const [page, setPage] = useState(0)
+
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [acceptAlias, setAcceptAlias] = useState('')
+  const [acceptGroup, setAcceptGroup] = useState('')
+
+  function load(s: DiscoveryStatus) {
+    setLoading(true); setError('')
+    fetch(`/api/research/commercial-keywords/discoveries?status=${s}`)
+      .then(r => r.json())
+      .then(d => { setDiscoveries(d.discoveries ?? []); setCountCache(prev => ({ ...prev, [s]: (d.discoveries ?? []).length })) })
+      .catch(() => setError('加载失败（网络异常）'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load(status); setPage(0) }, [status])
+
+  const totalPages = Math.max(1, Math.ceil(discoveries.length / PAGE_SIZE))
+  const clampedPage = Math.min(page, totalPages - 1)
+  const paged = discoveries.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE)
+
+  function openAcceptForm(d: Discovery) {
+    setAcceptingId(d.id); setAcceptAlias(d.source_keyword); setAcceptGroup(d.group_name)
+  }
+
+  async function confirmAccept(id: string) {
+    if (!acceptAlias.trim() || !acceptGroup.trim()) return
+    setError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'accept', alias: acceptAlias.trim(), groupName: acceptGroup.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || '操作失败'); return }
+      setAcceptingId(null)
+      setDiscoveries(prev => prev.filter(d => d.id !== id))
+      onAccepted()
+    } catch {
+      setError('操作失败（网络异常）')
+    }
+  }
+
+  async function ignoreDiscovery(id: string) {
+    setError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'ignore' }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || '操作失败'); return }
+      setDiscoveries(prev => prev.filter(d => d.id !== id))
+      onIgnored()
+    } catch {
+      setError('操作失败（网络异常）')
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-400">抓排名标题时（rank-title步骤，16个"排名"模式站点）顺手检查标题里有没有出现已知别名文字，命中了但关键词本身还不认识，就是新词候选——每天抓取慢慢攒出来的，不是一次性挖干净。</p>
+
+      <div className="flex items-center gap-1.5">
+        {(['pending', 'accepted', 'ignored'] as const).map(s => (
+          <button key={s} onClick={() => setStatus(s)}
+            className={`px-3 py-1 text-xs rounded-full border transition-colors ${status === s ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
+            {s === 'pending' ? '待审核' : s === 'accepted' ? '已加入' : '已忽略'}{countCache[s] != null ? ` ${countCache[s]}` : ''}
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {loading ? <Spinner /> : discoveries.length === 0 ? (
+        <p className="text-sm text-gray-300 text-center py-8">
+          {status === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : status === 'accepted' ? '还没有已加入的新词' : '还没有已忽略的新词'}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {paged.map(d => (
+            <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-800">{d.source_keyword}</span>
+                    <span className="text-xs text-gray-400">→ 推测属于「{d.group_name}」（标题含"{d.matched_alias}"）</span>
                   </div>
-                  {discoveryStatus !== 'accepted' && (
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button onClick={() => openAcceptForm(d)}
-                        className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">加入词组</button>
-                      {discoveryStatus === 'pending' && (
-                        <button onClick={() => ignoreDiscovery(d.id)}
-                          className="px-2.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg hover:text-red-500 hover:border-red-200 transition-colors">忽略</button>
-                      )}
-                    </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {d.site_domains?.length ?? 0} 个站点 · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'} · 最新命中 {d.domain ?? '—'}（{d.last_seen_at.slice(0, 10)}）
+                  </p>
+                  {d.title && (
+                    <p className="text-xs text-gray-500 mt-1 truncate" title={d.title}>
+                      {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{d.title}</a> : d.title}
+                    </p>
                   )}
                 </div>
-
-                {acceptingId === d.id && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                    <input value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
-                      placeholder="要加入的别名文字"
-                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-40" />
-                    <span className="text-xs text-gray-400">归到组</span>
-                    <input value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
-                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-32" />
-                    <button onClick={() => confirmAccept(d.id)} disabled={!acceptAlias.trim() || !acceptGroup.trim()}
-                      className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">确认</button>
-                    <button onClick={() => setAcceptingId(null)}
-                      className="px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600 transition-colors">取消</button>
+                {status !== 'accepted' && (
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button onClick={() => openAcceptForm(d)}
+                      className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">加入该词组</button>
+                    {status === 'pending' && (
+                      <button onClick={() => ignoreDiscovery(d.id)}
+                        className="px-2.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg hover:text-red-500 hover:border-red-200 transition-colors">忽略</button>
+                    )}
                   </div>
                 )}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+
+              {acceptingId === d.id && (
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                  <input value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
+                    placeholder="要加入的别名文字"
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-40" />
+                  <span className="text-xs text-gray-400">归到组</span>
+                  <input value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-32" />
+                  <button onClick={() => confirmAccept(d.id)} disabled={!acceptAlias.trim() || !acceptGroup.trim()}
+                    className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">确认</button>
+                  <button onClick={() => setAcceptingId(null)}
+                    className="px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600 transition-colors">取消</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
+      {discoveries.length > 0 && <SimplePagination page={clampedPage} total={discoveries.length} onChange={setPage} />}
     </div>
   )
 }

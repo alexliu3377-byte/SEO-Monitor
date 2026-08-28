@@ -44,24 +44,37 @@ export async function POST(req: Request) {
   if (ctx.error) return ctx.error
   const { user, service } = ctx
 
-  const { keywords } = await req.json() as { keywords?: string }
+  const { keywords, groupName: targetGroup } = await req.json() as { keywords?: string; groupName?: string }
   if (!keywords || !keywords.trim()) return NextResponse.json({ error: '没有输入关键词' }, { status: 400 })
 
   const lines = keywords.split('\n').map(l => l.trim()).filter(Boolean)
   if (lines.length === 0) return NextResponse.json({ error: '没有有效的关键词' }, { status: 400 })
 
-  // 每一行是一组别名——group_name 用这一行第一个词当标签；同一行多个别名
-  // 各自存一行，但共享同一个 group_name。
   const rows: { keyword: string; group_name: string; added_by: string }[] = []
   const seen = new Set<string>()
-  for (const line of lines) {
-    const members = parseLine(line)
-    if (members.length === 0) continue
-    const groupName = members[0]
-    for (const keyword of members) {
-      if (seen.has(keyword)) continue
-      seen.add(keyword)
-      rows.push({ keyword, group_name: groupName, added_by: user.id })
+
+  if (targetGroup && targetGroup.trim()) {
+    // 词组详情页"内联加别名"用这条路径——传了 groupName 就不按"每行一组"解析，
+    // 整段文本拆出来的全部词都当成加进这一个已有组的新别名。
+    for (const line of lines) {
+      for (const keyword of parseLine(line)) {
+        if (seen.has(keyword)) continue
+        seen.add(keyword)
+        rows.push({ keyword, group_name: targetGroup.trim(), added_by: user.id })
+      }
+    }
+  } else {
+    // 每一行是一组别名——group_name 用这一行第一个词当标签；同一行多个别名
+    // 各自存一行，但共享同一个 group_name。
+    for (const line of lines) {
+      const members = parseLine(line)
+      if (members.length === 0) continue
+      const groupName = members[0]
+      for (const keyword of members) {
+        if (seen.has(keyword)) continue
+        seen.add(keyword)
+        rows.push({ keyword, group_name: groupName, added_by: user.id })
+      }
     }
   }
   if (rows.length === 0) return NextResponse.json({ error: '没有有效的关键词' }, { status: 400 })
@@ -76,6 +89,25 @@ export async function POST(req: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })
+}
+
+// 词组详情页标题行内改名用——已存在但还没审核、group_name等于旧名字的
+// "新词发现"候选不做级联改名（会变成一条指向旧名字的候选，用户审核时
+// "加入词组"表单本来就能手动改归属组名，不影响功能，只是标签显示旧名，
+// 刻意简化不做级联更新）。
+export async function PATCH(req: Request) {
+  const ctx = await requireAdmin()
+  if (ctx.error) return ctx.error
+  const { service } = ctx
+
+  const { groupName, newGroupName } = await req.json() as { groupName?: string; newGroupName?: string }
+  if (!groupName || !newGroupName || !newGroupName.trim()) return NextResponse.json({ error: '缺少参数' }, { status: 400 })
+
+  const { error } = await service.from('commercial_keywords')
+    .update({ group_name: newGroupName.trim() })
+    .eq('group_name', groupName)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
 }
 
 export async function DELETE(req: Request) {

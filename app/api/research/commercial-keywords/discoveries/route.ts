@@ -24,14 +24,17 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status') || 'pending'
+  const groupName = searchParams.get('groupName')
   if (!VALID_STATUSES.includes(status)) return NextResponse.json({ error: '无效的状态' }, { status: 400 })
 
-  const { data, error } = await service
+  let query = service
     .from('commercial_keyword_discoveries')
     .select('*')
     .eq('status', status)
     .order('last_seen_at', { ascending: false })
     .limit(500)
+  if (groupName) query = query.eq('group_name', groupName)
+  const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const rows = (data ?? []) as { site_domains: string[] | null; seen_count: number; best_rank_position: number | null }[]
