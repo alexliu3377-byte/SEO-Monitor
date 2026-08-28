@@ -1030,14 +1030,19 @@ export async function fetchBaiduIndexPages(
   return { pages: results, failReason }
 }
 
-// Fetch Baidu search suggestions for a keyword
-export async function fetchBaiduSuggestion(keyword: string): Promise<string[]> {
+// Fetch Baidu search suggestions ("下拉词") for a keyword — raw, unfiltered.
+// 2026-08-28 抽出来给"商业词挖掘"用（lib/crawler.ts 原本就有这个函数，但一直
+// 是死代码——写完从没被接上过任何功能，全仓库零调用方）；固定过滤成"只留
+// 下载类意图词"对商业词挖掘没用（商业词的下拉词不一定带"下载/安装"这类词），
+// 所以拆出这个不过滤版本，fetchBaiduSuggestion 保持原样不动（万一以后真接上
+// 下载词发现功能）。改用 randomUA() 轮换 UA 而不是固定一个。
+async function fetchBaiduSuggestionRaw(keyword: string): Promise<string[]> {
   try {
     const encoded = encodeURIComponent(keyword)
     const url = `https://suggestion.baidu.com/su?wd=${encoded}&cb=window.bd__cbs__callback&json=1`
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; SEOMonitor/1.0)',
+        'User-Agent': randomUA(),
         Referer: 'https://www.baidu.com',
       },
       signal: AbortSignal.timeout(5000),
@@ -1048,11 +1053,17 @@ export async function fetchBaiduSuggestion(keyword: string): Promise<string[]> {
     const match = text.match(/\((\{.*?\})\)/)
     if (!match) return []
     const data = JSON.parse(match[1])
-    const suggestions: string[] = data?.s || []
-
-    // Filter to keep only download-related suggestions
-    return filterDownloadKeywords(suggestions)
+    return (data?.s || []) as string[]
   } catch {
     return []
   }
+}
+
+export async function fetchBaiduSuggestion(keyword: string): Promise<string[]> {
+  // Filter to keep only download-related suggestions
+  return filterDownloadKeywords(await fetchBaiduSuggestionRaw(keyword))
+}
+
+export async function fetchBaiduSuggestionsUnfiltered(keyword: string): Promise<string[]> {
+  return fetchBaiduSuggestionRaw(keyword)
 }

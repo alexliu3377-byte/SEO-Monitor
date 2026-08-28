@@ -237,6 +237,18 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '日志', text: '记录为 search，domain=查询域名，summary 显示是否已追踪及数据最新日期' },
     ],
   },
+  {
+    key: 'commercial-keywords',
+    title: '商业词挖掘',
+    badge: '研究中心"商业词"tab · 触发方式：页面按钮，非定时任务',
+    items: [
+      { label: '清单维护', text: '用户手动贴一份商业词清单存入 commercial_keywords 表（keyword 唯一），不含挖出来的下拉词——那部分现查现用不落库，保证新鲜度；单次最多贴100个词' },
+      { label: '下拉词挖掘', text: '点"查覆盖"时，对清单里每个种子词依次调用百度 suggestion.baidu.com/su 建议接口（lib/crawler.ts 的 fetchBaiduSuggestionsUnfiltered，未鉴权公开接口，不需要cookie/session）；种子词之间间隔200ms，避免短时间集中打接口' },
+      { label: '排名覆盖查询', text: '种子词+全部下拉词去重后，分批（150个一批）查 site_keyword_ranks 近7天数据，取每个"站点+关键词+平台"组合最新一条；只有"排名"模式站点（has_rank_title=true）有 rank_position/title 细节，"涨跌"模式站点（写 rank_changes）没有这些字段，查不到，不是漏做' },
+      { label: '写入表', text: 'commercial_keywords（清单）；覆盖查询本身不写库，每次现查现返回' },
+      { label: '不设门槛', text: '覆盖结果不按排名过滤，全部列出来（含未上榜的词），用户自己按排名数字判断——这是用户明确要求的' },
+    ],
+  },
 ]
 
 // Data retention periods (for reference in the rules modal)

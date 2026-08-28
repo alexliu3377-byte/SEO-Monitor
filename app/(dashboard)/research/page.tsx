@@ -15,11 +15,12 @@ function Spinner() {
   )
 }
 
-type TabKey = 'competitors' | 'diagnostic' | 'week' | 'month' | 'quarter' | 'year'
+type TabKey = 'competitors' | 'diagnostic' | 'commercial' | 'week' | 'month' | 'quarter' | 'year'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'competitors', label: '竞品成效' },
   { key: 'diagnostic', label: '站点诊断' },
+  { key: 'commercial', label: '商业词' },
   { key: 'week', label: '研究周报' },
   { key: 'month', label: '研究月报' },
   { key: 'quarter', label: '研究季报' },
@@ -57,6 +58,7 @@ export default function ResearchPage() {
 
       {activeTab === 'competitors' && <CompetitorsTab />}
       {activeTab === 'diagnostic' && <SiteDiagnosticTab />}
+      {activeTab === 'commercial' && <CommercialKeywordsTab />}
       {activeTab === 'week' && <ReportTab key="week" periodType="week" />}
       {activeTab === 'month' && <ReportTab key="month" periodType="month" />}
       {activeTab === 'quarter' && <ReportTab key="quarter" periodType="quarter" />}
@@ -359,6 +361,205 @@ function SiteDiagnosticTab() {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// ══════════════════════════════ 商业词 ══════════════════════════════
+
+interface CommercialKeyword { id: string; keyword: string; created_at: string }
+interface SeedResult { seed: string; expansions: string[] }
+interface CoverageRow {
+  keyword: string; isExpansion: boolean; seedKeyword: string
+  domain: string; siteName: string; isOwnSite: boolean
+  rankPosition: number | null; title: string | null; url: string | null
+  platform: string; statDate: string
+}
+interface CoverageResult {
+  seedResults: SeedResult[]; coverage: CoverageRow[]; noDataKeywords: string[]; totalKeywordsChecked: number
+}
+
+// 维护一份"商业词"清单 + 挖下拉词变体 + 查这批词（含变体）现在谁拿到了排名。
+// 2026-08-28 新增，用户想找"这批有商业价值的词，别人网站做得怎么样、多少
+// 排名、什么标题"，同时想借下拉词把同一个商业概念的不同说法都挖出来。
+function CommercialKeywordsTab() {
+  const [keywords, setKeywords] = useState<CommercialKeyword[]>([])
+  const [loadingList, setLoadingList] = useState(true)
+  const [pasteText, setPasteText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  const [running, setRunning] = useState(false)
+  const [runError, setRunError] = useState('')
+  const [result, setResult] = useState<CoverageResult | null>(null)
+  const [expandedSeed, setExpandedSeed] = useState<string | null>(null)
+
+  function loadList() {
+    setLoadingList(true)
+    fetch('/api/research/commercial-keywords').then(r => r.json()).then(d => setKeywords(d.keywords ?? [])).finally(() => setLoadingList(false))
+  }
+  useEffect(loadList, [])
+
+  async function saveKeywords() {
+    if (!pasteText.trim() || saving) return
+    setSaving(true); setSaveError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: pasteText }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setSaveError(data.error || '保存失败'); return }
+      setPasteText('')
+      loadList()
+    } catch {
+      setSaveError('保存失败（网络异常）')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeKeyword(id: string) {
+    await fetch('/api/research/commercial-keywords', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+    })
+    setKeywords(prev => prev.filter(k => k.id !== id))
+  }
+
+  async function clearAll() {
+    if (!window.confirm(`确定要清空全部 ${keywords.length} 个商业词吗？此操作不可撤销。`)) return
+    await fetch('/api/research/commercial-keywords', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }),
+    })
+    setKeywords([])
+  }
+
+  async function runCoverage() {
+    if (running || keywords.length === 0) return
+    setRunning(true); setRunError(''); setResult(null)
+    try {
+      const res = await fetch('/api/research/commercial-keywords/coverage', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { setRunError(data.error || '查询失败'); return }
+      setResult(data)
+    } catch {
+      setRunError('查询失败（网络异常），请重试')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <p className="text-sm text-gray-400">维护一份有商业价值、想重点盯的关键词清单。"查覆盖"会先给每个词挖一遍百度下拉词（发现同一个概念的不同说法），再把种子词+下拉词一起拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点（网站管理里"排名"开关开着的那批）——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
+        <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
+          placeholder="一行一个词，粘贴进来" rows={3}
+          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
+        <div className="flex items-center gap-2">
+          <button onClick={saveKeywords} disabled={saving || !pasteText.trim()}
+            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+            {saving ? '保存中…' : '保存到清单'}
+          </button>
+          {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+        </div>
+
+        {loadingList ? <Spinner /> : keywords.length === 0 ? (
+          <p className="text-sm text-gray-300 text-center py-4">清单是空的，先贴几个商业词</p>
+        ) : (
+          <div className="pt-2 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-400">已保存 {keywords.length} 个</span>
+              <button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-500">清空全部</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {keywords.map(k => (
+                <span key={k.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+                  {k.keyword}
+                  <button onClick={() => removeKeyword(k.id)} className="text-gray-400 hover:text-red-500">×</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button onClick={runCoverage} disabled={running || keywords.length === 0}
+          className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
+          {running ? 'AI正在挖下拉词+查排名，可能需要几十秒到几分钟…' : '查覆盖'}
+        </button>
+        {runError && <p className="text-xs text-red-600">{runError}</p>}
+      </div>
+
+      {result && (
+        <>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <p className="text-sm font-semibold text-gray-700 mb-3">下拉词挖掘结果（共检查 {result.totalKeywordsChecked} 个词，含种子词本身）</p>
+            <div className="space-y-1.5">
+              {result.seedResults.map(s => (
+                <div key={s.seed} className="border-b border-gray-50 pb-1.5 last:border-0">
+                  <button onClick={() => setExpandedSeed(prev => prev === s.seed ? null : s.seed)}
+                    className="w-full text-left text-xs text-gray-600 hover:text-gray-800">
+                    <span className="font-medium">{s.seed}</span>
+                    <span className="text-gray-400"> · 挖到 {s.expansions.length} 个下拉词</span>
+                  </button>
+                  {expandedSeed === s.seed && (
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                      {s.expansions.length > 0 ? s.expansions.join('、') : '没有挖到下拉词'}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-700">覆盖明细</span>
+              <span className="text-xs text-gray-400">{result.coverage.length} 条，按排名从好到差</span>
+            </div>
+            {result.coverage.length === 0 ? (
+              <p className="text-sm text-gray-300 text-center py-8">这批词现在没有任何"排名"模式站点拿到排名</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
+                      <th className="text-left px-4 py-2 font-medium">关键词</th>
+                      <th className="text-left px-4 py-2 font-medium">来自种子词</th>
+                      <th className="text-left px-4 py-2 font-medium">站点</th>
+                      <th className="text-right px-4 py-2 font-medium">排名</th>
+                      <th className="text-left px-4 py-2 font-medium">标题</th>
+                      <th className="text-left px-4 py-2 font-medium">平台</th>
+                      <th className="text-left px-4 py-2 font-medium">数据日期</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {result.coverage.map((c, i) => (
+                      <tr key={i} className="text-gray-700">
+                        <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span>{c.isExpansion && <span className="text-[10px] text-blue-500 ml-1">下拉</span>}</td>
+                        <td className="px-4 py-2 text-xs text-gray-400 max-w-[140px]"><span className="block truncate">{c.seedKeyword}</span></td>
+                        <td className="px-4 py-2 text-xs whitespace-nowrap">
+                          {c.domain}
+                          <span className={`ml-1 px-1 py-0.5 rounded text-[10px] ${c.isOwnSite ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400'}`}>{c.isOwnSite ? '自己' : '竞品'}</span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{c.rankPosition ?? '—'}</td>
+                        <td className="px-4 py-2 max-w-[220px]"><span className="block truncate" title={c.title ?? ''}>{c.title ?? '—'}</span></td>
+                        <td className="px-4 py-2 text-xs whitespace-nowrap">{c.platform}</td>
+                        <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap">{c.statDate}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {result.noDataKeywords.length > 0 && (
+              <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-400">
+                没查到任何排名数据（{result.noDataKeywords.length}个）：{result.noDataKeywords.join('、')}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
