@@ -626,12 +626,21 @@ function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     if (!conceptName.trim() || saving) return
     setSaving(true); setError('')
     try {
-      const line = [conceptName.trim(), ...aliases].join('、')
+      const wanted = [conceptName.trim(), ...aliases]
+      const line = wanted.join('、')
       const res = await fetch('/api/research/commercial-keywords', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: line }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || '保存失败'); return }
+      // keyword 全局唯一（跨词组），已经属于别的组的词会被静默跳过——提示一下
+      // 免得用户以为保存失败，其实只是这几个词已经在别的组里了。
+      const insertedKeywords = new Set(((data.keywords ?? []) as { keyword: string }[]).map(k => k.keyword))
+      const skipped = wanted.filter(k => !insertedKeywords.has(k))
+      if (skipped.length === wanted.length) { setError(`「${skipped.join('、')}」已经存在（可能在别的词组里），没有新建`); return }
+      if (skipped.length > 0) {
+        window.alert(`词组已保存，但「${skipped.join('、')}」已经存在（可能在别的词组里），没有加进来`)
+      }
       onCreated()
     } catch {
       setError('保存失败（网络异常）')
@@ -688,11 +697,19 @@ function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     if (!pasteText.trim() || saving) return
     setSaving(true); setError('')
     try {
+      const wanted = parseAliasInput(pasteText)
       const res = await fetch('/api/research/commercial-keywords', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: pasteText }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || '保存失败'); return }
+      // keyword 全局唯一（跨词组），已经属于别的组的词会被静默跳过——批量导入
+      // 一次贴很多词，更容易撞到，提示一下免得用户以为哪里出错了。
+      const insertedKeywords = new Set(((data.keywords ?? []) as { keyword: string }[]).map(k => k.keyword))
+      const skipped = wanted.filter(k => !insertedKeywords.has(k))
+      if (skipped.length > 0) {
+        window.alert(`已保存，但「${skipped.join('、')}」已经存在（可能在别的词组里或已导入过），没有重复加入`)
+      }
       onSaved()
     } catch {
       setError('保存失败（网络异常）')
@@ -737,6 +754,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(groupName)
   const [addAliasInput, setAddAliasInput] = useState('')
+  const [addAliasError, setAddAliasError] = useState('')
 
   const [filterOwn, setFilterOwn] = useState<'all' | 'own' | 'ref'>('all')
   const [filterPlatform, setFilterPlatform] = useState<'all' | 'mobile' | 'pc'>('all')
@@ -785,12 +803,26 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   async function addAlias() {
     const parsed = parseAliasInput(addAliasInput)
     if (parsed.length === 0) return
-    await fetch('/api/research/commercial-keywords', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keywords: parsed.join('\n'), groupName }),
-    })
-    setAddAliasInput('')
-    onKeywordsChanged()
+    setAddAliasError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: parsed.join('\n'), groupName }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAddAliasError(data.error || '添加失败'); return }
+      // keyword 全局唯一（跨词组），已经属于别的组的词会被静默跳过插入——
+      // 之前这里完全没检查这种情况，用户点了没反应，看起来像"加不了"。
+      const insertedKeywords = new Set(((data.keywords ?? []) as { keyword: string }[]).map(k => k.keyword))
+      const skipped = parsed.filter(k => !insertedKeywords.has(k))
+      if (skipped.length > 0) {
+        setAddAliasError(`「${skipped.join('、')}」已经存在（可能在别的词组里），不能重复添加`)
+      }
+      setAddAliasInput('')
+      onKeywordsChanged()
+    } catch {
+      setAddAliasError('添加失败（网络异常）')
+    }
   }
 
   async function deleteGroup() {
@@ -844,10 +876,10 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
           ))}
           <input value={addAliasInput} onChange={e => setAddAliasInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
-            onBlur={() => { if (addAliasInput.trim()) addAlias() }}
-            placeholder="+ 添加别名"
-            className="text-xs px-2.5 py-1 rounded-full border border-dashed border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-600 w-28" />
+            placeholder="+ 添加别名，回车确认"
+            className="text-xs px-2.5 py-1 rounded-full border border-dashed border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-600 w-32" />
         </div>
+        {addAliasError && <p className="text-xs text-red-600">{addAliasError}</p>}
       </div>
 
       {loading ? <Spinner /> : error ? (
