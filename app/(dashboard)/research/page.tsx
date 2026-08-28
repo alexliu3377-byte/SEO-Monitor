@@ -378,13 +378,32 @@ interface CoverageRow {
 interface CoverageResult {
   groupResults: GroupResult[]; coverage: CoverageRow[]; noDataKeywords: string[]; totalKeywordsChecked: number
 }
+interface Discovery {
+  id: string; source_keyword: string; group_name: string; matched_alias: string
+  domain: string | null; title: string | null; url: string | null
+  platform: string | null; rank_position: number | null; best_rank_position: number | null
+  site_domains: string[] | null; seen_count: number
+  first_seen_at: string; last_seen_at: string; status: string
+}
 
-// 维护一份"商业词"清单 + 挖下拉词变体 + 查这批词（含变体）现在谁拿到了排名。
-// 2026-08-28 新增，用户想找"这批有商业价值的词，别人网站做得怎么样、多少
-// 排名、什么标题"，同时想借下拉词把同一个商业概念的不同说法都挖出来。同一天
-// 补了"概念分组"——同一行贴多个别名（比如"纸飞机、telegram、telegreat"）
-// 算同一组，查覆盖时按组归拢展示，不是每个别名各查各的、互不相干。
+type CommercialSubView = 'list' | 'coverage' | 'discoveries'
+const SUB_VIEWS: { key: CommercialSubView; label: string }[] = [
+  { key: 'list', label: '词组库' },
+  { key: 'coverage', label: '排名覆盖' },
+  { key: 'discoveries', label: '新词发现' },
+]
+
+// 维护一份"商业词"清单 + 挖下拉词变体 + 查这批词（含变体）现在谁拿到了排名，
+// 外加从每天真实抓取的排名标题里被动积累"新词发现"证据。2026-08-28 新增，
+// 用户想找"这批有商业价值的词，别人网站做得怎么样、多少排名、什么标题"，
+// 同时想发现同一个商业概念的不同说法。同一天补了"概念分组"——同一行贴多个
+// 别名（比如"纸飞机、telegram、telegreat"）算同一组，查覆盖时按组归拢展示。
+// 又同一天加了"新词发现"：百度下拉词对敏感话题词经常返回空/文不对题（实测
+// 验证过），改成从 rank-title 抓取的真实标题里找"已知别名+未知词共现"的证据
+// （scripts/crawl-rank.ts 的 upsertDiscovery），人工审核后决定要不要收编进清单。
 function CommercialKeywordsTab() {
+  const [subView, setSubView] = useState<CommercialSubView>('list')
+
   const [keywords, setKeywords] = useState<CommercialKeyword[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [pasteText, setPasteText] = useState('')
@@ -395,6 +414,14 @@ function CommercialKeywordsTab() {
   const [runError, setRunError] = useState('')
   const [result, setResult] = useState<CoverageResult | null>(null)
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+
+  const [discoveries, setDiscoveries] = useState<Discovery[]>([])
+  const [loadingDiscoveries, setLoadingDiscoveries] = useState(false)
+  const [discoveryStatus, setDiscoveryStatus] = useState<'pending' | 'accepted' | 'ignored'>('pending')
+  const [discoveryError, setDiscoveryError] = useState('')
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [acceptAlias, setAcceptAlias] = useState('')
+  const [acceptGroup, setAcceptGroup] = useState('')
 
   function loadList() {
     setLoadingList(true)
@@ -469,8 +496,67 @@ function CommercialKeywordsTab() {
     }
   }
 
+  function loadDiscoveries(status: 'pending' | 'accepted' | 'ignored') {
+    setLoadingDiscoveries(true); setDiscoveryError('')
+    fetch(`/api/research/commercial-keywords/discoveries?status=${status}`)
+      .then(r => r.json())
+      .then(d => setDiscoveries(d.discoveries ?? []))
+      .catch(() => setDiscoveryError('加载失败（网络异常）'))
+      .finally(() => setLoadingDiscoveries(false))
+  }
+  useEffect(() => { if (subView === 'discoveries') loadDiscoveries(discoveryStatus) }, [subView, discoveryStatus])
+
+  function openAcceptForm(d: Discovery) {
+    setAcceptingId(d.id)
+    setAcceptAlias(d.source_keyword)
+    setAcceptGroup(d.group_name)
+  }
+
+  async function confirmAccept(id: string) {
+    if (!acceptAlias.trim() || !acceptGroup.trim()) return
+    setDiscoveryError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'accept', alias: acceptAlias.trim(), groupName: acceptGroup.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setDiscoveryError(data.error || '操作失败'); return }
+      setAcceptingId(null)
+      setDiscoveries(prev => prev.filter(d => d.id !== id))
+      loadList()
+    } catch {
+      setDiscoveryError('操作失败（网络异常）')
+    }
+  }
+
+  async function ignoreDiscovery(id: string) {
+    setDiscoveryError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'ignore' }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setDiscoveryError(data.error || '操作失败'); return }
+      setDiscoveries(prev => prev.filter(d => d.id !== id))
+    } catch {
+      setDiscoveryError('操作失败（网络异常）')
+    }
+  }
+
   return (
     <div className="space-y-5">
+      <div className="flex gap-1.5">
+        {SUB_VIEWS.map(v => (
+          <button key={v.key} onClick={() => setSubView(v.key)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${subView === v.key ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {subView === 'list' && (
       <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
         <p className="text-sm text-gray-400">维护一份有商业价值、想重点盯的关键词清单。同一行可以贴多个别名（同一个概念的不同叫法），用顿号或逗号隔开——查覆盖时会先给每个别名各挖一遍百度下拉词（发现更多说法），再把整组词一起拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点（网站管理里"排名"开关开着的那批）——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
         <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
@@ -510,11 +596,18 @@ function CommercialKeywordsTab() {
             </div>
           </div>
         )}
+      </div>
+      )}
 
+      {subView === 'coverage' && (
+      <div className="space-y-5">
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <p className="text-sm text-gray-400">对词组库里的每个别名挖一遍百度下拉词，再把整批词（含下拉词变体）拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
         <button onClick={runCoverage} disabled={running || keywords.length === 0}
           className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
           {running ? '正在挖下拉词+查排名，可能需要几十秒到几分钟…' : '查覆盖'}
         </button>
+        {keywords.length === 0 && <p className="text-xs text-gray-300">词组库是空的，先去"词组库"贴几个商业词</p>}
         {runError && <p className="text-xs text-red-600">{runError}</p>}
       </div>
 
@@ -588,6 +681,79 @@ function CommercialKeywordsTab() {
             )}
           </div>
         </>
+      )}
+      </div>
+      )}
+
+      {subView === 'discoveries' && (
+      <div className="space-y-5">
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <p className="text-sm text-gray-400">抓排名标题时（rank-title步骤，16个"排名"模式站点），顺手检查标题里有没有出现词组库里已知的别名文字；命中了但这条关键词本身还不是已知别名，就是一个新词候选，累积在这里等你审核——不是一次性挖干净，是每天抓取慢慢攒出来的。</p>
+          <div className="flex items-center gap-1.5">
+            {(['pending', 'accepted', 'ignored'] as const).map(s => (
+              <button key={s} onClick={() => setDiscoveryStatus(s)}
+                className={`px-3 py-1 text-xs rounded-full border transition-colors ${discoveryStatus === s ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
+                {s === 'pending' ? '待审核' : s === 'accepted' ? '已加入' : '已忽略'}
+              </button>
+            ))}
+          </div>
+          {discoveryError && <p className="text-xs text-red-600">{discoveryError}</p>}
+        </div>
+
+        {loadingDiscoveries ? <Spinner /> : discoveries.length === 0 ? (
+          <p className="text-sm text-gray-300 text-center py-8">
+            {discoveryStatus === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : discoveryStatus === 'accepted' ? '还没有已加入的新词' : '还没有已忽略的新词'}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {discoveries.map(d => (
+              <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-gray-800">{d.source_keyword}</span>
+                      <span className="text-xs text-gray-400">→ 命中概念组「{d.group_name}」（标题含"{d.matched_alias}"）</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      站点数 {d.site_domains?.length ?? 0} · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'} · 最新命中 {d.domain ?? '—'}（{d.last_seen_at.slice(0, 10)}）
+                    </p>
+                    {d.title && (
+                      <p className="text-xs text-gray-500 mt-1 truncate" title={d.title}>
+                        标题：{d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{d.title}</a> : d.title}
+                      </p>
+                    )}
+                  </div>
+                  {discoveryStatus !== 'accepted' && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button onClick={() => openAcceptForm(d)}
+                        className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">加入词组</button>
+                      {discoveryStatus === 'pending' && (
+                        <button onClick={() => ignoreDiscovery(d.id)}
+                          className="px-2.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg hover:text-red-500 hover:border-red-200 transition-colors">忽略</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {acceptingId === d.id && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                    <input value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
+                      placeholder="要加入的别名文字"
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-40" />
+                    <span className="text-xs text-gray-400">归到组</span>
+                    <input value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-32" />
+                    <button onClick={() => confirmAccept(d.id)} disabled={!acceptAlias.trim() || !acceptGroup.trim()}
+                      className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">确认</button>
+                    <button onClick={() => setAcceptingId(null)}
+                      className="px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600 transition-colors">取消</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       )}
     </div>
   )

@@ -40,6 +40,98 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks
 }
 
+// 商业词"标题共现新词发现"（2026-08-28）——rank-title 本来就在抓每个关键词的
+// 标题，顺便检查标题里有没有出现已知商业词别名的文字；命中了但这条关键词
+// 本身还不是已知别名，就是一个新词候选（例：标题"Telegreat...(纸飞机)..."
+// 命中"纸飞机"，说明"telegreat"可能是同一概念的新别名）。证据累积进
+// commercial_keyword_discoveries，人工在"商业词"tab审核加入清单，不自动加。
+interface CommercialAlias { alias: string; groupName: string }
+
+// 太短的别名（尤其英文缩写如 fb/ig/vk/x）在标题里太容易随机命中，噪音大于
+// 价值，直接排除在"触发词"之外（不影响它们本身仍是商业词清单成员/覆盖查询）。
+function isEligibleAlias(alias: string): boolean {
+  const isAscii = /^[\x00-\x7F]+$/.test(alias)
+  return isAscii ? alias.length >= 4 : alias.length >= 2
+}
+
+async function loadCommercialAliases(): Promise<{ eligible: CommercialAlias[]; knownSet: Set<string> }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (supabase as any).from('commercial_keywords').select('keyword, group_name')
+  const rows = (data || []) as { keyword: string; group_name: string | null }[]
+  const knownSet = new Set(rows.map(r => r.keyword.toLowerCase()))
+  const eligible = rows
+    .filter(r => isEligibleAlias(r.keyword))
+    .map(r => ({ alias: r.keyword, groupName: r.group_name || r.keyword }))
+  return { eligible, knownSet }
+}
+
+function findMatchedAlias(title: string, eligible: CommercialAlias[]): CommercialAlias | null {
+  const lower = title.toLowerCase()
+  for (const a of eligible) {
+    if (lower.includes(a.alias.toLowerCase())) return a
+  }
+  return null
+}
+
+async function upsertDiscovery(params: {
+  sourceKeyword: string; groupName: string; matchedAlias: string
+  siteId: string; domain: string; title: string; url: string | null
+  platform: string; rankPosition: number | null
+}) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: existing } = await (supabase as any)
+      .from('commercial_keyword_discoveries')
+      .select('id, site_domains, seen_count, best_rank_position')
+      .eq('source_keyword', params.sourceKeyword)
+      .eq('group_name', params.groupName)
+      .maybeSingle()
+
+    if (!existing) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from('commercial_keyword_discoveries').insert({
+        source_keyword: params.sourceKeyword,
+        group_name: params.groupName,
+        matched_alias: params.matchedAlias,
+        site_id: params.siteId,
+        domain: params.domain,
+        title: params.title,
+        url: params.url,
+        platform: params.platform,
+        rank_position: params.rankPosition,
+        best_rank_position: params.rankPosition,
+        site_domains: [params.domain],
+        seen_count: 1,
+      })
+      return
+    }
+
+    const row = existing as { id: string; site_domains: string[] | null; seen_count: number; best_rank_position: number | null }
+    const siteDomains = row.site_domains || []
+    const newDomains = siteDomains.includes(params.domain) ? siteDomains : [...siteDomains, params.domain]
+    const bestRank = params.rankPosition == null ? row.best_rank_position
+      : row.best_rank_position == null ? params.rankPosition
+      : Math.min(row.best_rank_position, params.rankPosition)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('commercial_keyword_discoveries').update({
+      matched_alias: params.matchedAlias,
+      site_id: params.siteId,
+      domain: params.domain,
+      title: params.title,
+      url: params.url,
+      platform: params.platform,
+      rank_position: params.rankPosition,
+      best_rank_position: bestRank,
+      site_domains: newDomains,
+      seen_count: row.seen_count + 1,
+      last_seen_at: new Date().toISOString(),
+    }).eq('id', row.id)
+  } catch (e) {
+    console.error(`  ⚠ commercial_keyword_discoveries 写入失败: ${e instanceof Error ? e.message : e}`)
+  }
+}
+
 async function main() {
   const today = dateOverride ?? getMalaysiaDate()
   const totalStart = Date.now()
@@ -140,6 +232,8 @@ async function main() {
   const session = await createAizhanHttpSession()
   console.log(`  ✓ 会话就绪 (${ts()})`)
 
+  const { eligible: eligibleAliases, knownSet: knownAliasSet } = await loadCommercialAliases()
+
   for (let i = 0; i < sites.length; i++) {
     const { id: siteId, domain, track_pc_rank } = sites[i]
     // 2026-08-26 新增：网站管理可以逐站关掉PC端排名抓取（竞品站点通常不需要，
@@ -193,6 +287,26 @@ async function main() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('site_keyword_ranks') as any)
               .upsert(chunk, { onConflict: 'site_id,keyword,stat_date,platform,type' })
+          }
+
+          if (eligibleAliases.length > 0) {
+            for (const e of entries) {
+              if (!e.title) continue
+              if (knownAliasSet.has(e.keyword.toLowerCase())) continue
+              const matched = findMatchedAlias(e.title, eligibleAliases)
+              if (!matched) continue
+              await upsertDiscovery({
+                sourceKeyword: e.keyword,
+                groupName: matched.groupName,
+                matchedAlias: matched.alias,
+                siteId,
+                domain,
+                title: e.title,
+                url: e.url || null,
+                platform,
+                rankPosition: e.rank_position,
+              })
+            }
           }
 
           siteSaved += rows.length

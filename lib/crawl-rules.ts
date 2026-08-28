@@ -248,6 +248,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '排名覆盖查询', text: '种子词+全部下拉词去重后，分批（150个一批）查 site_keyword_ranks 近7天数据，取每个"站点+关键词+平台"组合最新一条；只有"排名"模式站点（has_rank_title=true）有 rank_position/title 细节，"涨跌"模式站点（写 rank_changes）没有这些字段，查不到，不是漏做' },
       { label: '写入表', text: 'commercial_keywords（清单）；覆盖查询本身不写库，每次现查现返回' },
       { label: '不设门槛', text: '覆盖结果不按排名过滤，全部列出来（含未上榜的词），用户自己按排名数字判断——这是用户明确要求的' },
+      { label: '新词发现（标题共现）', text: '百度下拉词对敏感/被限制话题词经常返回空或文不对题（实测验证），改成从每天的 rank-title 抓取里顺手挖：抓到的标题里如果出现词组库已知别名的文字（如"纸飞机"），而这条关键词本身还不是已知别名，就当作候选证据累积进 commercial_keyword_discoveries（见 scripts/crawl-rank.ts 的 upsertDiscovery，插在 site_keyword_ranks 写入之后）；范围仅限16个rank-title站点（唯一有标题数据的地方），太短的别名（英文<4字符）不参与匹配，避免误报；累积字段含出现站点数/次数/历史最佳排名，供"商业词"tab的"新词发现"面板按证据强度排序人工审核（加入词组/忽略），不自动收编' },
     ],
   },
 ]
