@@ -19,16 +19,20 @@ interface RankRow {
   site_id: string; keyword: string; rank_position: number | null
   title: string | null; url: string | null; platform: string; stat_date: string
 }
+interface GroupResult {
+  groupName: string; members: string[]; expansions: string[]
+}
 interface CoverageRow {
-  keyword: string; isExpansion: boolean; seedKeyword: string
+  keyword: string; isExpansion: boolean; groupName: string
   domain: string; siteName: string; isOwnSite: boolean
   rankPosition: number | null; title: string | null; url: string | null
   platform: string; statDate: string
 }
 
-// 研究中心"商业词"tab 的核心接口——种子词逐个挖下拉词，再把"种子词+全部
-// 下拉词"拿去查现有排名数据里谁拿到了。同步一次性返回，不落库（每次现查，
-// 保证新鲜度，避免另建缓存表）。2026-08-28 新增。
+// 研究中心"商业词"tab 的核心接口——每个概念分组下的每个别名都逐个挖下拉词，
+// 再把"全部别名+全部下拉词"拿去查现有排名数据里谁拿到了。同步一次性返回，
+// 不落库（每次现查，保证新鲜度，避免另建缓存表）。2026-08-28 新增，2026-08-28
+// 当天补了"同一概念多个别名"分组支持（见 ../route.ts 顶部注释）。
 export async function POST(req: Request) {
   const authClient = createClient()
   const { data: { user } } = await authClient.auth.getUser()
@@ -38,29 +42,44 @@ export async function POST(req: Request) {
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
   if (!['super', 'admin'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { data: seedRows } = await service.from('commercial_keywords').select('keyword').order('created_at', { ascending: true })
-  const seeds = ((seedRows ?? []) as { keyword: string }[]).map(r => r.keyword)
-  if (seeds.length === 0) return NextResponse.json({ error: '清单是空的，先贴几个商业词' }, { status: 400 })
+  const { data: seedRows } = await service.from('commercial_keywords').select('keyword, group_name').order('created_at', { ascending: true })
+  const allSeeds = ((seedRows ?? []) as { keyword: string; group_name: string | null }[])
+  if (allSeeds.length === 0) return NextResponse.json({ error: '清单是空的，先贴几个商业词' }, { status: 400 })
 
-  // 1. 逐个种子词挖下拉词——种子词之间间隔200ms，避免短时间集中打百度建议接口
-  const seedResults: { seed: string; expansions: string[] }[] = []
-  const allKeywordsSet = new Set<string>()
-  for (const seed of seeds) {
-    allKeywordsSet.add(seed)
-    const expansions = await fetchBaiduSuggestionsUnfiltered(seed)
-    const filtered = expansions.filter(e => e !== seed)
-    for (const e of filtered) allKeywordsSet.add(e)
-    seedResults.push({ seed, expansions: filtered })
-    await delay(200)
+  // 按 group_name 归拢（没有 group_name 的老数据兜底成自己是自己的组）
+  const groupToMembers = new Map<string, string[]>()
+  for (const s of allSeeds) {
+    const g = s.group_name || s.keyword
+    if (!groupToMembers.has(g)) groupToMembers.set(g, [])
+    groupToMembers.get(g)!.push(s.keyword)
+  }
+  const allMemberKeywords = allSeeds.map(s => s.keyword)
+
+  // 1. 每个别名都单独挖一次下拉词——组内不同别名搜索习惯可能不一样，各自的
+  // 下拉词都有价值；别名之间间隔200ms，避免短时间集中打百度建议接口
+  const keywordToGroup = new Map<string, string>()
+  for (const [group, members] of Array.from(groupToMembers.entries())) {
+    for (const m of members) keywordToGroup.set(m, group)
+  }
+
+  const groupResults: GroupResult[] = []
+  const allKeywordsSet = new Set<string>(allMemberKeywords)
+  for (const [group, members] of Array.from(groupToMembers.entries())) {
+    const expansionsSet = new Set<string>()
+    for (const member of members) {
+      const expansions = await fetchBaiduSuggestionsUnfiltered(member)
+      for (const e of expansions) {
+        if (!allMemberKeywords.includes(e)) expansionsSet.add(e)
+      }
+      await delay(200)
+    }
+    for (const e of Array.from(expansionsSet)) {
+      allKeywordsSet.add(e)
+      if (!keywordToGroup.has(e)) keywordToGroup.set(e, group)
+    }
+    groupResults.push({ groupName: group, members, expansions: Array.from(expansionsSet) })
   }
   const allKeywords = Array.from(allKeywordsSet)
-
-  // 每个关键词属于哪个种子词（下拉词优先记它是谁挖出来的；种子词自己记自己）
-  const keywordToSeed = new Map<string, string>()
-  for (const seed of seeds) keywordToSeed.set(seed, seed)
-  for (const { seed, expansions } of seedResults) {
-    for (const e of expansions) if (!keywordToSeed.has(e)) keywordToSeed.set(e, seed)
-  }
 
   // 2. 关键词全集去重后，分批查 site_keyword_ranks（只有"排名"模式站点有
   // rank_position/title，"涨跌"模式站点没有这些细节，本来就查不到）
@@ -97,8 +116,8 @@ export async function POST(req: Request) {
     const site = siteMap.get(r.site_id)
     return {
       keyword: r.keyword,
-      isExpansion: !seeds.includes(r.keyword),
-      seedKeyword: keywordToSeed.get(r.keyword) ?? r.keyword,
+      isExpansion: !allMemberKeywords.includes(r.keyword),
+      groupName: keywordToGroup.get(r.keyword) ?? r.keyword,
       domain: site?.domain ?? '(未知站点)',
       siteName: site?.name ?? '',
       isOwnSite: site ? ownDomains.has(site.domain) : false,
@@ -118,5 +137,5 @@ export async function POST(req: Request) {
   const matchedKeywords = new Set(coverage.map(c => c.keyword))
   const noDataKeywords = allKeywords.filter(k => !matchedKeywords.has(k))
 
-  return NextResponse.json({ seedResults, coverage, noDataKeywords, totalKeywordsChecked: allKeywords.length })
+  return NextResponse.json({ groupResults, coverage, noDataKeywords, totalKeywordsChecked: allKeywords.length })
 }

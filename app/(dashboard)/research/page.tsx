@@ -367,21 +367,23 @@ function SiteDiagnosticTab() {
 
 // ══════════════════════════════ 商业词 ══════════════════════════════
 
-interface CommercialKeyword { id: string; keyword: string; created_at: string }
-interface SeedResult { seed: string; expansions: string[] }
+interface CommercialKeyword { id: string; keyword: string; group_name: string | null; created_at: string }
+interface GroupResult { groupName: string; members: string[]; expansions: string[] }
 interface CoverageRow {
-  keyword: string; isExpansion: boolean; seedKeyword: string
+  keyword: string; isExpansion: boolean; groupName: string
   domain: string; siteName: string; isOwnSite: boolean
   rankPosition: number | null; title: string | null; url: string | null
   platform: string; statDate: string
 }
 interface CoverageResult {
-  seedResults: SeedResult[]; coverage: CoverageRow[]; noDataKeywords: string[]; totalKeywordsChecked: number
+  groupResults: GroupResult[]; coverage: CoverageRow[]; noDataKeywords: string[]; totalKeywordsChecked: number
 }
 
 // 维护一份"商业词"清单 + 挖下拉词变体 + 查这批词（含变体）现在谁拿到了排名。
 // 2026-08-28 新增，用户想找"这批有商业价值的词，别人网站做得怎么样、多少
-// 排名、什么标题"，同时想借下拉词把同一个商业概念的不同说法都挖出来。
+// 排名、什么标题"，同时想借下拉词把同一个商业概念的不同说法都挖出来。同一天
+// 补了"概念分组"——同一行贴多个别名（比如"纸飞机、telegram、telegreat"）
+// 算同一组，查覆盖时按组归拢展示，不是每个别名各查各的、互不相干。
 function CommercialKeywordsTab() {
   const [keywords, setKeywords] = useState<CommercialKeyword[]>([])
   const [loadingList, setLoadingList] = useState(true)
@@ -392,13 +394,24 @@ function CommercialKeywordsTab() {
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
   const [result, setResult] = useState<CoverageResult | null>(null)
-  const [expandedSeed, setExpandedSeed] = useState<string | null>(null)
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
 
   function loadList() {
     setLoadingList(true)
     fetch('/api/research/commercial-keywords').then(r => r.json()).then(d => setKeywords(d.keywords ?? [])).finally(() => setLoadingList(false))
   }
   useEffect(loadList, [])
+
+  // 按 group_name 归拢展示（没有 group_name 的老数据兜底成自己是自己的组）
+  const groupedList = (() => {
+    const map = new Map<string, CommercialKeyword[]>()
+    for (const k of keywords) {
+      const g = k.group_name || k.keyword
+      if (!map.has(g)) map.set(g, [])
+      map.get(g)!.push(k)
+    }
+    return Array.from(map.entries())
+  })()
 
   async function saveKeywords() {
     if (!pasteText.trim() || saving) return
@@ -424,6 +437,13 @@ function CommercialKeywordsTab() {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
     })
     setKeywords(prev => prev.filter(k => k.id !== id))
+  }
+
+  async function removeGroup(groupName: string) {
+    await fetch('/api/research/commercial-keywords', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
+    })
+    setKeywords(prev => prev.filter(k => (k.group_name || k.keyword) !== groupName))
   }
 
   async function clearAll() {
@@ -452,9 +472,9 @@ function CommercialKeywordsTab() {
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-        <p className="text-sm text-gray-400">维护一份有商业价值、想重点盯的关键词清单。"查覆盖"会先给每个词挖一遍百度下拉词（发现同一个概念的不同说法），再把种子词+下拉词一起拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点（网站管理里"排名"开关开着的那批）——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
+        <p className="text-sm text-gray-400">维护一份有商业价值、想重点盯的关键词清单。同一行可以贴多个别名（同一个概念的不同叫法），用顿号或逗号隔开——查覆盖时会先给每个别名各挖一遍百度下拉词（发现更多说法），再把整组词一起拿去查现有排名数据里谁拿到了、第几名、标题是什么。只统计"排名"模式站点（网站管理里"排名"开关开着的那批）——"涨跌"模式站点没有具体排名/标题数据，查不到。</p>
         <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
-          placeholder="一行一个词，粘贴进来" rows={3}
+          placeholder={'一行一组，同一组内用顿号/逗号隔开多个别名，例如：\n纸飞机、telegram、telegreat、telegraph\nLetstalk'} rows={4}
           className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
         <div className="flex items-center gap-2">
           <button onClick={saveKeywords} disabled={saving || !pasteText.trim()}
@@ -469,15 +489,23 @@ function CommercialKeywordsTab() {
         ) : (
           <div className="pt-2 border-t border-gray-100">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-400">已保存 {keywords.length} 个</span>
+              <span className="text-xs text-gray-400">已保存 {keywords.length} 个（{groupedList.length} 组）</span>
               <button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-500">清空全部</button>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {keywords.map(k => (
-                <span key={k.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
-                  {k.keyword}
-                  <button onClick={() => removeKeyword(k.id)} className="text-gray-400 hover:text-red-500">×</button>
-                </span>
+            <div className="space-y-1.5">
+              {groupedList.map(([groupName, members]) => (
+                <div key={groupName} className="flex items-center gap-1.5 flex-wrap px-2 py-1.5 rounded-lg bg-gray-50/60 border border-gray-100">
+                  {members.length > 1 && (
+                    <button onClick={() => removeGroup(groupName)} title="删除整组"
+                      className="text-[10px] text-gray-400 hover:text-red-500 px-1.5 py-0.5 rounded border border-gray-200 flex-shrink-0">删除组</button>
+                  )}
+                  {members.map(k => (
+                    <span key={k.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-white text-gray-600 border border-gray-200">
+                      {k.keyword}
+                      <button onClick={() => removeKeyword(k.id)} className="text-gray-400 hover:text-red-500">×</button>
+                    </span>
+                  ))}
+                </div>
               ))}
             </div>
           </div>
@@ -485,7 +513,7 @@ function CommercialKeywordsTab() {
 
         <button onClick={runCoverage} disabled={running || keywords.length === 0}
           className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors">
-          {running ? 'AI正在挖下拉词+查排名，可能需要几十秒到几分钟…' : '查覆盖'}
+          {running ? '正在挖下拉词+查排名，可能需要几十秒到几分钟…' : '查覆盖'}
         </button>
         {runError && <p className="text-xs text-red-600">{runError}</p>}
       </div>
@@ -493,19 +521,20 @@ function CommercialKeywordsTab() {
       {result && (
         <>
           <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <p className="text-sm font-semibold text-gray-700 mb-3">下拉词挖掘结果（共检查 {result.totalKeywordsChecked} 个词，含种子词本身）</p>
+            <p className="text-sm font-semibold text-gray-700 mb-3">下拉词挖掘结果（共检查 {result.totalKeywordsChecked} 个词，含清单里的别名本身）</p>
             <div className="space-y-1.5">
-              {result.seedResults.map(s => (
-                <div key={s.seed} className="border-b border-gray-50 pb-1.5 last:border-0">
-                  <button onClick={() => setExpandedSeed(prev => prev === s.seed ? null : s.seed)}
+              {result.groupResults.map(g => (
+                <div key={g.groupName} className="border-b border-gray-50 pb-1.5 last:border-0">
+                  <button onClick={() => setExpandedGroup(prev => prev === g.groupName ? null : g.groupName)}
                     className="w-full text-left text-xs text-gray-600 hover:text-gray-800">
-                    <span className="font-medium">{s.seed}</span>
-                    <span className="text-gray-400"> · 挖到 {s.expansions.length} 个下拉词</span>
+                    <span className="font-medium">{g.groupName}</span>
+                    <span className="text-gray-400"> · 别名 {g.members.length} 个 · 挖到 {g.expansions.length} 个下拉词</span>
                   </button>
-                  {expandedSeed === s.seed && (
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                      {s.expansions.length > 0 ? s.expansions.join('、') : '没有挖到下拉词'}
-                    </p>
+                  {expandedGroup === g.groupName && (
+                    <div className="text-xs text-gray-500 mt-1 leading-relaxed space-y-0.5">
+                      <p>别名：{g.members.join('、')}</p>
+                      <p>下拉词：{g.expansions.length > 0 ? g.expansions.join('、') : '没有挖到下拉词'}</p>
+                    </div>
                   )}
                 </div>
               ))}
@@ -525,7 +554,7 @@ function CommercialKeywordsTab() {
                   <thead>
                     <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
                       <th className="text-left px-4 py-2 font-medium">关键词</th>
-                      <th className="text-left px-4 py-2 font-medium">来自种子词</th>
+                      <th className="text-left px-4 py-2 font-medium">所属概念</th>
                       <th className="text-left px-4 py-2 font-medium">站点</th>
                       <th className="text-right px-4 py-2 font-medium">排名</th>
                       <th className="text-left px-4 py-2 font-medium">标题</th>
@@ -537,7 +566,7 @@ function CommercialKeywordsTab() {
                     {result.coverage.map((c, i) => (
                       <tr key={i} className="text-gray-700">
                         <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span>{c.isExpansion && <span className="text-[10px] text-blue-500 ml-1">下拉</span>}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400 max-w-[140px]"><span className="block truncate">{c.seedKeyword}</span></td>
+                        <td className="px-4 py-2 text-xs text-gray-400 max-w-[140px]"><span className="block truncate">{c.groupName}</span></td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">
                           {c.domain}
                           <span className={`ml-1 px-1 py-0.5 rounded text-[10px] ${c.isOwnSite ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400'}`}>{c.isOwnSite ? '自己' : '竞品'}</span>

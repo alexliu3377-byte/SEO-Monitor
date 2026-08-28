@@ -12,8 +12,19 @@ async function requireAdmin() {
   return { user, service }
 }
 
+// 同一行内允许贴多个别名（同一个商业概念的不同叫法，比如"纸飞机、telegram、
+// telegreat"）——用顿号/逗号/中文逗号分隔。2026-08-28 加入：用户反馈这种
+// 多别名场景很常见，一开始只支持"一行一个独立词"导致贴进来的多别名行被
+// 整行存成一个不成词的字符串（比如"纸飞机telegram"）。
+const GROUP_SEPARATOR_RE = /[、,，]+/
+
+function parseLine(line: string): string[] {
+  return line.split(GROUP_SEPARATOR_RE).map(s => s.trim()).filter(Boolean)
+}
+
 // 研究中心"商业词"tab 的种子清单——贴一份固定名单维护（不含下拉词挖出来的
-// 变体，那部分现查现用不落库，见 coverage/route.ts）。2026-08-28 新增。
+// 变体，那部分现查现用不落库，见 coverage/route.ts）。同一个 group_name 下的
+// 几个词是同一个商业概念的不同别名，查覆盖时会归拢在一起展示。2026-08-28 新增。
 export async function GET() {
   const ctx = await requireAdmin()
   if (ctx.error) return ctx.error
@@ -21,7 +32,7 @@ export async function GET() {
 
   const { data, error } = await service
     .from('commercial_keywords')
-    .select('id, keyword, created_at')
+    .select('id, keyword, group_name, created_at')
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -36,19 +47,32 @@ export async function POST(req: Request) {
   const { keywords } = await req.json() as { keywords?: string }
   if (!keywords || !keywords.trim()) return NextResponse.json({ error: '没有输入关键词' }, { status: 400 })
 
-  const list = Array.from(new Set(
-    keywords.split('\n').map(k => k.trim()).filter(Boolean)
-  ))
-  if (list.length === 0) return NextResponse.json({ error: '没有有效的关键词' }, { status: 400 })
+  const lines = keywords.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length === 0) return NextResponse.json({ error: '没有有效的关键词' }, { status: 400 })
+
+  // 每一行是一组别名——group_name 用这一行第一个词当标签；同一行多个别名
+  // 各自存一行，但共享同一个 group_name。
+  const rows: { keyword: string; group_name: string; added_by: string }[] = []
+  const seen = new Set<string>()
+  for (const line of lines) {
+    const members = parseLine(line)
+    if (members.length === 0) continue
+    const groupName = members[0]
+    for (const keyword of members) {
+      if (seen.has(keyword)) continue
+      seen.add(keyword)
+      rows.push({ keyword, group_name: groupName, added_by: user.id })
+    }
+  }
+  if (rows.length === 0) return NextResponse.json({ error: '没有有效的关键词' }, { status: 400 })
   // 上限比分组任务"分发词"的200更低——每个词后面都要接一次下拉词API调用+
   // 排名查询，控制单次"查覆盖"的耗时和对百度接口的压力。
-  if (list.length > 100) return NextResponse.json({ error: '一次最多添加100个词' }, { status: 400 })
+  if (rows.length > 100) return NextResponse.json({ error: '一次最多添加100个词（含别名展开后）' }, { status: 400 })
 
-  const rows = list.map(keyword => ({ keyword, added_by: user.id }))
   const { data: inserted, error } = await service
     .from('commercial_keywords')
     .upsert(rows, { onConflict: 'keyword', ignoreDuplicates: true })
-    .select('id, keyword, created_at')
+    .select('id, keyword, group_name, created_at')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })
@@ -59,9 +83,14 @@ export async function DELETE(req: Request) {
   if (ctx.error) return ctx.error
   const { service } = ctx
 
-  const { id, all } = await req.json() as { id?: string; all?: boolean }
+  const { id, all, groupName } = await req.json() as { id?: string; all?: boolean; groupName?: string }
   if (all) {
     const { error } = await service.from('commercial_keywords').delete().not('id', 'is', null)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+  if (groupName) {
+    const { error } = await service.from('commercial_keywords').delete().eq('group_name', groupName)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   }

@@ -242,8 +242,9 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '商业词挖掘',
     badge: '研究中心"商业词"tab · 触发方式：页面按钮，非定时任务',
     items: [
-      { label: '清单维护', text: '用户手动贴一份商业词清单存入 commercial_keywords 表（keyword 唯一），不含挖出来的下拉词——那部分现查现用不落库，保证新鲜度；单次最多贴100个词' },
-      { label: '下拉词挖掘', text: '点"查覆盖"时，对清单里每个种子词依次调用百度 suggestion.baidu.com/su 建议接口（lib/crawler.ts 的 fetchBaiduSuggestionsUnfiltered，未鉴权公开接口，不需要cookie/session）；种子词之间间隔200ms，避免短时间集中打接口' },
+      { label: '清单维护', text: '用户手动贴一份商业词清单存入 commercial_keywords 表（keyword 唯一），不含挖出来的下拉词——那部分现查现用不落库，保证新鲜度；单次最多贴100个词（含别名展开后）' },
+      { label: '概念分组', text: '同一行可贴多个别名（同一商业概念的不同叫法，用顿号/逗号分隔，如"纸飞机、telegram、telegreat"），共享同一个 group_name（取该行第一个词）；查覆盖时按组归拢展示，删除支持整组删或单个别名删' },
+      { label: '下拉词挖掘', text: '点"查覆盖"时，对清单里每个词（组内每个别名都单独查一次，而不是每组只查一次）依次调用百度 suggestion.baidu.com/su 建议接口（lib/crawler.ts 的 fetchBaiduSuggestionsUnfiltered，未鉴权公开接口，不需要cookie/session；GBK编码需用 iconv 按 content-type 解码，不能直接 res.text()）；词与词之间间隔200ms，避免短时间集中打接口' },
       { label: '排名覆盖查询', text: '种子词+全部下拉词去重后，分批（150个一批）查 site_keyword_ranks 近7天数据，取每个"站点+关键词+平台"组合最新一条；只有"排名"模式站点（has_rank_title=true）有 rank_position/title 细节，"涨跌"模式站点（写 rank_changes）没有这些字段，查不到，不是漏做' },
       { label: '写入表', text: 'commercial_keywords（清单）；覆盖查询本身不写库，每次现查现返回' },
       { label: '不设门槛', text: '覆盖结果不按排名过滤，全部列出来（含未上榜的词），用户自己按排名数字判断——这是用户明确要求的' },
