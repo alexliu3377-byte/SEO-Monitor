@@ -75,6 +75,18 @@ export const CRAWL_RULES: RuleSection[] = [
     ],
   },
   {
+    key: 'onboard-site',
+    title: '新站补资料',
+    badge: '.github/workflows/onboard-site.yml · 触发方式：GitHub Actions 页面手动填域名，非定时任务',
+    items: [
+      { label: '用途', text: '新增站点后一次性补齐资料，不用再手动一条条触发；2026-09-03 加入，此前补一个新站（权重+新增关键词+7天历史排名）要手动跑9次 gh workflow run' },
+      { label: '输入', text: '站点域名（必填，需已在网站管理里添加）+ 补几天历史（可选，默认7天，只影响涨跌/排名，权重和新增关键词只抓"现在"这一份）' },
+      { label: '模式判断', text: '跑之前先查这个站点的 has_rank_data/has_rank_title，自动决定补涨跌历史（rank步骤）还是排名历史（rank-title步骤）还是两个都补——不用用户自己记得站点是哪个模式；两个都没开时只补权重+新增关键词，并给出警告' },
+      { label: '执行方式', text: '单个job里顺序跑完，不做并行分片（只针对一个站点，站点数据量小，顺序执行完全够用，不用像每日全量抓取那样考虑20个job并发上限）；底层复用现有 scripts/crawl.ts --site --date 和 scripts/crawl-rank.ts --site --date，跟手动 gh workflow run 触发是同一套抓取逻辑，只是自动化了循环' },
+      { label: '不含', text: '不补收录页面追踪（index-pages）和成效追踪（tracking）——这两步不支持 --date 历史补抓，意义不大；如果站点开了 has_index_pages，仍需另外手动触发一次 index-pages 步骤' },
+    ],
+  },
+  {
     key: 'index-pages',
     title: '收录页面追踪',
     badge: 'step=index-pages · GitHub Actions · 03:30 MYT（cron 19:30 UTC）',

@@ -1,0 +1,115 @@
+name: New Site Backfill
+
+# 新增站点后一键补资料：今日权重+收录、当前新增关键词、以及过去N天的历史
+# 排名数据（涨跌/排名，看站点自己开的是哪个模式，自动判断，两个都开就两个
+# 都补）。2026-09-03 加入，此前这个操作要手动一条条 gh workflow run 触发
+# （补一个新站要跑 weight+keywords+7天rank-title共9次），改成这里一次搞定。
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: '站点域名（例如 bjgsl.org.cn），必须已经在网站管理里添加过'
+        required: true
+      days:
+        description: '往回补几天的涨跌/排名历史（仅影响 rank/rank-title，权重和新增关键词只抓"现在"这一份）'
+        required: false
+        default: '7'
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate site input
+        env:
+          SITE_INPUT: ${{ github.event.inputs.site }}
+        run: |
+          if ! [[ "$SITE_INPUT" =~ ^[a-zA-Z0-9.-]{1,253}$ ]]; then
+            echo "::error::域名格式不对：$SITE_INPUT"
+            exit 1
+          fi
+
+      - name: Look up site config
+        id: siteinfo
+        env:
+          SITE_INPUT: ${{ github.event.inputs.site }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          RESULT=$(curl -sf \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/sites?domain=eq.$SITE_INPUT&select=has_rank_data,has_rank_title")
+          COUNT=$(echo "$RESULT" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::找不到域名为 $SITE_INPUT 的站点，请先在网站管理里添加"
+            exit 1
+          fi
+          HAS_RANK_DATA=$(echo "$RESULT" | python3 -c "import json,sys; print(str(json.load(sys.stdin)[0]['has_rank_data']).lower())")
+          HAS_RANK_TITLE=$(echo "$RESULT" | python3 -c "import json,sys; print(str(json.load(sys.stdin)[0]['has_rank_title']).lower())")
+          echo "has_rank_data=$HAS_RANK_DATA" >> $GITHUB_OUTPUT
+          echo "has_rank_title=$HAS_RANK_TITLE" >> $GITHUB_OUTPUT
+          echo "站点=$SITE_INPUT  涨跌模式=$HAS_RANK_DATA  排名模式=$HAS_RANK_TITLE"
+
+      - name: Cache Playwright browsers
+        if: steps.siteinfo.outputs.has_rank_data == 'true' || steps.siteinfo.outputs.has_rank_title == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.siteinfo.outputs.has_rank_data == 'true' || steps.siteinfo.outputs.has_rank_title == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: 补今日权重+收录
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/crawl.ts --step=weight --site=${{ github.event.inputs.site }}
+
+      - name: 补新增关键词
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/crawl.ts --step=keywords --site=${{ github.event.inputs.site }}
+
+      - name: 补涨跌历史（rank）
+        if: steps.siteinfo.outputs.has_rank_data == 'true'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          DAYS="${{ github.event.inputs.days }}"
+          for i in $(seq 0 $((DAYS-1))); do
+            D=$(date -u -d "+8 hours -$i days" +%F)
+            echo "── 补抓涨跌 $D ──"
+            npx tsx scripts/crawl.ts --step=rank --site=${{ github.event.inputs.site }} --date=$D
+          done
+
+      - name: 补排名历史（rank-title）
+        if: steps.siteinfo.outputs.has_rank_title == 'true'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          DAYS="${{ github.event.inputs.days }}"
+          for i in $(seq 0 $((DAYS-1))); do
+            D=$(date -u -d "+8 hours -$i days" +%F)
+            echo "── 补抓排名 $D ──"
+            npx tsx scripts/crawl-rank.ts --site=${{ github.event.inputs.site }} --date=$D
+          done
+
+      - name: 两种模式都没开
+        if: steps.siteinfo.outputs.has_rank_data == 'false' && steps.siteinfo.outputs.has_rank_title == 'false'
+        run: echo "::warning::这个站点涨跌/排名两个模式都没开，只补了权重和新增关键词，没有历史涨跌/排名数据可补"
