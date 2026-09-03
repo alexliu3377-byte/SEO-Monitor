@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -32,6 +32,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .select('id, domain, name, site_stage, site_focus, site_strategy, site_weight, site_ip, site_index_count, post_start_hour, post_end_hour, post_interval_minutes')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ site: data })
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface Site {
   id?: string
@@ -88,7 +88,7 @@ function AiSelectorHelper({ onApply }: { onApply: (sug: { title_selector: string
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          <textarea
+          <textarea aria-label="输入详细内容"
             value={htmlInput}
             onChange={(e) => setHtmlInput(e.target.value)}
             placeholder="粘贴一条或几条列表项的HTML代码（右键“检查”复制出来）；如果这个站是翻页JSON接口，也可以直接粘贴整段JSON响应"
@@ -180,6 +180,9 @@ function sitToSources(s: Site | null): HtmlSource[] {
 }
 
 export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const onCloseRef = useRef(onClose)
   const [form, setForm] = useState<Site>(site ? { ...site } : { ...defaultForm })
   const [htmlSources, setHtmlSources] = useState<HtmlSource[]>(() => sitToSources(site ?? null))
   const [saving, setSaving] = useState(false)
@@ -190,11 +193,40 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
   const [previewError, setPreviewError] = useState<string | null>(null)
 
   useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
     setForm(site ? { ...site, friend_links: site.friend_links || [] } : { ...defaultForm })
     setHtmlSources(sitToSources(site ?? null))
     setPreviewData(null)
     setPreviewError(null)
   }, [site])
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    const oldOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    closeButtonRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current()
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      ) ?? [])
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = oldOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [])
 
   function updateSource(idx: number, field: keyof HtmlSource, value: string) {
     const next = htmlSources.map((s, i) => i === idx ? { ...s, [field]: value } : s)
@@ -308,14 +340,14 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl my-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="site-dialog-title" className="bg-white rounded-xl shadow-2xl w-full max-w-2xl my-4">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 id="site-dialog-title" className="text-lg font-semibold text-gray-900">
             {form.id ? '编辑网站' : '新增网站'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="关闭网站编辑窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -325,10 +357,11 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
         {/* Form */}
         <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
           {/* Domain */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">域名</label>
+              <label htmlFor="site-domain" className="block text-sm font-medium text-gray-700 mb-1">域名</label>
               <input
+                id="site-domain"
                 type="text"
                 value={form.domain}
                 onChange={(e) => update('domain', e.target.value)}
@@ -337,8 +370,9 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">站点名称</label>
+              <label htmlFor="site-name" className="block text-sm font-medium text-gray-700 mb-1">站点名称</label>
               <input
+                id="site-name"
                 type="text"
                 value={form.name}
                 onChange={(e) => update('name', e.target.value)}
@@ -349,10 +383,11 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
           </div>
 
           {/* Category & Focus */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">分类</label>
+              <label htmlFor="site-category" className="block text-sm font-medium text-gray-700 mb-1">分类</label>
               <select
+                id="site-category"
                 value={form.category}
                 onChange={(e) => update('category', e.target.value as Site['category'])}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -363,8 +398,9 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">关注</label>
+              <label htmlFor="site-focus" className="block text-sm font-medium text-gray-700 mb-1">关注</label>
               <select
+                id="site-focus"
                 value={form.focus_level}
                 onChange={(e) => update('focus_level', Number(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -378,7 +414,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
 
           {/* Friend Links */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">友情链接 <span className="text-gray-400 font-normal">（同公司站点）</span></label>
+            <label htmlFor="site-friend-link" className="block text-sm font-medium text-gray-700 mb-1.5">友情链接 <span className="text-gray-400 font-normal">（同公司站点）</span></label>
             <div className="flex flex-wrap gap-2 mb-2">
               {(form.friend_links || []).map((link) => (
                 <span key={link} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
@@ -392,6 +428,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
             </div>
             <div className="flex gap-2">
               <input
+                id="site-friend-link"
                 type="text"
                 value={newFriendLink}
                 onChange={(e) => setNewFriendLink(e.target.value)}
@@ -433,7 +470,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">列表页URL（多页用换行分隔）</label>
-                    <textarea
+                    <textarea aria-label="输入详细内容"
                       value={src.url}
                       onChange={(e) => updateSource(idx, 'url', e.target.value)}
                       placeholder={"https://example.com/new/\nhttps://example.com/new-2/"}
@@ -441,10 +478,10 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white resize-none"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">标题CSS选择器</label>
-                      <input
+                      <input aria-label="输入内容"
                         type="text"
                         value={src.titleSelector}
                         onChange={(e) => updateSource(idx, 'titleSelector', e.target.value)}
@@ -454,7 +491,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">日期CSS选择器</label>
-                      <input
+                      <input aria-label="输入内容"
                         type="text"
                         value={src.dateSelector}
                         onChange={(e) => updateSource(idx, 'dateSelector', e.target.value)}
@@ -465,7 +502,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">文章链接CSS选择器 <span className="text-gray-400 font-normal">（填写才抓取文章URL；留空不记录）</span></label>
-                    <input
+                    <input aria-label="输入内容"
                       type="text"
                       value={src.urlSelector}
                       onChange={(e) => updateSource(idx, 'urlSelector', e.target.value)}
@@ -488,8 +525,11 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
           {/* Version Clean */}
           <div>
             <label className="flex items-center gap-2.5 cursor-pointer">
-              <div
+              <button
+                type="button"
                 onClick={() => update('enable_version_clean', !form.enable_version_clean)}
+                aria-pressed={form.enable_version_clean}
+                aria-label="启用版本号清洗"
                 className={`relative w-10 h-5 rounded-full transition-colors ${
                   form.enable_version_clean ? 'bg-green-600' : 'bg-gray-300'
                 }`}
@@ -497,7 +537,7 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
                 <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
                   form.enable_version_clean ? 'translate-x-5' : 'translate-x-0'
                 }`} />
-              </div>
+              </button>
               <span className="text-sm font-medium text-gray-700">启用版本号清洗</span>
             </label>
 
@@ -547,11 +587,11 @@ export default function AddSiteModal({ site, onClose, onSaved }: AddSiteModalPro
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-          {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="px-4 sm:px-6 py-4 border-t border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {error && <p role="alert" aria-live="assertive" className="text-sm text-red-600">{error}</p>}
           <div className="flex items-center gap-3 ml-auto">
-            <button onClick={onClose} className="btn-secondary">取消</button>
-            <button onClick={handleSave} disabled={saving} className="btn-primary">
+            <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+            <button type="button" onClick={handleSave} disabled={saving} aria-busy={saving} className="btn-primary">
               {saving ? '保存中...' : '保存'}
             </button>
           </div>

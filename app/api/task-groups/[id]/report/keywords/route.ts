@@ -7,7 +7,7 @@ interface RawKw {
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -41,7 +41,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .order('search_volume', { ascending: false })
     .range(from, to)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({
     keywords: (rows ?? []).map((r: RawKw) => ({

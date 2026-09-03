@@ -151,7 +151,7 @@ export async function GET() {
   // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
   // 完全没做校验，无鉴权无限流地代理抓取第三方站点，跟同目录其它图表接口的
   // 设计意图（"要求登录"）不一致。
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

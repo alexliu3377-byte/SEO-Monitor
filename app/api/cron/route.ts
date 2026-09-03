@@ -95,6 +95,13 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const siteFilter = searchParams.get('site')
   const step = searchParams.get('step') // 'keywords' | 'rank' | 'weight' | 'index-pages' | null (all)
+  const validSteps = new Set(['keywords', 'rank', 'weight', 'index-pages', 'rank-title', 'tracking'])
+  if (step && !validSteps.has(step)) {
+    return NextResponse.json({ error: 'Invalid crawl step' }, { status: 400 })
+  }
+  if (siteFilter && !/^[a-z0-9.-]{1,253}$/i.test(siteFilter)) {
+    return NextResponse.json({ error: 'Invalid site filter' }, { status: 400 })
+  }
   const runKeywords    = !step || step === 'keywords'
   const runRank        = !step || step === 'rank'
   const runWeight      = !step || step === 'weight'
@@ -149,7 +156,7 @@ export async function GET(request: Request) {
                   dateSelector: dateSels[i] || dateSels[0] || '',
                   urlSelector: srcUrlSel || undefined,
                 }
-                const srcEntries = await fetchHtmlListPages([src], htmlCutoff, maxPg, isSingleSite)
+                const srcEntries = await fetchHtmlListPages([src], htmlCutoff, maxPg, isSingleSite, true)
                 for (const e of srcEntries) {
                   rawEntries.push({ title: e.title, content_date: parseContentDate(e.date), content_type: srcType, source_url: srcUrlSel ? (e.url || null) : null })
                 }
@@ -185,13 +192,14 @@ export async function GET(request: Request) {
             const existingKeys = new Set<string>()
 
             for (const cd of batchDates) {
-              const { data: existing } = await supabase
+              const existing = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
                 .from('raw_keywords')
-                .select('keyword')
+                .select('id, keyword')
                 .eq('site_id', site.id)
                 .eq('content_date', cd)
-                .limit(10000)
-              for (const row of (existing || []) as { keyword: string }[]) {
+                .order('id', { ascending: true })
+                .range(from, to))
+              for (const row of existing) {
                 existingKeys.add(`${cd}|${row.keyword}`)
               }
             }
@@ -199,13 +207,15 @@ export async function GET(request: Request) {
             if (hasNullDate) {
               // For undated entries, fall back to same-MYT-day dedup
               const todayMYTStart = new Date(new Date(today + 'T16:00:00.000Z').getTime() - 86400000).toISOString()
-              const { data: existingNull } = await supabase
+              const existingNull = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
                 .from('raw_keywords')
-                .select('keyword')
+                .select('id, keyword')
                 .eq('site_id', site.id)
                 .gte('discovered_at', todayMYTStart)
                 .is('content_date', null)
-              for (const row of (existingNull || []) as { keyword: string }[]) {
+                .order('id', { ascending: true })
+                .range(from, to))
+              for (const row of existingNull) {
                 existingKeys.add(`null|${row.keyword}`)
               }
             }
@@ -920,6 +930,11 @@ export async function GET(request: Request) {
               onConflict: 'claim_id,record_date,keyword', ignoreDuplicates: false,
             })
           }
+          const changedGroupIds = Array.from(new Set(claims.map((claim: ClaimRow) => claim.group_id).filter(Boolean)))
+          if (changedGroupIds.length > 0) {
+            const { error: cacheError } = await supabase.from('group_tracking_cache').delete().in('group_id', changedGroupIds)
+            if (cacheError) console.error('tracking-cache invalidation failed:', cacheError.code)
+          }
           ownRows = ownUpsertRows.length
         }
       } catch (e) {
@@ -937,8 +952,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ date: today, yesterday, results })
   } catch (err: unknown) {
+    console.error('Cron execution failed', err)
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : '定时任务失败' },
+      { error: '定时任务失败' },
       { status: 500 }
     )
   }

@@ -516,13 +516,14 @@ export default function HotRadarPage() {
     [wordLibData, wordLibMinSites]
   )
 
-  const baseList = !filtered ? [] :
+  const baseList = useMemo(() => !filtered ? [] :
     activeTab === 'cross'        ? filtered.crossWords        :
     activeTab === 'volumeRising' ? filtered.volumeRisingWords :
     activeTab === 'new'          ? filtered.newWords          :
     activeTab === 'rank'         ? filtered.rankWords         :
     activeTab === 'wordLib'      ? wordLibFiltered            :
-    filteredStreakWords
+    filteredStreakWords,
+  [filtered, activeTab, wordLibFiltered, filteredStreakWords])
 
   const activeList = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -657,14 +658,14 @@ export default function HotRadarPage() {
             <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">站点</span>
-                <input type="text" value={filterSite}
+                <input aria-label="输入内容" type="text" value={filterSite}
                   onChange={e => { setFilterSite(e.target.value); setPage(0) }}
                   placeholder="输入域名..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-36" />
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">关键词</span>
-                <input type="text" value={filterKeyword}
+                <input aria-label="输入内容" type="text" value={filterKeyword}
                   onChange={e => { setFilterKeyword(e.target.value); setPage(0) }}
                   placeholder="搜索..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-32" />
@@ -673,7 +674,7 @@ export default function HotRadarPage() {
                 {activeTab === 'wordLib' ? (
                   <>
                     <span className="text-xs text-gray-400">最少站点数</span>
-                    <select value={wordLibMinSites} onChange={e => { setWordLibMinSites(Number(e.target.value)); setPage(0) }}
+                    <select aria-label="选择选项" value={wordLibMinSites} onChange={e => { setWordLibMinSites(Number(e.target.value)); setPage(0) }}
                       className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                       <option value={1}>1站</option>
                       <option value={2}>2站</option>
@@ -684,7 +685,7 @@ export default function HotRadarPage() {
                 ) : activeTab === 'streak' ? (
                   <>
                     <span className="text-xs text-gray-400">最少上涨天数</span>
-                    <select value={minStreak} onChange={e => { setMinStreak(Number(e.target.value)); setPage(0) }}
+                    <select aria-label="选择选项" value={minStreak} onChange={e => { setMinStreak(Number(e.target.value)); setPage(0) }}
                       className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                       <option value={2}>2天</option>
                       <option value={3}>3天</option>
@@ -695,7 +696,7 @@ export default function HotRadarPage() {
                 ) : (
                   <>
                     <span className="text-xs text-gray-400">最少站点数</span>
-                    <select value={minSites} onChange={e => { setMinSites(Number(e.target.value)); setPage(0) }}
+                    <select aria-label="选择选项" value={minSites} onChange={e => { setMinSites(Number(e.target.value)); setPage(0) }}
                       className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                       <option value={2}>2站</option>
                       <option value={3}>3站</option>
@@ -714,7 +715,7 @@ export default function HotRadarPage() {
                 </button>
                 <span className="text-gray-200">|</span>
                 <span className="text-xs text-gray-400">每页</span>
-                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value) as PageSize); setPage(0) }}
+                <select aria-label="选择选项" value={pageSize} onChange={e => { setPageSize(Number(e.target.value) as PageSize); setPage(0) }}
                   className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-700 focus:outline-none">
                   {PAGE_SIZES.map(s => <option key={s} value={s}>{s} 条</option>)}
                 </select>
@@ -727,7 +728,7 @@ export default function HotRadarPage() {
 
               {/* 交叉词：7列 */}
               {activeTab === 'cross' && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-56" />
@@ -792,7 +793,7 @@ export default function HotRadarPage() {
 
               {/* 共新增词：6列 */}
               {activeTab === 'new' && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-64" />
@@ -844,7 +845,7 @@ export default function HotRadarPage() {
 
               {/* 搜索量上涨：keyword_volume 没有站点归属，列比其他tab少 */}
               {activeTab === 'volumeRising' && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-48" />
@@ -904,7 +905,7 @@ export default function HotRadarPage() {
 
               {/* 竞品涨排名：6列 */}
               {activeTab === 'rank' && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-64" />
@@ -955,7 +956,7 @@ export default function HotRadarPage() {
 
               {/* 连续上涨词：6列 */}
               {activeTab === 'streak' && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-64" />
@@ -1015,7 +1016,7 @@ export default function HotRadarPage() {
                 </div>
               )}
               {activeTab === 'wordLib' && !wordLibLoading && (
-                <table className="w-full table-fixed">
+                <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
                     <col className="w-24" />
                     <col className="w-64" />
@@ -1073,7 +1074,7 @@ export default function HotRadarPage() {
 
       {/* 查看 Detail Modal */}
       {detailKw && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailKw(null)}>
+        <div role="dialog" aria-modal="true" aria-label="关键词详情" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailKw(null)}>
           <div className={`bg-white rounded-xl shadow-2xl w-full max-h-[80vh] flex flex-col ${activeTab === 'cross' ? 'max-w-3xl' : 'max-w-lg'}`} onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
               <div>
@@ -1082,7 +1083,7 @@ export default function HotRadarPage() {
                   {activeTab === 'wordLib' ? '近30天长尾词分布' : '近30天出现记录'}
                 </p>
               </div>
-              <button onClick={() => setDetailKw(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              <button type="button" aria-label="关闭关键词详情" onClick={() => setDetailKw(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
             <div className="overflow-y-auto flex-1 p-4">
               {detailLoading ? (

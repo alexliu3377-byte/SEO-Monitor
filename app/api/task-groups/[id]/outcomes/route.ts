@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
+import { loadGroupTrackingPayload } from '@/lib/group-tracking-cache'
 
 export const maxDuration = 60
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const userId = user.id
@@ -47,15 +47,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 进去，见 lib/group-tracking-cache.ts + app/api/tracking-cache/refresh）。
   // 缓存没命中（刚上线还没跑过定时任务、或者这个分组是新建的）才现场算一次
   // 并顺手写回，跟 hot_radar_cache 的兜底逻辑一致。
-  const { data: cached } = await service
-    .from('group_tracking_cache').select('payload').eq('group_id', groupId).maybeSingle()
-  let allRows: EnrichedTrackRow[]
-  if (cached?.payload) {
-    allRows = cached.payload as EnrichedTrackRow[]
-  } else {
-    allRows = await computeGroupTrackingPayload(service, groupId)
-    await service.from('group_tracking_cache').upsert({ group_id: groupId, payload: allRows, computed_at: new Date().toISOString() })
-  }
+  const { rows: allRows, computedAt, fromCache } = await loadGroupTrackingPayload(service, groupId)
 
   // 原来 applyTrackFilters 里对 DB 的过滤（user_id/operation_type/submit_date）
   // 现在改成对缓存数组的内存过滤——effectiveness 依然不在这一批里（原因见下
@@ -122,6 +114,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   return NextResponse.json({
     rows: pagedRows, summary, groupSummary, totalRows, page, pageSize,
-    truncated: false,
+    truncated: false, computedAt, fromCache,
   })
 }

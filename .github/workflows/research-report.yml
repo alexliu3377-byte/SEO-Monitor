@@ -37,8 +37,8 @@ jobs:
       matrix: ${{ steps.gen.outputs.matrix }}
       total: ${{ steps.gen.outputs.total }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'
@@ -46,11 +46,15 @@ jobs:
 
       - name: Determine period type
         id: period
+        env:
+          PERIOD_TYPE_INPUT: ${{ github.event.inputs.periodType }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "type=${{ github.event.inputs.periodType }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "type=$PERIOD_TYPE_INPUT" >> "$GITHUB_OUTPUT"
           else
-            case "${{ github.event.schedule }}" in
+            case "$EVENT_SCHEDULE" in
               '45 1 1 1 *') echo "type=year" >> "$GITHUB_OUTPUT" ;;
               '0 1 1 1,4,7,10 *') echo "type=quarter" >> "$GITHUB_OUTPUT" ;;
               '0 0 1 * *') echo "type=month" >> "$GITHUB_OUTPUT" ;;
@@ -63,8 +67,11 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PERIOD_TYPE: ${{ steps.period.outputs.type }}
+          PERIOD_START: ${{ github.event.inputs.periodStart }}
+          PERIOD_END: ${{ github.event.inputs.periodEnd }}
         run: |
-          OUTPUT=$(npx tsx scripts/research-report.ts --mode=init --period-type=${{ steps.period.outputs.type }} --period-start=${{ github.event.inputs.periodStart }} --period-end=${{ github.event.inputs.periodEnd }})
+          OUTPUT=$(npx tsx scripts/research-report.ts --mode=init --period-type="$PERIOD_TYPE" --period-start="$PERIOD_START" --period-end="$PERIOD_END")
           echo "$OUTPUT"
           REPORT_ID=$(echo "$OUTPUT" | grep '^REPORT_ID=' | cut -d= -f2)
           echo "report_id=${REPORT_ID}" >> "$GITHUB_OUTPUT"
@@ -98,8 +105,8 @@ jobs:
       fail-fast: false   # 一个分片失败不影响其它分片，finalize 阶段照样跑
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'
@@ -117,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'

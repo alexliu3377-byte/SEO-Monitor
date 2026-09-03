@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   let authed = !!(cronSecret && authHeader === `Bearer ${cronSecret}`)
 
   if (!authed) {
-    const authClient = createClient()
+    const authClient = await createClient()
     const { data: { user } } = await authClient.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,7 +42,8 @@ export async function GET(req: Request) {
       // 某个分组算失败时跳过它、保留它昨天的缓存，不要用错误/空结果覆盖掉
       // ——照抄 hot-radar/refresh 那次"报错被静默吞掉、缓存写成空"事故后
       // 加的保护逻辑（2026-08-13）。
-      results.push({ groupId: g.id, name: g.name, ok: false, error: e instanceof Error ? e.message : String(e) })
+      console.error('Tracking cache refresh failed', { groupId: g.id, error: e })
+      results.push({ groupId: g.id, name: g.name, ok: false, error: 'Refresh failed' })
     }
   }
 

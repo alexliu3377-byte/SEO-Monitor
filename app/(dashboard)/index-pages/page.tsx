@@ -290,7 +290,7 @@ const [triggering, setTriggering] = useState(false)
               })}
             </div>
 
-            <select
+            <select aria-label="选择选项"
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value as StatusFilter)}
               className="h-8 px-2 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -305,7 +305,7 @@ const [triggering, setTriggering] = useState(false)
             </select>
 
             <div className="relative">
-              <input
+              <input aria-label="输入内容"
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -318,7 +318,7 @@ const [triggering, setTriggering] = useState(false)
             </div>
 
             <div className="relative">
-              <input
+              <input aria-label="输入内容"
                 type="text"
                 value={urlSearch}
                 onChange={e => setUrlSearch(e.target.value)}
@@ -346,7 +346,7 @@ const [triggering, setTriggering] = useState(false)
                 {isAdmin && <p className="text-xs mt-1">请先点击手动重抓</p>}
               </div>
             ) : (
-              <table className="w-full text-sm">
+              <table aria-label="数据表格" className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
                     <th className="text-center px-3 py-2 font-medium text-gray-500 w-[13%]">
@@ -411,7 +411,7 @@ const [triggering, setTriggering] = useState(false)
             <div className="flex items-center justify-between mt-4">
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <span>每页</span>
-                <select
+                <select aria-label="选择选项"
                   value={pageSize}
                   onChange={e => setPageSize(Number(e.target.value))}
                   className="h-7 px-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -447,7 +447,7 @@ const [triggering, setTriggering] = useState(false)
       {showCrawlModal && activeSite && (
         <>
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => !triggering && setShowCrawlModal(false)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div role="dialog" aria-modal="true" aria-label="抓取任务设置" className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
               {/* Modal header */}
               <div className="flex items-center justify-between px-5 pt-5 pb-3">
@@ -504,7 +504,7 @@ const [triggering, setTriggering] = useState(false)
                   <label className="block text-xs font-medium text-gray-500 mb-1">
                     百度链接（可选，填入则忽略范围选项）
                   </label>
-                  <input
+                  <input aria-label="输入内容"
                     type="text"
                     value={crawlCustomUrl}
                     onChange={e => setCrawlCustomUrl(e.target.value)}

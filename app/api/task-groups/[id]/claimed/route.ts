@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
 
 async function getCallerId(): Promise<string | null> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   return user?.id ?? null
 }
@@ -29,6 +31,9 @@ export async function GET(
   const { searchParams } = new URL(req.url)
   const requestedUserId = searchParams.get('userId')
   const date = searchParams.get('date') || getMY()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
+  }
 
   // Only admin/super can query other users' records
   let userId = callerId
@@ -50,7 +55,7 @@ export async function GET(
     .neq('status', 'dismissed')
     .order('created_at', { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   let keywords = data || []
 
   // 待提交（pending）的认领不该因为翻到"今天"就从列表里消失——之前严格按
@@ -95,7 +100,7 @@ export async function POST(
     userId?: string
   }
 
-  if (!keyword) {
+  if (!keyword || typeof keyword !== 'string' || keyword.trim().length > 200 || typeof source !== 'string' || source.length > 100) {
     return NextResponse.json({ error: '缺少必要参数' }, { status: 400 })
   }
 
@@ -122,6 +127,15 @@ export async function POST(
   // 全部分组、能编辑任何组员的认领记录（见下面 PATCH 的 canEditOthers），
   // 认领这个动作理应有同等权限，不需要先手动把自己加进成员列表）。
   const callerRole = await getCallerRole(callerId)
+  const { data: targetMembership } = await service
+    .from('task_group_members')
+    .select('user_id')
+    .eq('group_id', groupId)
+    .eq('user_id', targetUserId)
+    .maybeSingle()
+  if (!targetMembership) {
+    return NextResponse.json({ error: 'Claims must be assigned to a member of this group' }, { status: 400 })
+  }
   if (callerRole !== 'super' && callerRole !== 'admin') {
     const { data: membership } = await service
       .from('task_group_members')
@@ -159,6 +173,10 @@ export async function POST(
         .eq('user_id', existing.user_id)
         .maybeSingle()
       if (member?.username) claimedByName = member.username
+      if (!member?.username) {
+        const names = await resolveUserDisplayNames(service, [existing.user_id])
+        claimedByName = names.get(existing.user_id) ?? claimedByName
+      }
     }
     return NextResponse.json({ error: `这个词今天已经被${claimedByName}认领了`, claimedBy: claimedByName }, { status: 409 })
   }
@@ -206,7 +224,11 @@ export async function POST(
     .select('id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, created_at')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error?.code === '23505') {
+    return NextResponse.json({ error: '这个词今天已经被组内其他成员认领了' }, { status: 409 })
+  }
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ keyword: data })
 }
 
@@ -253,8 +275,10 @@ export async function PATCH(
     .eq('group_id', groupId)
   if (!canEditOthers) query = query.eq('user_id', callerId)
 
-  const { error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const { data: updated, error } = await query.select('id').maybeSingle()
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  if (!updated) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
+  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ success: true })
 }
 
@@ -267,11 +291,22 @@ export async function PUT(
   if (!callerId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: groupId } = await params
-  const body = await req.json().catch(() => ({})) as { date?: string }
+  const body = await req.json().catch(() => ({})) as { date?: string; userId?: string }
   const date = body.date || getMY()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const callerRole = await getCallerRole(callerId)
+  const targetUserId = body.userId && body.userId !== callerId && ['admin', 'super'].includes(callerRole)
+    ? body.userId
+    : callerId
+  const { data: targetMembership } = await service
+    .from('task_group_members').select('user_id')
+    .eq('group_id', groupId).eq('user_id', targetUserId).maybeSingle()
+  if (!targetMembership) return NextResponse.json({ error: 'Target user is not a member of this group' }, { status: 400 })
 
   // GET above pulls forward any older still-pending claims when viewing
   // "today" (see the comment there) — the "提交" button has to actually
@@ -282,11 +317,12 @@ export async function PUT(
     .from('member_claimed_keywords')
     .update({ status: 'submitted', submitted_at: new Date().toISOString() })
     .eq('group_id', groupId)
-    .eq('user_id', callerId)
+    .eq('user_id', targetUserId)
     .eq('status', 'pending')
   query = date === getMY() ? query.lte('claimed_date', date) : query.eq('claimed_date', date)
 
   const { error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ success: true })
 }

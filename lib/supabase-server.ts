@@ -4,16 +4,13 @@ import { cookies } from 'next/headers'
 import type { Database } from './supabase'
 
 // Server Component / Route Handler client (cookie-based auth)
-export function createClient() {
-  const cookieStore = cookies()
+export async function createClient() {
+  const cookieStore = await cookies()
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
         getAll() {
           return cookieStore.getAll()
         },
@@ -23,7 +20,7 @@ export function createClient() {
               cookieStore.set(name, value, options)
             )
           } catch {
-            // called from Server Component — safe to ignore
+            // Server Components cannot write cookies; route handlers can.
           }
         },
       },

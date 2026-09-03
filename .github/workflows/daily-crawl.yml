@@ -35,6 +35,9 @@ jobs:
         id: gen
         env:
           SITE_INPUT: ${{ github.event.inputs.site }}
+          STEP_INPUT: ${{ github.event.inputs.step }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
@@ -46,19 +49,19 @@ jobs:
             echo "Single-site run ($SITE) → 1 group"
           else
             # 根据 step 决定每组站点上限
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              STEP="${{ github.event.inputs.step }}"
-            elif [ "${{ github.event.schedule }}" = "5 16 * * *" ]; then
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              STEP="$STEP_INPUT"
+            elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
               STEP="keywords"
-            elif [ "${{ github.event.schedule }}" = "30 16 * * *" ]; then
+            elif [ "$EVENT_SCHEDULE" = "30 16 * * *" ]; then
               STEP="weight"
-            elif [ "${{ github.event.schedule }}" = "30 17 * * *" ]; then
+            elif [ "$EVENT_SCHEDULE" = "30 17 * * *" ]; then
               STEP="rank"
-            elif [ "${{ github.event.schedule }}" = "30 18 * * *" ]; then
+            elif [ "$EVENT_SCHEDULE" = "30 18 * * *" ]; then
               STEP="rank-title"
-            elif [ "${{ github.event.schedule }}" = "30 19 * * *" ]; then
+            elif [ "$EVENT_SCHEDULE" = "30 19 * * *" ]; then
               STEP="index-pages"
-            elif [ "${{ github.event.schedule }}" = "45 22 * * *" ]; then
+            elif [ "$EVENT_SCHEDULE" = "45 22 * * *" ]; then
               STEP="tracking"
             else
               STEP="all"
@@ -116,9 +119,9 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'
@@ -128,20 +131,24 @@ jobs:
 
       - name: Determine step
         id: vars
+        env:
+          STEP_INPUT: ${{ github.event.inputs.step }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            STEP="${{ github.event.inputs.step }}"
-          elif [ "${{ github.event.schedule }}" = "5 16 * * *" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            STEP="$STEP_INPUT"
+          elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
             STEP="keywords"
-          elif [ "${{ github.event.schedule }}" = "30 16 * * *" ]; then
+          elif [ "$EVENT_SCHEDULE" = "30 16 * * *" ]; then
             STEP="weight"
-          elif [ "${{ github.event.schedule }}" = "30 17 * * *" ]; then
+          elif [ "$EVENT_SCHEDULE" = "30 17 * * *" ]; then
             STEP="rank"
-          elif [ "${{ github.event.schedule }}" = "30 18 * * *" ]; then
+          elif [ "$EVENT_SCHEDULE" = "30 18 * * *" ]; then
             STEP="rank-title"
-          elif [ "${{ github.event.schedule }}" = "30 19 * * *" ]; then
+          elif [ "$EVENT_SCHEDULE" = "30 19 * * *" ]; then
             STEP="index-pages"
-          elif [ "${{ github.event.schedule }}" = "45 22 * * *" ]; then
+          elif [ "$EVENT_SCHEDULE" = "45 22 * * *" ]; then
             STEP="tracking"
           else
             STEP="all"
@@ -151,7 +158,7 @@ jobs:
 
       - name: Cache Playwright browsers
         if: steps.vars.outputs.step == 'rank' || steps.vars.outputs.step == 'rank-title'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}

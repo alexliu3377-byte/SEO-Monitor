@@ -1,5 +1,6 @@
 import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 
 export interface RankMatchWithFlag {
   keyword: string
@@ -28,6 +29,39 @@ export interface EnrichedTrackRow {
   rank_matches: RankMatchWithFlag[]
 }
 
+const TRACKING_CACHE_MAX_AGE_MS = 26 * 60 * 60 * 1000
+
+export async function loadGroupTrackingPayload(service: any, groupId: string): Promise<{
+  rows: EnrichedTrackRow[]
+  computedAt: string
+  fromCache: boolean
+}> {
+  const { data: cached, error: cacheError } = await service
+    .from('group_tracking_cache')
+    .select('payload, computed_at')
+    .eq('group_id', groupId)
+    .maybeSingle()
+  if (cacheError) console.error('Group tracking cache read failed', { groupId, code: cacheError.code })
+
+  const cachedAt = cached?.computed_at ? Date.parse(cached.computed_at) : NaN
+  const cacheIsFresh = Array.isArray(cached?.payload) && Number.isFinite(cachedAt) && Date.now() - cachedAt <= TRACKING_CACHE_MAX_AGE_MS
+  let rows = cacheIsFresh ? cached.payload as EnrichedTrackRow[] : await computeGroupTrackingPayload(service, groupId)
+  let computedAt = cacheIsFresh ? cached.computed_at as string : new Date().toISOString()
+
+  if (!cacheIsFresh) {
+    const { error } = await service
+      .from('group_tracking_cache')
+      .upsert({ group_id: groupId, payload: rows, computed_at: computedAt })
+    if (error) console.error('Group tracking cache write failed', { groupId, code: error.code })
+  }
+
+  // Repair historical cached rows at read time as well. This makes profile name
+  // changes visible immediately without forcing a costly tracking recompute.
+  const names = await resolveUserDisplayNames(service, rows.map(row => row.user_id))
+  rows = rows.map(row => ({ ...row, username: names.get(row.user_id) ?? row.username }))
+  return { rows, computedAt, fromCache: cacheIsFresh }
+}
+
 type RawTrackRow = {
   id: string; claim_id: string; user_id: string
   keyword: string; final_keyword: string | null
@@ -50,10 +84,7 @@ type RawTrackRow = {
 export async function computeGroupTrackingPayload(service: any, groupId: string): Promise<EnrichedTrackRow[]> {
   const { data: membersRaw } = await service
     .from('task_group_members').select('user_id, username').eq('group_id', groupId)
-  const memberMap = new Map<string, string>(
-    (membersRaw || []).map((m: { user_id: string; username: string | null }) =>
-      [m.user_id, m.username || m.user_id.slice(0, 8)])
-  )
+  const memberList = (membersRaw || []) as { user_id: string; username: string | null }[]
 
   // Fetch bad environment dates (crawl anomaly or site-wide index drop > 5%)
   const since90 = new Date(Date.now() + 8 * 3600000 - 90 * 86400000).toISOString().slice(0, 10)
@@ -87,6 +118,11 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     seen.add(r.claim_id)
     return true
   })
+  const usernameOf = await resolveUserDisplayNames(
+    service,
+    dedupedRows.map(row => row.user_id),
+    memberList
+  )
 
   // Fetch source for deduped claim_ids (batched to avoid URL length limits —
   // UUIDs are fixed-width so 200/batch is safe here, unlike the CJK-keyword
@@ -189,7 +225,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     return {
       ...r,
       is_indexed: isIndexed,
-      username: memberMap.get(r.user_id) ?? r.user_id.slice(0, 8),
+      username: usernameOf.get(r.user_id) ?? r.user_id.slice(0, 8),
       rank_change: rankChange,
       env_excluded: badDates.has(r.record_date),
       source: claimSourceMap.get(r.claim_id) ?? null,

@@ -209,10 +209,10 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
             let entries
             if (u.includes('{page}')) {
               // JSON API mode: URL template with {page} placeholder
-              entries = await fetchJsonHtmlPages(u, titleSel, dateSel, srcUrlSel || undefined, htmlCutoff)
+              entries = await fetchJsonHtmlPages(u, titleSel, dateSel, srcUrlSel || undefined, htmlCutoff, 30, true)
             } else {
               const src: HtmlSource = { url: u, titleSelector: titleSel, dateSelector: dateSel, urlSelector: srcUrlSel || undefined }
-              entries = await fetchHtmlListPages([src], htmlCutoff, maxPg)
+              entries = await fetchHtmlListPages([src], htmlCutoff, maxPg, false, true)
             }
             for (const e of entries) {
               rawEntries.push({ title: e.title, content_date: parseContentDate(e.date), content_type: srcType, source_url: srcUrlSel ? (e.url || null) : null })
@@ -248,16 +248,18 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
         const existingKeys = new Set<string>()
 
         for (const cd of batchDates) {
-          const { data: existing } = await supabase
-            .from('raw_keywords').select('keyword').eq('site_id', site.id).eq('content_date', cd).limit(10000)
-          for (const row of (existing || []) as { keyword: string }[]) existingKeys.add(`${cd}|${row.keyword}`)
+          const existing = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
+            .from('raw_keywords').select('id, keyword').eq('site_id', site.id).eq('content_date', cd)
+            .order('id', { ascending: true }).range(from, to))
+          for (const row of existing) existingKeys.add(`${cd}|${row.keyword}`)
         }
 
         if (hasNullDate) {
           const todayMYTStart = new Date(new Date(today + 'T16:00:00.000Z').getTime() - 86400000).toISOString()
-          const { data: existingNull } = await supabase
-            .from('raw_keywords').select('keyword').eq('site_id', site.id).gte('discovered_at', todayMYTStart).is('content_date', null)
-          for (const row of (existingNull || []) as { keyword: string }[]) existingKeys.add(`null|${row.keyword}`)
+          const existingNull = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
+            .from('raw_keywords').select('id, keyword').eq('site_id', site.id).gte('discovered_at', todayMYTStart).is('content_date', null)
+            .order('id', { ascending: true }).range(from, to))
+          for (const row of existingNull) existingKeys.add(`null|${row.keyword}`)
         }
 
         const newEntries = cleanedEntries.filter((e) => {
@@ -1114,6 +1116,11 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
           onConflict: 'claim_id,record_date,keyword', ignoreDuplicates: false,
         })
       }
+      const changedGroupIds = Array.from(new Set(claims.map(claim => claim.group_id).filter(Boolean)))
+      if (changedGroupIds.length > 0) {
+        const { error: cacheError } = await supabase.from('group_tracking_cache').delete().in('group_id', changedGroupIds)
+        if (cacheError) console.error('  [tracking-cache] invalidation failed:', cacheError.code)
+      }
       ownRows = ownUpsertRows.length
       console.log(`  [自己站点追踪] ${claims.length} 条记录写入完成，${rankMatchRows.length} 条排名词匹配`)
     } else {
@@ -1145,6 +1152,15 @@ async function main() {
   // 本身支持按日期查历史数据，见 buildRankUrl 的 isToday 分支）。不传就是正常
   // 当天抓取，其它步骤不读这个参数。
   const dateOverride = args.find((a) => a.startsWith('--date='))?.split('=')[1] ?? null
+  const validSteps = new Set(['all', 'keywords', 'weight', 'rank', 'rank-title', 'index-pages', 'tracking'])
+  if (!validSteps.has(step)) throw new Error(`Invalid crawl step: ${step}`)
+  if (siteFilter && !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(siteFilter)) {
+    throw new Error('Invalid --site value')
+  }
+  if (dateOverride && !/^\d{4}-\d{2}-\d{2}$/.test(dateOverride)) throw new Error('Invalid --date value')
+  if (!Number.isInteger(group) || !Number.isInteger(totalGroups) || group < 0 || totalGroups < 1 || group >= totalGroups) {
+    throw new Error('Invalid crawl group partition')
+  }
 
   const totalStart = Date.now()
   const ip = await getPublicIp()

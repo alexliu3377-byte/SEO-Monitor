@@ -8,7 +8,7 @@ const WORKFLOW = 'verify-deindex.yml'
 // Body: { recheck?: boolean }
 // Triggers the verify-deindex GitHub Actions workflow via workflow_dispatch.
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

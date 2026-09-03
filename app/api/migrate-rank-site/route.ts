@@ -9,7 +9,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 // migrate_rank_changes_to_site_keyword_ranks / migrate_site_keyword_ranks_to_rank_changes，
 // 指向真正在用的 site_keyword_ranks；旧表 site_rank_keywords 已删除。
 export async function POST(request: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, rows })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : '迁移失败' }, { status: 500 })
+    console.error('Rank site migration failed', err)
+    return NextResponse.json({ error: '迁移失败' }, { status: 500 })
   }
 }

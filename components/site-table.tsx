@@ -117,7 +117,7 @@ export default function SiteTable({ sites, allSites, onEdit, onDelete, onToggle,
   return (
     <>
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table aria-label="数据表格" className="w-full">
         <thead className="bg-gray-50">
           <tr>
             <th className="table-th">域名</th>

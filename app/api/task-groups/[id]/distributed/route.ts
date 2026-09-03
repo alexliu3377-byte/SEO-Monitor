@@ -9,7 +9,7 @@ function getMY(offsetDays = 0) {
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -33,7 +33,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     .select('id, keyword, volume, volume_source, matched_keyword, repeatable, created_at, batch_id, batch_name, cooldown_days, daily_limit')
     .eq('group_id', groupId)
     .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const keywords = (rows || []).map((r: { keyword: string }) => r.keyword)
   // Latest non-dismissed claim per keyword — repeatable words cycle back to
@@ -79,7 +79,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -126,13 +126,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .from('distributed_keywords')
     .upsert(rows, { onConflict: 'group_id,keyword' })
     .select('id, keyword, volume, volume_source, matched_keyword, repeatable, batch_name, cooldown_days, daily_limit')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -150,7 +150,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   let query = service.from('distributed_keywords').delete().eq('group_id', groupId)
   if (!all) query = query.eq('id', id)
   const { error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ success: true })
 }

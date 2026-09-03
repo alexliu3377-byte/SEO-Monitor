@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 async function requireAdmin() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     .limit(500)
   if (groupName) query = query.eq('group_name', groupName)
   const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const rows = (data ?? []) as { site_domains: string[] | null; seen_count: number; best_rank_position: number | null }[]
   rows.sort((a, b) => {
@@ -67,7 +67,7 @@ export async function PATCH(req: Request) {
     const { error } = await service.from('commercial_keyword_discoveries')
       .update({ status: 'ignored', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
       .eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
@@ -79,12 +79,12 @@ export async function PATCH(req: Request) {
   const { error: insertError } = await service
     .from('commercial_keywords')
     .upsert({ keyword: alias.trim(), group_name: groupName.trim(), added_by: user.id }, { onConflict: 'keyword', ignoreDuplicates: true })
-  if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
+  if (insertError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const { error } = await service.from('commercial_keyword_discoveries')
     .update({ status: 'accepted', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

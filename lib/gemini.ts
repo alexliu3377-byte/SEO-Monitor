@@ -51,10 +51,11 @@ export async function callGeminiJSON<T>(
   for (const model of models) {
     try {
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          signal: AbortSignal.timeout(45_000),
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: {
@@ -75,7 +76,8 @@ export async function callGeminiJSON<T>(
           continue
         }
       }
-      lastErr = `${model} -> ${r.status}: ${(await r.text()).slice(0, 300)}`
+      await r.body?.cancel()
+      lastErr = `${model} -> HTTP ${r.status}`
     } catch (e) {
       lastErr = `${model} -> 请求异常: ${e instanceof Error ? e.message : String(e)}`
     }

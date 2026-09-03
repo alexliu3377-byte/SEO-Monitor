@@ -22,13 +22,14 @@ const getWordlibWords = unstable_cache(
 )
 
 export async function GET() {
-  const { data: { user } } = await createClient().auth.getUser()
+  const { data: { user } } = await (await createClient()).auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
     const data = await getWordlibWords()
     return NextResponse.json({ data })
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'RPC failed' }, { status: 500 })
+    console.error('Word library RPC failed', e)
+    return NextResponse.json({ error: 'Unable to load word library' }, { status: 500 })
   }
 }

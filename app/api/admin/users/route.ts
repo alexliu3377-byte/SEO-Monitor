@@ -3,7 +3,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
 
 async function getCallerRole(): Promise<UserRole | null> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,7 +22,7 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: { users }, error } = await service.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const { data: profiles } = await service.from('user_profiles').select('id, role, username')
   const profileMap = new Map<string, { role: UserRole; username: string | null }>(
@@ -39,7 +39,7 @@ export async function GET() {
   }))
 
   const filtered = callerRole === 'admin'
-    ? result.filter(u => u.role !== 'super')
+    ? result.filter(u => u.role === 'normal')
     : result
 
   return NextResponse.json({ users: filtered })
@@ -59,8 +59,15 @@ export async function POST(req: Request) {
     role: UserRole
   }
 
-  if (!username || !email || !password || !role) {
+  const normalizedUsername = username?.trim()
+  const normalizedEmail = email?.trim().toLowerCase()
+
+  if (!normalizedUsername || !normalizedEmail || !password || !role) {
     return NextResponse.json({ error: '缺少必填字段' }, { status: 400 })
+  }
+
+  if (normalizedUsername.length > 64 || password.length < 8 || !['normal', 'admin', 'super'].includes(role)) {
+    return NextResponse.json({ error: 'Invalid account details' }, { status: 400 })
   }
 
   if (callerRole === 'admin' && role !== 'normal') {
@@ -69,17 +76,31 @@ export async function POST(req: Request) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const { data: duplicate } = await service
+    .from('user_profiles')
+    .select('id')
+    .ilike('username', normalizedUsername)
+    .maybeSingle()
+  if (duplicate) return NextResponse.json({ error: 'Username is already in use' }, { status: 409 })
+
   const { data: { user }, error } = await service.auth.admin.createUser({
-    email,
+    email: normalizedEmail,
     password,
     email_confirm: true,
   })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Account creation failed; the email may already be in use' }, { status: 500 })
   if (!user) return NextResponse.json({ error: '创建失败' }, { status: 500 })
 
-  await service.from('user_profiles').insert({ id: user.id, role, username })
+  const { error: profileError } = await service
+    .from('user_profiles')
+    .insert({ id: user.id, role, username: normalizedUsername })
+  if (profileError) {
+    await service.auth.admin.deleteUser(user.id)
+    const status = profileError.code === '23505' ? 409 : 500
+    return NextResponse.json({ error: status === 409 ? 'Username is already in use' : 'Profile creation failed' }, { status })
+  }
 
   return NextResponse.json({
-    user: { id: user.id, email: user.email ?? '', username, role, created_at: user.created_at }
+    user: { id: user.id, email: user.email ?? '', username: normalizedUsername, role, created_at: user.created_at }
   })
 }

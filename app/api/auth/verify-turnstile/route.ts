@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 
 export async function POST(req: Request) {
+  void req
+  return NextResponse.json({ error: 'Turnstile verification is part of the login request' }, { status: 410 })
+  /*
   const { token } = await req.json() as { token: string }
 
   if (!token) {
@@ -23,4 +26,5 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ success: true })
+  */
 }

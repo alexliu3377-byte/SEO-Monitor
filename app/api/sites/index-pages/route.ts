@@ -5,7 +5,7 @@ const ALLOWED_PAGE_SIZES = [10, 20, 50]
 
 // GET /api/sites/index-pages?siteId=X&page=0&pageSize=10&search=keyword&timeFilter=all|near7|near30&statusFilter=all|new|reindexed|disappeared|updated|active
 export async function GET(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -104,7 +104,7 @@ export async function GET(req: Request) {
   query = query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
   const { data, count, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const rows = (data || []).map((r: {
     id: string; url: string; title: string; snippet: string
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
 
 // PATCH /api/sites/index-pages — toggle has_index_pages for a site
 export async function PATCH(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -141,7 +141,7 @@ export async function PATCH(req: Request) {
   if (!siteId || typeof enabled !== 'boolean') return NextResponse.json({ error: '缺少参数' }, { status: 400 })
 
   const { error } = await service.from('sites').update({ has_index_pages: enabled }).eq('id', siteId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

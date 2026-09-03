@@ -50,6 +50,8 @@ export default function SitesPage() {
   const [filterCategory, setFilterCategory] = useState('')
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null)
   const [migrating, setMigrating] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Site | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   async function loadSites() {
     setLoading(true)
@@ -73,8 +75,14 @@ export default function SitesPage() {
     setShowModal(true)
   }
 
-  async function handleDelete(site: Site) {
-    if (!confirm(`确认删除 ${site.domain}？此操作不可恢复。`)) return
+  function handleDelete(site: Site) {
+    setPendingDelete(site)
+  }
+
+  async function confirmDelete() {
+    const site = pendingDelete
+    if (!site) return
+    setNotice(null)
     setDeletingId(site.id)
     try {
       const res = await fetch('/api/sites', {
@@ -86,9 +94,10 @@ export default function SitesPage() {
         const data = await res.json()
         throw new Error(data.error || '删除失败')
       }
+      setPendingDelete(null)
       await loadSites()
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '删除失败')
+      setNotice(err instanceof Error ? err.message : '删除失败')
     } finally {
       setDeletingId(null)
     }
@@ -109,7 +118,7 @@ export default function SitesPage() {
         prev.map((s) => s.id === site.id ? { ...s, is_enabled: !s.is_enabled } : s)
       )
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '更新失败')
+      setNotice(err instanceof Error ? err.message : '更新失败')
     }
   }
 
@@ -135,7 +144,7 @@ export default function SitesPage() {
       setPendingToggle({ site, direction: 'to_rank_changes', newRankData: true, newRankTitle: false })
       return
     }
-    applyToggle(site, newVal, newVal ? false : site.has_rank_title).catch(err => alert(err.message))
+    applyToggle(site, newVal, newVal ? false : site.has_rank_title).catch(err => setNotice(err.message))
   }
 
   async function handleToggleIndexPages(site: Site) {
@@ -153,7 +162,7 @@ export default function SitesPage() {
         prev.map((s) => s.id === site.id ? { ...s, has_index_pages: !s.has_index_pages } : s)
       )
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '更新失败')
+      setNotice(err instanceof Error ? err.message : '更新失败')
     }
   }
 
@@ -164,7 +173,7 @@ export default function SitesPage() {
       setPendingToggle({ site, direction: 'to_site_keyword_ranks', newRankData: false, newRankTitle: true })
       return
     }
-    applyToggle(site, newVal ? false : site.has_rank_data, newVal).catch(err => alert(err.message))
+    applyToggle(site, newVal ? false : site.has_rank_data, newVal).catch(err => setNotice(err.message))
   }
 
   async function handleTogglePcRank(site: Site) {
@@ -181,7 +190,7 @@ export default function SitesPage() {
       }
       setSites((prev) => prev.map((s) => s.id === site.id ? { ...s, track_pc_rank: newVal } : s))
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '更新失败')
+      setNotice(err instanceof Error ? err.message : '更新失败')
     }
   }
 
@@ -202,7 +211,7 @@ export default function SitesPage() {
       await applyToggle(site, newRankData, newRankTitle)
       setPendingToggle(null)
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : '操作失败')
+      setNotice(err instanceof Error ? err.message : '操作失败')
     } finally {
       setMigrating(false)
     }
@@ -236,6 +245,13 @@ export default function SitesPage() {
         </button>
       </div>
 
+      {notice && (
+        <div role="alert" aria-live="assertive" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="关闭错误提示" className="min-h-11 min-w-11">×</button>
+        </div>
+      )}
+
       <div className="card">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-400 gap-3">
@@ -261,7 +277,7 @@ export default function SitesPage() {
               <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-400">站点</span>
-                  <input
+                  <input aria-label="输入内容"
                     type="text"
                     value={filterSite}
                     onChange={(e) => setFilterSite(e.target.value)}
@@ -271,7 +287,7 @@ export default function SitesPage() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-400">关注级别</span>
-                  <select value={filterFocus} onChange={(e) => setFilterFocus(e.target.value)} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+                  <select aria-label="选择选项" value={filterFocus} onChange={(e) => setFilterFocus(e.target.value)} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                     <option value="">全部</option>
                     <option value="1">重点</option>
                     <option value="2">侧重</option>
@@ -280,7 +296,7 @@ export default function SitesPage() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-400">分类</span>
-                  <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+                  <select aria-label="选择选项" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                     <option value="">全部</option>
                     <option value="large">大站</option>
                     <option value="medium">中站</option>
@@ -313,8 +329,25 @@ export default function SitesPage() {
         />
       )}
 
+      {pendingDelete && (
+        <div role="alertdialog" aria-modal="true" aria-labelledby="delete-site-title" aria-describedby="delete-site-description" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <h2 id="delete-site-title" className="text-lg font-semibold text-gray-900">确认删除网站</h2>
+            <p id="delete-site-description" className="mt-2 text-sm text-gray-600">
+              确认删除 {pendingDelete.domain}？此操作不可恢复。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" className="btn-secondary" disabled={deletingId === pendingDelete.id} onClick={() => setPendingDelete(null)}>取消</button>
+              <button type="button" className="btn-danger" aria-busy={deletingId === pendingDelete.id} disabled={deletingId === pendingDelete.id} onClick={confirmDelete}>
+                {deletingId === pendingDelete.id ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pendingToggle && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <h3 className="font-semibold text-gray-900 mb-1">
               {pendingToggle.direction === 'to_site_keyword_ranks' ? '切换至排名模式' : '切换至涨跌模式'}

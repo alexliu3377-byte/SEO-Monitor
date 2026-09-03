@@ -90,7 +90,7 @@ export default function IndexMonitorPage() {
     }
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     setLoading(true)
@@ -208,7 +208,7 @@ export default function IndexMonitorPage() {
           <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">站点</span>
-              <input
+              <input aria-label="输入内容"
                 type="text"
                 value={filterSite}
                 onChange={(e) => { setFilterSite(e.target.value); setPage(0) }}
@@ -218,7 +218,7 @@ export default function IndexMonitorPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">关注级别</span>
-              <select value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+              <select aria-label="选择选项" value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                 <option value="">全部</option>
                 <option value="1">重点</option>
                 <option value="2">侧重</option>
@@ -227,7 +227,7 @@ export default function IndexMonitorPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">状态</span>
-              <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+              <select aria-label="选择选项" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                 <option value="">全部</option>
                 <option value="normal">正常</option>
                 <option value="warning">下跌</option>
@@ -243,7 +243,7 @@ export default function IndexMonitorPage() {
             </p>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table aria-label="数据表格" className="w-full">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="table-th">域名</th>
@@ -312,7 +312,7 @@ export default function IndexMonitorPage() {
 
       {/* Detail Chart Modal */}
       {selectedSite && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>

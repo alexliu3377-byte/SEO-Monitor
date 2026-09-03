@@ -4,7 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 // 给 environment_segments_daily 提供只读查询——月度趋势/规则中心那批页面的
 // admin/super 门槛同一个套路，这里也是内部信号，不对普通组员开放。
 export async function GET(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
     .gte('date', since)
     .order('date', { ascending: false })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ rows: data ?? [] })
 }

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { activityStart, activityEnd } from '@/lib/activity-log'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+import { isKeywordExportOwner } from '@/lib/kw-export-owner'
 
 async function log(supabase: ReturnType<typeof createServiceClient>, step: string, ok: number, summary: string, t0: number) {
   const aid = await activityStart(supabase, { type: 'search', source: 'browser', step })
@@ -8,7 +10,7 @@ async function log(supabase: ReturnType<typeof createServiceClient>, step: strin
 }
 
 export async function GET(req: Request) {
-  const authCheck = createClient()
+  const authCheck = await createClient()
   const { data: { user } } = await authCheck.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -17,6 +19,9 @@ export async function GET(req: Request) {
   const exportParam = searchParams.get('export')
   const exportAll = exportParam === '1'
   const exportToday = exportParam === 'today'
+  if ((exportAll || exportToday) && !isKeywordExportOwner(user.id)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const t0 = Date.now()
 
   const supabase = createServiceClient()
@@ -27,19 +32,30 @@ export async function GET(req: Request) {
     const todayMY = new Date(nowMs).toISOString().slice(0, 10)
     const todayStartUTC = new Date(todayMY + 'T00:00:00+08:00').toISOString()
 
-    const { data: rawData, error: rawErr } = await supabase
-      .from('raw_keywords')
-      .select('keyword')
-      .gte('discovered_at', todayStartUTC)
-    if (rawErr) return NextResponse.json({ error: rawErr.message }, { status: 500 })
+    let rawData: { id: string; keyword: string }[]
+    try {
+      rawData = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
+        .from('raw_keywords')
+        .select('id, keyword')
+        .gte('discovered_at', todayStartUTC)
+        .order('id', { ascending: true })
+        .range(from, to))
+    } catch {
+      return NextResponse.json({ error: 'Unable to load today\'s keywords' }, { status: 500 })
+    }
 
     const keywords = Array.from(new Set((rawData || []).map((r: { keyword: string }) => r.keyword)))
     if (keywords.length === 0) return NextResponse.json({ keywords: [] })
 
-    const { data: volData } = await supabase
-      .from('keyword_volume')
-      .select('keyword, volume, latest_trend')
-      .in('keyword', keywords)
+    const volData: { keyword: string; volume: number; latest_trend: string | null }[] = []
+    for (let i = 0; i < keywords.length; i += 200) {
+      const { data, error } = await supabase
+        .from('keyword_volume')
+        .select('keyword, volume, latest_trend')
+        .in('keyword', keywords.slice(i, i + 200))
+      if (error) return NextResponse.json({ error: 'Unable to load keyword volumes' }, { status: 500 })
+      if (data) volData.push(...data)
+    }
 
     const volMap = new Map((volData || []).map((r: { keyword: string; volume: number; latest_trend: string | null }) => [r.keyword, r]))
     const result = keywords
@@ -64,7 +80,7 @@ export async function GET(req: Request) {
         .order('volume', { ascending: false })
         .order('keyword', { ascending: true })
         .range(offset, offset + batchSize - 1)
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
       if (!data || data.length === 0) break
       allRows.push(...data)
       if (data.length < batchSize) break
@@ -90,7 +106,7 @@ export async function GET(req: Request) {
   if (q) dataQuery = dataQuery.ilike('keyword', `%${q}%`)
 
   const [{ count }, { data, error }] = await Promise.all([countQuery, dataQuery])
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const results = data || []
   const total = count ?? 0

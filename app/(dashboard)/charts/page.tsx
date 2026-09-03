@@ -62,7 +62,7 @@ function Card({ title, subtitle, icon, list, footer, accent }: {
 
 function MoreModal({ title, items, onClose }: { title: string; items: React.ReactNode[]; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm flex flex-col" style={{ maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
           <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
@@ -116,7 +116,7 @@ interface MonthlyDrillData {
 // 排名"面板）同一个展示方式——域名下面带一行 PC/M权重，不是单纯罗列域名。
 function DomainListModal({ title, domains, weights, onClose }: { title: string; domains: string[]; weights: Record<string, { pc: number; mobile: number }>; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
@@ -146,7 +146,7 @@ function DomainListModal({ title, domains, weights, onClose }: { title: string; 
 // 站点各自连续了多少天，而不是像 DomainListModal 那样只罗列域名。
 function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string; siteCount: number; sites: StreakSite[]; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
@@ -223,7 +223,7 @@ function MonthlyTrendTab() {
           <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-4">
             <div className="flex items-center justify-between mb-5">
               <span className="text-sm font-semibold text-gray-700">类目占比</span>
-              <select value={chartYear} onChange={e => setChartYear(e.target.value)}
+              <select aria-label="选择选项" value={chartYear} onChange={e => setChartYear(e.target.value)}
                 className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -262,7 +262,7 @@ function MonthlyTrendTab() {
 
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-2.5">
-              <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+              <select aria-label="选择选项" value={filterYear} onChange={e => setFilterYear(e.target.value)}
                 className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>

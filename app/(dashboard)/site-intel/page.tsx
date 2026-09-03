@@ -57,8 +57,15 @@ export default function SiteIntelPage() {
 
       <form onSubmit={handleSearch} className="flex gap-3 mb-6 max-w-xl">
         <div className="relative flex-1">
+          <label htmlFor="site-intel-search" className="sr-only">搜索站点域名</label>
           <input
+            id="site-intel-search"
             type="text"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={showSuggestions && suggestions.length > 0}
+            aria-controls="site-intel-suggestions"
+            aria-activedescendant={highlightIdx >= 0 ? `site-intel-option-${highlightIdx}` : undefined}
             value={input}
             onChange={e => {
               setInput(e.target.value)
@@ -87,9 +94,12 @@ export default function SiteIntelPage() {
             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
           />
           {showSuggestions && suggestions.length > 0 && (
-            <ul className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+            <ul id="site-intel-suggestions" role="listbox" className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
               {suggestions.map((s, i) => (
                 <li
+                  id={`site-intel-option-${i}`}
+                  role="option"
+                  aria-selected={i === highlightIdx}
                   key={s}
                   onMouseDown={() => {
                     setInput(s)

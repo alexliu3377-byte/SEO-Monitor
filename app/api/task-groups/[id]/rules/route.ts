@@ -4,7 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 // GET /api/task-groups/[id]/rules?competitor=1
 // Returns rules applied to this group's sites (or competitor domains if ?competitor=1)
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -30,7 +30,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const { data: allRules, error } = await service
     .from('rules').select('*').order('rule_number', { ascending: true })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   if (isCompetitor) {
     const groupDomains: string[] = group.competitor_domains ?? []

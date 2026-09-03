@@ -56,7 +56,7 @@ function buildClusters(rows: KwRow[]) {
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -77,7 +77,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .gte('content_date', since)
     .order('content_date', { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const allRows: KwRow[] = rows ?? []
 

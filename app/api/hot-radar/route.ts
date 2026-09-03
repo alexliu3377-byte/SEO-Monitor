@@ -15,7 +15,7 @@ export const maxDuration = 60
 // auth.getUser() 读 cookie，Next.js 因此把这条路由判定成动态路由，路由级
 // revalidate 对动态路由不生效，是个死配置，删掉——真正的缓存靠上面这张表。）
 export async function GET() {
-  const authCheck = createClient()
+  const authCheck = await createClient()
   const { data: { user } } = await authCheck.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

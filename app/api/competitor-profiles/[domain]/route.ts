@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ domain: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const { data: callerProfile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
+  if (!callerProfile || !['admin', 'super'].includes(callerProfile.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const { domain } = await params
   const { data } = await service
     .from('competitor_profiles').select('*').eq('domain', decodeURIComponent(domain)).maybeSingle()
@@ -16,7 +20,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ domain:
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ domain: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -42,6 +46,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ domain: 
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ profile: data })
 }

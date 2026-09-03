@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import { buildGroupMaps, groupSortedRows } from '@/lib/company-groups'
 import { useUser } from '@/lib/user-context'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
@@ -83,7 +84,7 @@ function PaginationBar({ page, total, pageSize, onPageChange, onPageSizeChange }
     <div className="flex items-center justify-between px-5 py-2.5 border-t border-gray-100 bg-gray-50/50 flex-shrink-0 text-xs">
       <div className="flex items-center gap-1.5 text-gray-500">
         每页
-        <select
+        <select aria-label="选择选项"
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value) as PageSize)}
           className="border border-gray-200 rounded px-1 py-0.5 text-xs"
@@ -179,7 +180,7 @@ export default function CompetitorDailyPage() {
     return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     setLoading(true)
@@ -295,11 +296,6 @@ export default function CompetitorDailyPage() {
       setKwCounts({ app: appRes.count ?? 0, game: gameRes.count ?? 0 })
       if (kwRes.error) throw kwRes.error
       setSiteKeywords((kwRes.data || []) as Keyword[])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(supabase.from('competitor_kw_stats') as any).upsert(
-        { site_id: site.site_id, stat_date: date, app_count: appRes.count ?? 0, game_count: gameRes.count ?? 0, updated_at: new Date().toISOString() },
-        { onConflict: 'site_id,stat_date' }
-      ).then(() => loadData()).catch(() => loadData())
     } catch {
       setSiteKeywords([])
     } finally {
@@ -394,16 +390,17 @@ export default function CompetitorDailyPage() {
       const supabase = getBrowserClient()
       const since = new Date(Date.now() - 30 * 86400000).toISOString()
 
-      const { data: kwData } = await supabase
+      const kwData = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
         .from('raw_keywords')
-        .select('keyword')
+        .select('id, keyword')
         .eq('site_id', site.site_id)
         .gte('discovered_at', since)
-        .limit(5000)
+        .order('id', { ascending: true })
+        .range(from, to))
 
       const keywords = Array.from(
         new Set(
-          ((kwData || []) as { keyword: string }[])
+          kwData
             .map((r) => r.keyword)
             .filter((k) => !k.includes('电脑版'))
         )
@@ -514,13 +511,13 @@ export default function CompetitorDailyPage() {
     try {
       const supabase = getBrowserClient()
       const since = getMalaysiaDate(-30)
-      const q = site.hasRankTitle
-        ? supabase.from('site_keyword_ranks').select('keyword, type, stat_date').eq('site_id', site.site_id).eq('platform', 'mobile').gt('volume', 0).gte('stat_date', since).limit(5000)
-        : supabase.from('rank_changes').select('keyword, type, stat_date').eq('site_id', site.site_id).gte('stat_date', since).limit(5000)
-      const { data } = await q
-
       type RawRow = { keyword: string; type: string; stat_date: string }
-      const rows = (data || []) as RawRow[]
+      const rows = await fetchAllRows<RawRow & { id: string }>((from, to) => {
+        const q = site.hasRankTitle
+          ? supabase.from('site_keyword_ranks').select('id, keyword, type, stat_date').eq('site_id', site.site_id).eq('platform', 'mobile').gt('volume', 0).gte('stat_date', since)
+          : supabase.from('rank_changes').select('id, keyword, type, stat_date').eq('site_id', site.site_id).gte('stat_date', since)
+        return q.order('id', { ascending: true }).range(from, to)
+      })
       const upSet = new Map<string, Set<string>>()
       const downSet = new Map<string, Set<string>>()
       for (const row of rows) {
@@ -577,13 +574,13 @@ export default function CompetitorDailyPage() {
     try {
       const supabase = getBrowserClient()
       const since = getMalaysiaDate(-30)
-      const q = site.hasRankTitle
-        ? supabase.from('site_keyword_ranks').select('keyword, volume, type, stat_date').eq('site_id', site.site_id).eq('platform', 'mobile').gt('volume', 0).gte('stat_date', since).limit(5000)
-        : supabase.from('rank_changes').select('keyword, volume, type, stat_date').eq('site_id', site.site_id).gte('stat_date', since).limit(5000)
-      const { data } = await q
-
       type RawRow = { keyword: string; volume: number; type: string; stat_date: string }
-      const rows = (data || []) as RawRow[]
+      const rows = await fetchAllRows<RawRow & { id: string }>((from, to) => {
+        const q = site.hasRankTitle
+          ? supabase.from('site_keyword_ranks').select('id, keyword, volume, type, stat_date').eq('site_id', site.site_id).eq('platform', 'mobile').gt('volume', 0).gte('stat_date', since)
+          : supabase.from('rank_changes').select('id, keyword, volume, type, stat_date').eq('site_id', site.site_id).gte('stat_date', since)
+        return q.order('id', { ascending: true }).range(from, to)
+      })
 
       const kwMap = new Map<string, { upDays: Set<string>; downDays: Set<string>; volumes: number[] }>()
       for (const row of rows) {
@@ -648,7 +645,7 @@ export default function CompetitorDailyPage() {
           <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">站点</span>
-              <input
+              <input aria-label="输入内容"
                 type="text"
                 value={filterSite}
                 onChange={(e) => { setFilterSite(e.target.value); setMainPage(0) }}
@@ -658,7 +655,7 @@ export default function CompetitorDailyPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">关注级别</span>
-              <select value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setMainPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+              <select aria-label="选择选项" value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setMainPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                 <option value="">全部</option>
                 <option value="1">重点</option>
                 <option value="2">侧重</option>
@@ -667,7 +664,7 @@ export default function CompetitorDailyPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">状态</span>
-              <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setMainPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+              <select aria-label="选择选项" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setMainPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                 <option value="">全部</option>
                 <option value="normal">正常</option>
                 <option value="warning">偏低</option>
@@ -677,7 +674,7 @@ export default function CompetitorDailyPage() {
             <span className="ml-auto text-xs text-gray-400">共 {visibleRows.length} 条</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table aria-label="数据表格" className="w-full">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="table-th">域名</th>
@@ -756,13 +753,13 @@ export default function CompetitorDailyPage() {
 
       {/* 昨日新词 Modal */}
       {selectedSite && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold text-gray-900">{selectedSite.domain} · 新词</h3>
-                <input
+                <input aria-label="选择日期"
                   type="date"
                   value={kwDate}
                   max={getMalaysiaDate(0)}
@@ -856,7 +853,7 @@ export default function CompetitorDailyPage() {
         const cleanFrom = cleanPage * pageSize
         const pageClean = cleanedEntries.slice(cleanFrom, cleanFrom + pageSize)
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
                 <div>
@@ -924,13 +921,13 @@ export default function CompetitorDailyPage() {
 
       {/* 排名变动 Modal */}
       {rankSite && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold text-gray-900">{rankSite.domain} · 排名变动</h3>
-                <input
+                <input aria-label="选择日期"
                   type="date"
                   value={rankDate}
                   max={getMalaysiaDate(0)}
@@ -994,7 +991,7 @@ export default function CompetitorDailyPage() {
               ) : rankPageData.length === 0 ? (
                 <p className="text-center text-gray-400 py-16 text-sm">无数据</p>
               ) : (
-                <table className="w-full text-sm">
+                <table aria-label="数据表格" className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       <th className="px-5 py-2.5 text-left font-medium text-gray-500">关键词</th>
@@ -1031,7 +1028,7 @@ export default function CompetitorDailyPage() {
 
       {/* 趋势 Modal */}
       {trendSite && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTrendSite(null)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTrendSite(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <div>
@@ -1070,7 +1067,7 @@ export default function CompetitorDailyPage() {
         const unstableFrom = unstablePage * pageSize
         const pageUnstable = unstableData.slice(unstableFrom, unstableFrom + pageSize)
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
                 <div>
@@ -1095,7 +1092,7 @@ export default function CompetitorDailyPage() {
                 ) : pageUnstable.length === 0 ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无不稳定词（需积累多天数据）</p>
                 ) : (
-                  <table className="w-full text-sm">
+                  <table aria-label="数据表格" className="w-full text-sm">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
                         <th className="px-5 py-2.5 text-left font-medium text-gray-500">关键词</th>

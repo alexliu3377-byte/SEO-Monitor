@@ -5,7 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { callGeminiJSON } from '@/lib/gemini'
 
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

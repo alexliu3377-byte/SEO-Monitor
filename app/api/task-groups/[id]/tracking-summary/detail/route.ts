@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   currentMonth, monthRange, dedupeByClaim, fetchClaimSourceMap, fetchRankMatches,
@@ -15,7 +16,7 @@ interface DetailRow {
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -44,7 +45,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { data: membersRaw } = await service
     .from('task_group_members').select('user_id, username').eq('group_id', groupId)
   const memberList = (membersRaw || []) as { user_id: string; username: string | null }[]
-  const usernameOf = new Map<string, string>(memberList.map(m => [m.user_id, m.username || m.user_id.slice(0, 8)]))
   const isMember = memberList.some(m => m.user_id === user.id)
 
   if (!canSeeAll && !isMember) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -72,6 +72,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   })
 
   const rows = dedupeByClaim(rawRows)
+  const usernameOf = await resolveUserDisplayNames(
+    service,
+    [...memberList.map(m => m.user_id), ...rows.map(r => r.user_id)],
+    memberList
+  )
   const claimIds = rows.map(r => r.claim_id)
   const claimSourceMap = await fetchClaimSourceMap(service, claimIds)
   const showUsername = scope === 'total'

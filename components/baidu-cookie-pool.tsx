@@ -96,7 +96,7 @@ export function BaiduCookiePoolManager() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div>
@@ -135,14 +135,14 @@ export function BaiduCookiePoolManager() {
 
               <div className="border border-dashed border-gray-200 rounded-lg p-4 space-y-3">
                 <p className="text-xs font-medium text-gray-600">添加新账号 Cookie</p>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={newCookieName}
                   onChange={e => setNewCookieName(e.target.value)}
                   placeholder={nextCookieName()}
                   className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
-                <textarea
+                <textarea aria-label="输入详细内容"
                   value={newCookieInput}
                   onChange={e => { setNewCookieInput(e.target.value); setSaveMsg('') }}
                   placeholder={"从 Chrome DevTools → Application → Cookies 全选复制粘贴到这里\n（每行一个 cookie，Tab 分隔格式自动识别）"}

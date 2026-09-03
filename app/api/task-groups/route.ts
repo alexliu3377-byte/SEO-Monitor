@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
+import { invalidateGroupTrackingCache, normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 
 async function getCaller() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,16 +24,18 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  const [{ data: groups, error }, { data: members }] = await Promise.all([
+  const [{ data: groups, error }, { data: members, error: membersError }] = await Promise.all([
     service.from('task_groups').select('*').order('created_at'),
     service.from('task_group_members').select('group_id, user_id, username, member_type'),
   ])
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error || membersError) return NextResponse.json({ error: 'Unable to load task groups' }, { status: 500 })
 
+  const rawMembers = (members || []) as RawMember[]
+  const displayNames = await resolveUserDisplayNames(service, rawMembers.map(m => m.user_id), rawMembers)
   const membersByGroup = new Map<string, { user_id: string; username: string; member_type: string }[]>()
-  for (const m of (members || []) as RawMember[]) {
+  for (const m of rawMembers) {
     if (!membersByGroup.has(m.group_id)) membersByGroup.set(m.group_id, [])
-    membersByGroup.get(m.group_id)!.push({ user_id: m.user_id, username: m.username || '', member_type: m.member_type || 'app' })
+    membersByGroup.get(m.group_id)!.push({ user_id: m.user_id, username: displayNames.get(m.user_id) || '', member_type: m.member_type || 'app' })
   }
 
   const allGroups = ((groups || []) as RawGroup[]).map(g => ({
@@ -67,21 +71,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '请至少选择一个成员' }, { status: 400 })
   }
 
-  const name = (nameInput || '').trim() || members.map(m => m.username || m.user_id.slice(0, 8)).join(' · ')
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  if (!['game', 'app', 'both'].includes(type)) {
+    return NextResponse.json({ error: 'Invalid group type' }, { status: 400 })
+  }
+  const normalized = await normalizeTaskGroupMembers(service, members)
+  if (normalized.error) return NextResponse.json({ error: normalized.error }, { status: 400 })
+  const safeName = ((nameInput || '').trim() || normalized.members.map(member => member.username).join(' · ')).slice(0, 100)
 
   const { data: group, error } = await service
     .from('task_groups')
-    .insert({ name, type, rank_domains: rank_domains || [], new_domains: new_domains || [], associated_domains: associated_domains || [], competitor_domains: competitor_domains || [], site_domains: site_domains || [] })
+    .insert({ name: safeName, type, rank_domains: normalizeDomains(rank_domains), new_domains: normalizeDomains(new_domains), associated_domains: normalizeDomains(associated_domains), competitor_domains: normalizeDomains(competitor_domains), site_domains: normalizeDomains(site_domains) })
     .select()
     .single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Unable to create task group' }, { status: 500 })
 
-  await service.from('task_group_members').insert(
-    members.map(m => ({ group_id: group.id, user_id: m.user_id, username: m.username, member_type: m.member_type || 'app' }))
+  const { error: memberError } = await service.from('task_group_members').insert(
+    normalized.members.map(m => ({ group_id: group.id, ...m }))
   )
+  if (memberError) {
+    await service.from('task_groups').delete().eq('id', group.id)
+    return NextResponse.json({ error: 'Unable to save group members' }, { status: 500 })
+  }
+  await invalidateGroupTrackingCache(service, group.id)
 
-  return NextResponse.json({ group: { ...group, members } })
+  return NextResponse.json({ group: { ...group, members: normalized.members } })
 }

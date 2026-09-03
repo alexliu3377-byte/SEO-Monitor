@@ -18,7 +18,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 // Crawls Baidu site: for given domain, upserts into site_indexed_pages for the matching site.
 // Does NOT mark disappeared pages (manual crawl is supplemental, not authoritative).
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

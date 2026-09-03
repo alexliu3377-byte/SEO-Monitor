@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
 
@@ -111,6 +112,54 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { role } = useUser()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+
+  useEffect(() => setMobileOpen(false), [pathname])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1023px)')
+    const sync = () => setIsMobile(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return
+    const menuButton = menuButtonRef.current
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusables = () => Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) ?? [])
+    requestAnimationFrame(() => focusables()[0]?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusables()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      menuButton?.focus()
+    }
+  }, [isMobile, mobileOpen])
 
   async function handleLogout() {
     const supabase = getBrowserClient()
@@ -126,8 +175,33 @@ export default function Sidebar() {
   })
 
   return (
+    <>
+      <button
+        ref={menuButtonRef}
+        type="button"
+        aria-label="打开导航菜单"
+        aria-expanded={mobileOpen}
+        aria-controls="primary-sidebar"
+        onClick={() => setMobileOpen(true)}
+        className="fixed left-3 top-3 z-40 inline-flex h-11 w-11 items-center justify-center rounded-lg bg-slate-900 text-white shadow-lg lg:hidden"
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
+      </button>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="关闭导航菜单"
+          className="fixed inset-0 z-40 bg-black/45 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
     <aside
-      className="fixed inset-y-0 left-0 w-[220px] flex flex-col z-50"
+      ref={sidebarRef}
+      id="primary-sidebar"
+      aria-label="主导航"
+      aria-hidden={isMobile && !mobileOpen ? true : undefined}
+      inert={isMobile && !mobileOpen ? true : undefined}
+      className={`fixed inset-y-0 left-0 w-[220px] flex flex-col z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
       style={{ background: '#0f172a', borderRight: '1px solid rgba(255,255,255,0.05)' }}
     >
       {/* ── Logo ── */}
@@ -143,8 +217,11 @@ export default function Sidebar() {
           </div>
           <div>
             <p className="text-white font-semibold text-sm leading-tight">SEO Monitor</p>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>监控后台</p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>监控后台</p>
           </div>
+          <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
         </div>
       </div>
 
@@ -158,12 +235,13 @@ export default function Sidebar() {
               <div key={item.href}>
                 <Link
                   href={item.href}
+                  aria-current={isParentActive ? 'page' : undefined}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isParentActive
                       ? 'bg-green-600 text-white'
                       : hasActiveChild
                       ? 'text-white/80 hover:bg-white/5'
-                      : 'text-white/45 hover:bg-white/8 hover:text-white/90'
+                      : 'text-white/65 hover:bg-white/8 hover:text-white/95'
                   }`}
                 >
                   {item.icon}
@@ -176,10 +254,11 @@ export default function Sidebar() {
                       <Link
                         key={child.href}
                         href={child.href}
+                        aria-current={isChildActive ? 'page' : undefined}
                         className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                           isChildActive
                             ? 'bg-green-600 text-white'
-                            : 'text-white/40 hover:bg-white/8 hover:text-white/80'
+                            : 'text-white/60 hover:bg-white/8 hover:text-white/90'
                         }`}
                       >
                         {child.icon}
@@ -199,10 +278,11 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? 'page' : undefined}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 isActive
                   ? 'bg-green-600 text-white'
-                  : 'text-white/45 hover:bg-white/8 hover:text-white/90'
+                  : 'text-white/65 hover:bg-white/8 hover:text-white/95'
               }`}
             >
               {item.icon}
@@ -217,14 +297,14 @@ export default function Sidebar() {
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
-          style={{ color: 'rgba(255,255,255,0.35)' }}
+          style={{ color: 'rgba(255,255,255,0.65)' }}
           onMouseEnter={e => {
             (e.currentTarget as HTMLElement).style.background = 'rgba(239,68,68,0.1)'
             ;(e.currentTarget as HTMLElement).style.color = '#fca5a5'
           }}
           onMouseLeave={e => {
             (e.currentTarget as HTMLElement).style.background = 'transparent'
-            ;(e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'
+            ;(e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'
           }}
         >
           <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -234,5 +314,6 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   )
 }

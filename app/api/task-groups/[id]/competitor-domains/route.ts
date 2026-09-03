@@ -3,7 +3,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
 
 async function getCallerRole(): Promise<UserRole | null> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,6 +31,6 @@ export async function PATCH(
     .update({ competitor_domains: competitor_domains || [] })
     .eq('id', id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ success: true })
 }

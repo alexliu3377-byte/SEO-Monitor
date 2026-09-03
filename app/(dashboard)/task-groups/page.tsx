@@ -286,16 +286,16 @@ function MemberModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div role="dialog" aria-modal="true" aria-label="编辑分组" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="font-semibold text-gray-900">{isCreate ? '新增分组' : '编辑分组'}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button type="button" aria-label="关闭分组窗口" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
         </div>
         <div className="overflow-y-auto flex-1 p-5 space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">分组名称</label>
-            <input type="text" value={name} onChange={e => onNameChange(e.target.value)}
+            <input aria-label="输入内容" type="text" value={name} onChange={e => onNameChange(e.target.value)}
               placeholder="留空则自动使用成员名称"
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
           </div>
@@ -316,7 +316,7 @@ function MemberModal({
               </div>
             )}
             <div className="relative">
-              <input type="text" value={siteSearch} onChange={e => setSiteSearch(e.target.value)}
+              <input aria-label="输入内容" type="text" value={siteSearch} onChange={e => setSiteSearch(e.target.value)}
                 placeholder="搜索并添加站点…"
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-400" />
               {siteSearch && (
@@ -347,7 +347,7 @@ function MemberModal({
                 const mType = mTypes[u.id] || 'app'
                 return (
                   <div key={u.id} className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${isSelected ? 'bg-gray-50' : 'hover:bg-gray-50'}`}>
-                    <input type="checkbox" checked={isSelected}
+                    <input aria-label="选择此项" type="checkbox" checked={isSelected}
                       onChange={e => {
                         const next = new Set(selUsers); const nextTypes = { ...mTypes }
                         if (e.target.checked) { next.add(u.id); nextTypes[u.id] = nextTypes[u.id] || 'app' }
@@ -931,14 +931,9 @@ export default function TaskGroupsPage() {
     const key = `${activeGroup.id}|${effectiveViewingId}`
     if (dismissedRecKey === key) return
     try {
-      const supabase = getBrowserClient()
-      const since = new Date(Date.now() - RECOMMEND_COOLDOWN_UNIT_DAYS * 86400000).toISOString()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabase.from('member_rec_dismissals') as any)
-        .select('keyword, dismissed_at')
-        .eq('group_id', activeGroup.id)
-        .eq('user_id', effectiveViewingId)
-        .gte('dismissed_at', since)
+      const response = await fetch(`/api/task-groups/${activeGroup.id}/dismissals?userId=${encodeURIComponent(effectiveViewingId)}`)
+      if (!response.ok) throw new Error('Failed to load dismissals')
+      const { rows: data } = await response.json()
       const map = new Map<string, string>()
       for (const r of (data || []) as { keyword: string; dismissed_at: string }[]) map.set(r.keyword, r.dismissed_at)
       setDismissedRecMap(map)
@@ -992,13 +987,9 @@ export default function TaskGroupsPage() {
     const key = activeGroup.id
     if (allMembersDismissedKey === key) return
     try {
-      const supabase = getBrowserClient()
-      const since = new Date(Date.now() - RECOMMEND_COOLDOWN_UNIT_DAYS * 86400000).toISOString()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabase.from('member_rec_dismissals') as any)
-        .select('user_id, keyword, dismissed_at')
-        .eq('group_id', activeGroup.id)
-        .gte('dismissed_at', since)
+      const response = await fetch(`/api/task-groups/${activeGroup.id}/dismissals?all=1`)
+      if (!response.ok) throw new Error('Failed to load dismissals')
+      const { rows: data } = await response.json()
       const byMember = new Map<string, Map<string, string>>()
       for (const r of (data || []) as { user_id: string; keyword: string; dismissed_at: string }[]) {
         if (!byMember.has(r.user_id)) byMember.set(r.user_id, new Map())
@@ -1234,11 +1225,13 @@ export default function TaskGroupsPage() {
       })
     }
     if (!activeGroupId || !uid) return
-    const supabase = getBrowserClient()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(supabase.from('member_rec_dismissals') as any)
-      .upsert({ group_id: activeGroupId, user_id: uid, keyword, dismissed_at: at }, { onConflict: 'group_id,user_id,keyword' })
-      .then(() => {})
+    fetch(`/api/task-groups/${activeGroupId}/dismissals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, keyword, permanent }),
+    }).then(async response => {
+      if (!response.ok) throw new Error('Failed to dismiss recommendation')
+    }).catch(() => setClaimErrorMsg('移除推荐失败，请重试'))
   }
 
   async function dismissClaimed(claimId: string) {
@@ -1321,6 +1314,7 @@ export default function TaskGroupsPage() {
           keyword: addKw.trim(),
           source: '手动添加',
           search_volume: 0,
+          userId: effectiveViewingId,
           operation_type: addOpType,
           final_keyword: addFinalKw.trim() || undefined,
           page_url: normalizeUrl(addUrl) || undefined,
@@ -1357,7 +1351,7 @@ export default function TaskGroupsPage() {
       const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: selectedDate }),
+        body: JSON.stringify({ date: selectedDate, userId: effectiveViewingId }),
       })
       if (res.ok) setClaimedKeywords(prev => prev.map(k => k.status === 'pending' ? { ...k, status: 'submitted' } : k))
     } finally { setSubmitting(false) }
@@ -1728,7 +1722,7 @@ export default function TaskGroupsPage() {
           {distributedWords.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">暂无分发词{canManage ? '，点右上角添加' : ''}</div>
           ) : (
-            <table className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full table-fixed">
               <colgroup>{canManage && <col className="w-6" />}<col /><col className="w-24" /><col className="w-32" /></colgroup>
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 {canManage && <th className="w-6" />}
@@ -1833,7 +1827,7 @@ export default function TaskGroupsPage() {
         }
         return (
           <>
-            <table className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full table-fixed">
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
@@ -1945,7 +1939,7 @@ export default function TaskGroupsPage() {
         }
         return (
           <>
-            <table className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full table-fixed">
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
@@ -2037,7 +2031,7 @@ export default function TaskGroupsPage() {
       return (
         <div>
           <div className="flex gap-2 mb-4">
-            <input ref={searchInputRef} type="text" value={searchInput}
+            <input aria-label="输入内容" ref={searchInputRef} type="text" value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && triggerSearch()}
               placeholder="输入关键词..."
@@ -2053,7 +2047,7 @@ export default function TaskGroupsPage() {
             <div className="text-center py-10 text-gray-400 text-sm">无结果</div>
           ) : (
             <>
-              <table className="w-full table-fixed">
+              <table aria-label="数据表格" className="w-full table-fixed">
                 <colgroup>
                   <col />
                   <col className="w-20" />
@@ -2127,7 +2121,7 @@ export default function TaskGroupsPage() {
       const slice = sorted_vr.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
@@ -2176,7 +2170,7 @@ export default function TaskGroupsPage() {
       const slice = sorted_cross.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
@@ -2220,7 +2214,7 @@ export default function TaskGroupsPage() {
       const slice = sorted_rank.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
@@ -2259,7 +2253,7 @@ export default function TaskGroupsPage() {
       const slice = sorted_streak.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
@@ -2298,7 +2292,7 @@ export default function TaskGroupsPage() {
       const slice = sorted_new.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
@@ -2338,13 +2332,13 @@ export default function TaskGroupsPage() {
       const slice = filtered_wl.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-3 py-2 text-left font-medium">
                 <div className="flex items-center gap-1.5">
                   <span>关键词</span>
-                  <input
+                  <input aria-label="输入内容"
                     type="text"
                     value={wordLibSearch}
                     onChange={e => { setWordLibSearch(e.target.value); setTabPage(prev => ({ ...prev, wordLib: 0 })) }}
@@ -2394,7 +2388,7 @@ export default function TaskGroupsPage() {
           {/* Date picker */}
           <div className="flex items-center gap-3 mb-4">
             <span className="text-xs text-gray-400 flex-shrink-0">日期</span>
-            <input type="date" value={selectedDate}
+            <input aria-label="选择日期" type="date" value={selectedDate}
               min={availableDates[availableDates.length - 1] || ''}
               max={availableDates[0] || today}
               onChange={e => { setRankdownDate(e.target.value); setTabPage(prev => ({ ...prev, rankdown: 0 })) }}
@@ -2409,7 +2403,7 @@ export default function TaskGroupsPage() {
             <div className="text-center py-10 text-gray-400 text-sm">该日期暂无下跌词</div>
           ) : (
             <>
-              <table className="w-full table-fixed">
+              <table aria-label="数据表格" className="w-full table-fixed">
                 <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="px-3 py-2 text-left font-medium">关键词</th>
                   <th className="px-2 py-2 text-left font-medium">页面URL</th>
@@ -2493,7 +2487,7 @@ export default function TaskGroupsPage() {
     if (detailSource === '跌排更新' || detailSource === '跌词更新') {
       if (detailUrlSiblings.length === 0) return <p className="text-sm text-gray-400 text-center py-10">这个URL下没有其它命中的词</p>
       return (
-        <table className="w-full">
+        <table aria-label="数据表格" className="w-full">
           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
             <th className="py-1.5 text-left font-medium">关键词</th>
             <th className="py-1.5 text-center font-medium w-16">排名</th>
@@ -2701,7 +2695,7 @@ export default function TaskGroupsPage() {
                 )}
                 <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-100">
                   <span className="text-sm font-medium text-gray-700">今日任务 <span className="text-gray-400 font-normal">· {submittedCount}</span></span>
-                  <input type="date" value={selectedDate} max={today}
+                  <input aria-label="选择日期" type="date" value={selectedDate} max={today}
                     onChange={e => setSelectedDate(e.target.value || today)}
                     className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-500 cursor-pointer" />
                 </div>
@@ -2756,14 +2750,14 @@ export default function TaskGroupsPage() {
                                   ))}
                                   {isInvalid && !k.operation_type && <span className="text-[10px] text-red-400">必选</span>}
                                 </div>
-                                <input
+                                <input aria-label="输入内容"
                                   type="text"
                                   defaultValue={k.final_keyword ?? ''}
                                   placeholder="最终做的词"
                                   className={`w-full text-xs px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-green-400 bg-white placeholder-gray-300 ${isInvalid && !k.final_keyword?.trim() ? 'border-red-300 placeholder-red-300' : 'border-gray-200'}`}
                                   onBlur={e => { if (e.target.value !== (k.final_keyword ?? '')) { saveClaim(k.id, 'final_keyword', e.target.value); if (e.target.value.trim()) setInvalidClaimIds(prev => { const n = new Set(prev); n.delete(k.id); return n }) } }}
                                 />
-                                <input
+                                <input aria-label="输入内容"
                                   type="text"
                                   defaultValue={k.page_url ?? ''}
                                   placeholder="https://..."
@@ -2795,7 +2789,7 @@ export default function TaskGroupsPage() {
                   <div className="border-t border-gray-100">
                     {showAddForm ? (
                       <div className="p-3 space-y-1.5 bg-gray-50/60">
-                        <input
+                        <input aria-label="输入内容"
                           type="text"
                           value={addKw}
                           onChange={e => setAddKw(e.target.value)}
@@ -2811,7 +2805,7 @@ export default function TaskGroupsPage() {
                               {op}
                             </button>
                           ))}
-                          <input
+                          <input aria-label="输入内容"
                             type="text"
                             value={addFinalKw}
                             onChange={e => setAddFinalKw(e.target.value)}
@@ -2819,7 +2813,7 @@ export default function TaskGroupsPage() {
                             className="flex-1 min-w-0 text-xs px-2 py-0.5 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-green-400 bg-white"
                           />
                         </div>
-                        <input
+                        <input aria-label="输入内容"
                           type="text"
                           value={addUrl}
                           onChange={e => setAddUrl(e.target.value)}
@@ -2880,7 +2874,7 @@ export default function TaskGroupsPage() {
       )}
 
       {showDistributeModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDistributeModal(false)}>
+        <div role="dialog" aria-modal="true" aria-label="添加分发词" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDistributeModal(false)}>
           <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div>
@@ -2894,7 +2888,7 @@ export default function TaskGroupsPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-              <textarea
+              <textarea aria-label="输入详细内容"
                 value={distributeText}
                 onChange={e => { setDistributeText(e.target.value); setDistributeMsg('') }}
                 placeholder={'Lo研社官方正版\nTokimeki ai\n超自然卡头插件免费版\nreWASD安卓汉化版\n小呆阅读安卓版\n小书阁纯净版'}
@@ -2903,12 +2897,12 @@ export default function TaskGroupsPage() {
               />
               <div>
                 <label className="block text-xs text-gray-600 mb-1">这批词属于什么（可选）</label>
-                <input type="text" value={distributeBatchName} onChange={e => setDistributeBatchName(e.target.value)}
+                <input aria-label="输入内容" type="text" value={distributeBatchName} onChange={e => setDistributeBatchName(e.target.value)}
                   placeholder="比如：AI聊天类应用"
                   className="w-full px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
               </div>
               <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
-                <input type="checkbox" checked={distributeRepeatable} onChange={e => setDistributeRepeatable(e.target.checked)}
+                <input aria-label="选择此项" type="checkbox" checked={distributeRepeatable} onChange={e => setDistributeRepeatable(e.target.checked)}
                   className="mt-0.5" />
                 <span>
                   可重复认领
@@ -2920,14 +2914,14 @@ export default function TaskGroupsPage() {
               {distributeRepeatable && (
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">冷却天数</label>
-                  <input type="number" min={1} value={distributeCooldownDays}
+                  <input aria-label="输入数值" type="number" min={1} value={distributeCooldownDays}
                     onChange={e => setDistributeCooldownDays(e.target.value)}
                     className="w-24 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
                 </div>
               )}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">每日名额上限（可选）</label>
-                <input type="number" min={1} value={distributeDailyLimit}
+                <input aria-label="输入数值" type="number" min={1} value={distributeDailyLimit}
                   onChange={e => setDistributeDailyLimit(e.target.value)}
                   placeholder="不填＝不限"
                   className="w-24 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
@@ -2977,7 +2971,7 @@ export default function TaskGroupsPage() {
       )}
 
       {deleteId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
             <h3 className="font-semibold text-gray-900 mb-2">确认删除</h3>
             <p className="text-sm text-gray-500 mb-5">删除后无法恢复，分组内的成员和设置都会清除。</p>
@@ -2991,7 +2985,7 @@ export default function TaskGroupsPage() {
 
       {/* 今日推荐"×"确认弹窗——永久移除 / 7天后再显示 */}
       {dismissConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDismissConfirm(null)}>
+        <div role="dialog" aria-modal="true" aria-label="确认移除推荐" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDismissConfirm(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-gray-900 mb-2">移除"{dismissConfirm.keyword}"</h3>
             <p className="text-sm text-gray-500 mb-5">
@@ -3012,7 +3006,7 @@ export default function TaskGroupsPage() {
 
       {/* Detail modal */}
       {detailKw && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailKw(null)}>
+        <div role="dialog" aria-modal="true" aria-label="关键词详情" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailKw(null)}>
           <div className={`bg-white rounded-xl shadow-2xl w-full max-h-[80vh] flex flex-col ${detailSource === '交叉词' ? 'max-w-3xl' : 'max-w-lg'}`}
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
@@ -3020,7 +3014,7 @@ export default function TaskGroupsPage() {
                 <h3 className="font-semibold text-gray-900">{detailKw}</h3>
                 <p className="text-xs text-gray-400 mt-0.5">近30天出现记录</p>
               </div>
-              <button onClick={() => setDetailKw(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              <button type="button" aria-label="关闭关键词详情" onClick={() => setDetailKw(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
             <div className="overflow-y-auto flex-1 p-4">
               {DetailBody()}

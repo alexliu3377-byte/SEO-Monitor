@@ -4,8 +4,10 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { type ReactNode } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
+import { isKeywordExportOwner } from '@/lib/kw-export-owner'
 import { computeIndexStatus } from '@/lib/index-status'
 import { computeKwStatus } from '@/lib/kw-status'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   LineChart,
   Line,
@@ -72,6 +74,38 @@ function getMY(offsetDays = 0): string {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000)
     .toISOString()
     .slice(0, 10)
+}
+
+type CsvSheet = { name: string; rows: Record<string, unknown>[] }
+
+function createCsvWorkbookApi() {
+  const escapeCell = (value: unknown) => {
+    const text = value == null ? '' : String(value)
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+  return {
+    utils: {
+      book_new: () => ({ sheets: [] as CsvSheet[] }),
+      json_to_sheet: (rows: Record<string, unknown>[]) => rows,
+      book_append_sheet: (book: { sheets: CsvSheet[] }, rows: Record<string, unknown>[], name: string) => {
+        book.sheets.push({ name, rows })
+      },
+    },
+    write: (book: { sheets: CsvSheet[] }, _options?: unknown) => {
+      const headers = [...new Set(book.sheets.flatMap(sheet => sheet.rows.flatMap(row => Object.keys(row))))]
+      const lines = [
+        ['日期', ...headers].map(escapeCell).join(','),
+        ...book.sheets.flatMap(sheet => sheet.rows.map(row =>
+          [sheet.name, ...headers.map(header => row[header])].map(escapeCell).join(',')
+        )),
+      ]
+      const encoded = new TextEncoder().encode(lines.join('\r\n'))
+      const withBom = new Uint8Array(encoded.length + 3)
+      withBom.set([0xef, 0xbb, 0xbf])
+      withBom.set(encoded, 3)
+      return withBom
+    },
+  }
 }
 
 
@@ -337,9 +371,10 @@ export default function DashboardPage() {
       db.from('raw_keywords').select('keyword,content_date').eq('site_id', siteId)
         .eq('content_type', 'game').not('keyword', 'like', '%电脑版%')
         .order('content_date', { ascending: false }).limit(200),
-      db.from('rank_changes').select('keyword,volume,type,stat_date')
+      (async () => ({ data: await fetchAllRows<{ id: string; keyword: string; volume: number; type: string; stat_date: string }>((from, to) => db
+        .from('rank_changes').select('id,keyword,volume,type,stat_date')
         .eq('site_id', siteId).gte('stat_date', d30ago)
-        .order('stat_date', { ascending: false }).limit(5000),
+        .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)) }))(),
     ])
     type KwRaw = { keyword: string; content_date: string }
     const latestAppDate = (appRaw || []).length > 0 ? (appRaw![0] as KwRaw).content_date : ''
@@ -547,7 +582,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-1.5">
-              <input
+              <input aria-label="选择日期"
                 type="date"
                 value={chartFrom}
                 max={chartTo}
@@ -555,7 +590,7 @@ export default function DashboardPage() {
                 className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none"
               />
               <span className="text-xs text-gray-400">至</span>
-              <input
+              <input aria-label="选择日期"
                 type="date"
                 value={chartTo}
                 min={chartFrom}
@@ -708,12 +743,12 @@ export default function DashboardPage() {
       const kwList = weightModalKwTab === 'app' ? (weightModalExtra?.appKw ?? []) : (weightModalExtra?.gameKw ?? [])
       const rankList = weightModalRankTab === 'up' ? (weightModalExtra?.rankupAll ?? []) : (weightModalExtra?.rankdownAll ?? [])
       return (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setWeightModalSite(null)}>
+        <div role="dialog" aria-modal="true" aria-label="站点权重详情" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setWeightModalSite(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
               <h2 className="text-base font-bold text-gray-900">{weightModalSite.domain}</h2>
-              <button onClick={() => setWeightModalSite(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              <button type="button" aria-label="关闭权重详情" onClick={() => setWeightModalSite(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
             {/* 5 compact metric tiles */}
             <div className="grid grid-cols-5 gap-2 px-6 py-4 flex-shrink-0">
@@ -929,14 +964,14 @@ export default function DashboardPage() {
       }
       const avg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0
       return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setKwModalSite(null)}>
+        <div role="dialog" aria-modal="true" aria-label="关键词详情" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setKwModalSite(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <div>
                 <h3 className="text-sm font-semibold text-gray-800">{kwModalSite.domain} · 新增趋势</h3>
                 <p className="text-xs text-gray-400 mt-0.5">近30天每日新增关键词数量</p>
               </div>
-              <button onClick={() => setKwModalSite(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              <button type="button" aria-label="关闭关键词详情" onClick={() => setKwModalSite(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-lg leading-none">×</button>
             </div>
             <div className="mt-4">
               {trend.length < 2 ? (
@@ -977,14 +1012,14 @@ export default function DashboardPage() {
       const snap7 = [...allSnaps].reverse().find(r => r.snapshot_date <= getMY(-7))
       const weeklyChange = snap7 ? latest - snap7.index_count : 0
       return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setIndexModalSite(null)}>
+        <div role="dialog" aria-modal="true" aria-label="收录详情" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setIndexModalSite(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h3 className="font-semibold text-gray-900">{indexModalSite.domain} · 收录趋势</h3>
                 <p className="text-xs text-gray-400 mt-0.5">近30天百度收录变化</p>
               </div>
-              <button onClick={() => setIndexModalSite(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              <button type="button" aria-label="关闭收录详情" onClick={() => setIndexModalSite(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
             <div className="p-6">
               <div className="flex gap-6 mb-4 items-end">
@@ -1026,8 +1061,9 @@ export default function DashboardPage() {
 interface KwVolRow { keyword: string; volume: number; latest_trend?: string | null; volume_change?: number | null }
 
 function KeywordSearchCard() {
-  const { role } = useUser()
+  const { role, id } = useUser()
   const isAdmin = role !== 'super'
+  const canExport = isKeywordExportOwner(id)
   const [query, setQuery] = useState('')
   const [rows, setRows] = useState<KwVolRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -1073,7 +1109,7 @@ function KeywordSearchCard() {
       const verifyRes = await fetch('/api/keyword-volume/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, purpose: 'keyword-volume' }),
       })
       const verifyData = await verifyRes.json()
       if (!verifyRes.ok) {
@@ -1109,7 +1145,7 @@ function KeywordSearchCard() {
             <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />
             <span className="text-sm font-medium text-gray-600">搜索量查询</span>
           </div>
-          {role === 'super' && (
+          {canExport && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => openExportDialog('today')}
@@ -1129,7 +1165,7 @@ function KeywordSearchCard() {
         </div>
 
         <div className="flex gap-1.5 mb-3 flex-shrink-0">
-          <input
+          <input aria-label="输入内容"
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -1198,7 +1234,7 @@ function KeywordSearchCard() {
 
       {/* Export auth dialog */}
       {showDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
             <h3 className="text-base font-semibold text-gray-900 mb-1">验证身份</h3>
             <p className="text-xs text-gray-400 mb-5">{exportType === 'today' ? '导出今日新词需要验证账号权限' : '导出全部数据需要验证账号权限'}</p>
@@ -1206,7 +1242,7 @@ function KeywordSearchCard() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">用户名</label>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -1217,7 +1253,7 @@ function KeywordSearchCard() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">密码</label>
-                <input
+                <input aria-label="输入密码"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -1287,7 +1323,7 @@ function RankupExportButton() {
     const verRes = await fetch('/api/keyword-volume/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, purpose: 'rank-history' }),
     })
     if (!verRes.ok) {
       const d = await verRes.json()
@@ -1338,7 +1374,7 @@ function RankupExportButton() {
     }
 
     setProgress('生成 Excel 文件...')
-    const XLSX = await import('xlsx')
+    const XLSX = createCsvWorkbookApi()
     const wb = XLSX.utils.book_new()
     let totalKw = 0
     for (const [date, items] of Object.entries(allData)) {
@@ -1348,11 +1384,12 @@ function RankupExportButton() {
       XLSX.utils.book_append_sheet(wb, ws, date)
     }
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-    const blob = new Blob([wbout], { type: 'application/octet-stream' })
+    const blob = new Blob([wbout], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `涨词-${domain}-${startDate}至${endDate}.xlsx`
+    a.download = a.download.replace(/\.xlsx$/i, '.csv')
     a.click()
     URL.revokeObjectURL(url)
     fetch('/api/log-activity', {
@@ -1380,7 +1417,7 @@ function RankupExportButton() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
             <h3 className="text-base font-semibold text-gray-900 mb-1">涨词导出</h3>
             <p className="text-xs text-gray-400 mb-4">从爱站抓取指定站点的涨入关键词并导出 Excel</p>
@@ -1388,7 +1425,7 @@ function RankupExportButton() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">网站域名</label>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={domain}
                   onChange={e => setDomain(e.target.value)}
@@ -1400,7 +1437,7 @@ function RankupExportButton() {
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="block text-xs font-medium text-gray-600 mb-1">开始日期</label>
-                  <input
+                  <input aria-label="选择日期"
                     type="date"
                     value={startDate}
                     onChange={e => setStartDate(e.target.value)}
@@ -1410,7 +1447,7 @@ function RankupExportButton() {
                 </div>
                 <div className="flex-1">
                   <label className="block text-xs font-medium text-gray-600 mb-1">结束日期</label>
-                  <input
+                  <input aria-label="选择日期"
                     type="date"
                     value={endDate}
                     onChange={e => setEndDate(e.target.value)}
@@ -1424,7 +1461,7 @@ function RankupExportButton() {
               )}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">用户名</label>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -1435,7 +1472,7 @@ function RankupExportButton() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">密码</label>
-                <input
+                <input aria-label="输入密码"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -1507,7 +1544,7 @@ function RankdownExportButton() {
     const verRes = await fetch('/api/keyword-volume/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, purpose: 'rank-history' }),
     })
     if (!verRes.ok) {
       const d = await verRes.json()
@@ -1559,7 +1596,7 @@ function RankdownExportButton() {
     }
 
     setProgress('生成 Excel 文件...')
-    const XLSX = await import('xlsx')
+    const XLSX = createCsvWorkbookApi()
     const wb = XLSX.utils.book_new()
     let totalKw = 0
     for (const [date, items] of Object.entries(allData)) {
@@ -1569,11 +1606,12 @@ function RankdownExportButton() {
       XLSX.utils.book_append_sheet(wb, ws, date)
     }
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-    const blob = new Blob([wbout], { type: 'application/octet-stream' })
+    const blob = new Blob([wbout], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `跌词-${domain}-${startDate}至${endDate}.xlsx`
+    a.download = a.download.replace(/\.xlsx$/i, '.csv')
     a.click()
     URL.revokeObjectURL(url)
     fetch('/api/log-activity', {
@@ -1601,7 +1639,7 @@ function RankdownExportButton() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
             <h3 className="text-base font-semibold text-gray-900 mb-1">跌词导出</h3>
             <p className="text-xs text-gray-400 mb-4">从爱站抓取指定站点的跌出关键词并导出 Excel</p>
@@ -1609,7 +1647,7 @@ function RankdownExportButton() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">网站域名</label>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={domain}
                   onChange={e => setDomain(e.target.value)}
@@ -1621,7 +1659,7 @@ function RankdownExportButton() {
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="block text-xs font-medium text-gray-600 mb-1">开始日期</label>
-                  <input
+                  <input aria-label="选择日期"
                     type="date"
                     value={startDate}
                     onChange={e => setStartDate(e.target.value)}
@@ -1631,7 +1669,7 @@ function RankdownExportButton() {
                 </div>
                 <div className="flex-1">
                   <label className="block text-xs font-medium text-gray-600 mb-1">结束日期</label>
-                  <input
+                  <input aria-label="选择日期"
                     type="date"
                     value={endDate}
                     onChange={e => setEndDate(e.target.value)}
@@ -1645,7 +1683,7 @@ function RankdownExportButton() {
               )}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">用户名</label>
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -1656,7 +1694,7 @@ function RankdownExportButton() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">密码</label>
-                <input
+                <input aria-label="输入密码"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -1827,11 +1865,12 @@ function CompareChart({
   const [focusedIds, setFocusedIds] = useState<Set<string>>(new Set())
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const lineClickedRef = useRef(false)
+  const siteIdsKey = siteIds.join(',')
 
   useEffect(() => {
     setFocusedIds(new Set())
     setHoveredId(null)
-  }, [siteIds.join(',')])
+  }, [siteIdsKey])
 
   function toggleFocus(id: string) {
     setFocusedIds(prev => {

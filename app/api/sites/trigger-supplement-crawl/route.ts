@@ -9,7 +9,7 @@ const WORKFLOW = 'supplement-crawl.yml'
 // POST /api/sites/trigger-supplement-crawl
 // Triggers the supplement-crawl GitHub Actions workflow via workflow_dispatch.
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

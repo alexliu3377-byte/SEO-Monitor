@@ -48,7 +48,7 @@ export default function SiteAZPicker({ sites, selectedId, onSelect }: {
 
   return (
     <div className="space-y-2">
-      <input
+      <input aria-label="输入内容"
         type="text"
         value={query}
         onChange={e => setQuery(e.target.value)}

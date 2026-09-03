@@ -4,7 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 export const maxDuration = 55
 
 export async function POST(req: Request) {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     const data = await res.json()
     return NextResponse.json(data)
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : '触发失败' }, { status: 500 })
+    console.error('Crawl dispatch failed', err)
+    return NextResponse.json({ error: '触发失败' }, { status: 500 })
   }
 }

@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
 import { fetchAizhanData } from '@/lib/crawler'
-import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { createServiceClient } from '@/lib/supabase-server'
 import { activityStart, activityEnd } from '@/lib/activity-log'
+import { getUserProfile } from '@/lib/get-user-profile'
 
 export async function GET(req: Request) {
-  const { data: { user } } = await createClient().auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const profile = await getUserProfile()
+  if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (profile.role === 'normal') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const domain = searchParams.get('domain')?.trim()
+  if (domain && !/^[a-z0-9.-]{1,253}$/i.test(domain)) return NextResponse.json({ error: 'Invalid domain' }, { status: 400 })
   if (!domain) return NextResponse.json({ error: '缺少域名' }, { status: 400 })
 
   const supabase = createServiceClient()

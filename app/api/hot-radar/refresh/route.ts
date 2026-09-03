@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   let authed = !!(cronSecret && authHeader === `Bearer ${cronSecret}`)
 
   if (!authed) {
-    const authClient = createClient()
+    const authClient = await createClient()
     const { data: { user } } = await authClient.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
 
   const computedAt = new Date().toISOString()
   const { error } = await supabase.from('hot_radar_cache').upsert({ id: 'latest', payload: finalPayload, computed_at: computedAt })
-  if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ success: false, error: 'Unable to refresh hot radar' }, { status: 500 })
 
   return NextResponse.json({
     success: true,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { getBrowserClient } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
 
 // ─── Canvas CAPTCHA ───────────────────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ declare global {
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
+  const router = useRouter()
   const [username, setUsername]             = useState('')
   const [password, setPassword]             = useState('')
   const [captchaInput, setCaptchaInput]     = useState('')
@@ -108,45 +109,24 @@ export default function LoginPage() {
     }
 
     const hasTurnstile = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
-    if (hasTurnstile) {
-      if (!turnstileToken) { setError('请完成人机验证'); return }
-      setLoading(true)
-      const tsRes = await fetch('/api/auth/verify-turnstile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: turnstileToken }),
-      })
-      if (!tsRes.ok) {
-        const d = await tsRes.json()
-        setError(d.error ?? '人机验证失败，请重试')
-        setLoading(false)
-        setTurnstileToken(null)
-        if (turnstileWidgetId.current && window.turnstile) window.turnstile.reset(turnstileWidgetId.current)
-        return
-      }
-    } else {
-      setLoading(true)
-    }
+    if (hasTurnstile && !turnstileToken) { setError('请完成人机验证'); return }
+    setLoading(true)
 
     const resolveRes = await fetch('/api/auth/resolve-username', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.trim(), password }),
+      body: JSON.stringify({ username: username.trim(), password, turnstileToken }),
     })
     if (!resolveRes.ok) {
       const d = await resolveRes.json()
       setError(d.error ?? '用户名或密码错误')
-      setLoading(false); refreshCaptcha(); return
-    }
-    const { access_token, refresh_token } = await resolveRes.json()
-    const supabase = getBrowserClient()
-    const { error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token })
-    if (sessionError) {
-      setError('登录失败，请重试')
       setLoading(false); refreshCaptcha()
-    } else {
-      window.location.href = '/'
+      setTurnstileToken(null)
+      if (turnstileWidgetId.current && window.turnstile) window.turnstile.reset(turnstileWidgetId.current)
+      return
     }
+    router.replace('/')
+    router.refresh()
   }
 
   // Glass input style
@@ -223,8 +203,9 @@ export default function LoginPage() {
 
               {/* Username */}
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">用户名</label>
+                <label htmlFor="login-username" className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">用户名</label>
                 <input
+                  id="login-username"
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -240,9 +221,10 @@ export default function LoginPage() {
 
               {/* Password */}
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">密码</label>
+                <label htmlFor="login-password" className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">密码</label>
                 <div className="relative">
                   <input
+                    id="login-password"
                     type={showPwd ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
@@ -257,7 +239,8 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPwd(v => !v)}
-                    tabIndex={-1}
+                    aria-label={showPwd ? '隐藏密码' : '显示密码'}
+                    aria-pressed={showPwd}
                     className="absolute inset-y-0 right-0 px-3.5 flex items-center text-white/40 hover:text-white/70 transition-colors"
                   >
                     {showPwd
@@ -270,9 +253,10 @@ export default function LoginPage() {
 
               {/* CAPTCHA */}
               <div>
-                <label className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">图形验证码</label>
+                <label htmlFor="login-captcha" className="block text-xs font-medium text-white/70 mb-1.5 tracking-wide">图形验证码</label>
                 <div className="flex gap-2.5">
                   <input
+                    id="login-captcha"
                     type="text"
                     value={captchaInput}
                     onChange={e => setCaptchaInput(e.target.value)}
@@ -285,27 +269,28 @@ export default function LoginPage() {
                     onFocus={onFocusGlass}
                     onBlur={onBlurGlass}
                   />
-                  <canvas
-                    ref={canvasRef}
-                    width={116}
-                    height={48}
-                    onClick={refreshCaptcha}
-                    title="点击刷新"
-                    className="rounded-xl cursor-pointer flex-shrink-0"
-                    style={{ borderRadius: '12px' }}
-                  />
+                  <button type="button" onClick={refreshCaptcha} aria-label="刷新图形验证码" className="rounded-xl flex-shrink-0">
+                    <canvas
+                      ref={canvasRef}
+                      width={116}
+                      height={48}
+                      aria-hidden="true"
+                      className="rounded-xl pointer-events-none"
+                      style={{ borderRadius: '12px' }}
+                    />
+                  </button>
                 </div>
                 <p className="text-xs text-white/35 mt-1.5">不区分大小写 · 点击图片刷新</p>
               </div>
 
               {/* Turnstile */}
               {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
-                <div ref={turnstileRef} className="pt-0.5" />
+                <div ref={turnstileRef} aria-label="Cloudflare 人机验证" className="pt-0.5" />
               )}
 
               {/* Error */}
               {error && (
-                <div className="flex items-start gap-2.5 rounded-xl px-4 py-3"
+                <div role="alert" aria-live="assertive" className="flex items-start gap-2.5 rounded-xl px-4 py-3"
                   style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)' }}>
                   <svg className="w-4 h-4 text-red-300 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -318,6 +303,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
+                aria-busy={loading}
                 className="w-full py-3 mt-1 font-semibold text-white text-sm rounded-xl transition-all duration-150 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',

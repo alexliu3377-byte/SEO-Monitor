@@ -34,7 +34,7 @@ interface CoverageRow {
 // 不落库（每次现查，保证新鲜度，避免另建缓存表）。2026-08-28 新增，2026-08-28
 // 当天补了"同一概念多个别名"分组支持（见 ../route.ts 顶部注释）。
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

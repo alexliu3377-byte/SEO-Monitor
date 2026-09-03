@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -29,7 +30,7 @@ interface RawRow { user_id: string; keyword: string; source: string; search_volu
 interface RawMember { user_id: string; username: string | null; member_type: string | null }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -54,7 +55,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const members: { userId: string; username: string; memberType: string }[] = (membersRaw || []).map((m: RawMember) => ({
     userId: m.user_id,
-    username: m.username || m.user_id.slice(0, 8),
+    username: m.username || '',
     memberType: m.member_type || 'app',
   }))
 
@@ -81,7 +82,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!canSeeAll) query = query.eq('user_id', user.id)
 
   const { data: rows, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+
+  const rawRows = (rows || []) as RawRow[]
+  const allUserIds = Array.from(new Set([
+    ...members.map(m => m.userId),
+    ...rawRows.map(r => r.user_id),
+  ]))
+  const usernameOf = await resolveUserDisplayNames(service, allUserIds, (membersRaw || []) as RawMember[])
+  for (const member of members) member.username = usernameOf.get(member.userId)!
+  for (const userId of allUserIds) {
+    if (!members.some(m => m.userId === userId)) {
+      members.push({ userId, username: usernameOf.get(userId)!, memberType: 'app' })
+    }
+  }
 
   // Build per-member aggregation
   const memberMap = new Map<string, {
@@ -100,7 +114,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     })
   }
 
-  for (const row of ((rows || []) as RawRow[])) {
+  for (const row of rawRows) {
     if (!memberMap.has(row.user_id)) continue
     const entry = memberMap.get(row.user_id)!
     const vol = Number(row.search_volume) || 0

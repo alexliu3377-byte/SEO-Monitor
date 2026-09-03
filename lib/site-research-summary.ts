@@ -91,10 +91,10 @@ export async function fetchSiteResearchSummary(service: any, siteId: string, dat
         .eq('site_id', siteId).eq('platform', 'mobile').gte('stat_date', dateStart).lte('stat_date', dateEnd)
         .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to),
       { countHint: rankRowsCountRes.count ?? 0 }),
-    fetchAllRows<{ content_date: string | null; content_type: string }>((from, to) =>
-      service.from('raw_keywords').select('content_date, content_type')
+    fetchAllRows<{ id: string; content_date: string | null; content_type: string }>((from, to) =>
+      service.from('raw_keywords').select('id, content_date, content_type')
         .eq('site_id', siteId).gte('content_date', dateStart).lte('content_date', dateEnd)
-        .order('content_date', { ascending: true }).order('keyword', { ascending: true }).range(from, to),
+        .order('content_date', { ascending: true }).order('id', { ascending: true }).range(from, to),
       { countHint: rawKwCountRes.count ?? 0 }),
   ])
 

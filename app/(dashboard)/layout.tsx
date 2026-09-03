@@ -10,9 +10,9 @@ export default async function DashboardLayout({
   const profile = await getUserProfile()
   return (
     <UserProvider profile={profile}>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
         <Sidebar />
-        <main className="flex-1 ml-[220px] bg-slate-50 h-screen overflow-y-auto">
+        <main id="main-content" className="flex-1 bg-slate-50 min-h-screen pt-14 lg:pt-0 lg:ml-[220px] lg:h-screen lg:overflow-y-auto">
           {children}
         </main>
       </div>

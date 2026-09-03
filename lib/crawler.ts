@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio'
 import * as iconv from 'iconv-lite'
+import { fetchPublicUrl } from '@/lib/safe-remote-url'
 
 export interface PageEntry {
   title: string
@@ -67,12 +68,20 @@ function getDirectHeaders(): Record<string, string> {
 }
 
 // Fetch HTML with automatic charset detection (handles GBK/GB2312 sites)
-async function fetchHtmlDecoded(url: string, headers: Record<string, string>): Promise<{ ok: boolean; html: string; status?: number; setCookies: string[] }> {
+async function fetchHtmlDecoded(
+  url: string,
+  headers: Record<string, string>,
+  safeRemote = false
+): Promise<{ ok: boolean; html: string; status?: number; setCookies: string[] }> {
   try {
-    const res = await fetch(url, { headers, next: { revalidate: 0 }, signal: AbortSignal.timeout(10000) })
+    const options = { headers, next: { revalidate: 0 }, signal: AbortSignal.timeout(10000) }
+    const res = safeRemote ? await fetchPublicUrl(url, options) : await fetch(url, options)
     const setCookies = res.headers.getSetCookie?.() ?? []
     if (!res.ok) return { ok: false, html: '', status: res.status, setCookies }
+    const contentLength = Number(res.headers.get('content-length') || 0)
+    if (contentLength > 5 * 1024 * 1024) return { ok: false, html: '', status: 413, setCookies }
     const buffer = Buffer.from(await res.arrayBuffer())
+    if (buffer.length > 5 * 1024 * 1024) return { ok: false, html: '', status: 413, setCookies }
     // ASCII-safe peek to detect charset without corrupting data
     const peek = buffer.subarray(0, 4096).toString('ascii')
     const ctCharset = (res.headers.get('content-type') || '').match(/charset=([^\s;]+)/i)?.[1]?.toLowerCase()
@@ -89,9 +98,10 @@ async function fetchHtmlDecoded(url: string, headers: Record<string, string>): P
 export async function fetchHtmlList(
   url: string,
   titleSelector: string,
-  dateSelector: string
+  dateSelector: string,
+  safeRemote = false
 ): Promise<PageEntry[]> {
-  const { ok, html, status } = await fetchHtmlDecoded(url, getSiteHeaders(url))
+  const { ok, html, status } = await fetchHtmlDecoded(url, getSiteHeaders(url), safeRemote)
   if (!ok) throw new Error(`Failed to fetch HTML list: ${status}`)
   const $ = cheerio.load(html)
 
@@ -216,7 +226,8 @@ export async function fetchHtmlListPages(
   sources: HtmlSource[],
   cutoffDateStr: string,
   maxPages = 5,
-  skipPageDelay = false
+  skipPageDelay = false,
+  safeRemote = false,
 ): Promise<PageEntry[]> {
   const all: PageEntry[] = []
 
@@ -228,7 +239,7 @@ export async function fetchHtmlListPages(
     let cookieJar = ''
     try {
       const origin = new URL(source.url).origin
-      const { setCookies } = await fetchHtmlDecoded(origin, getDirectHeaders())
+      const { setCookies } = await fetchHtmlDecoded(origin, getDirectHeaders(), safeRemote)
       if (setCookies.length) {
         cookieJar = setCookies.map((c) => c.split(';')[0]).join('; ')
         await randomDelay(1000, 2000)
@@ -238,7 +249,7 @@ export async function fetchHtmlListPages(
     while (currentUrl && page < maxPages) {
       page++
       try {
-        const { ok, html, setCookies } = await fetchHtmlDecoded(currentUrl, getSiteHeaders(currentUrl, cookieJar || undefined))
+        const { ok, html, setCookies } = await fetchHtmlDecoded(currentUrl, getSiteHeaders(currentUrl, cookieJar || undefined), safeRemote)
 
         // Accumulate cookies for subsequent page requests
         if (setCookies.length) {
@@ -303,6 +314,7 @@ export async function fetchJsonHtmlPages(
   urlSelector: string | undefined,
   cutoffDateStr: string,
   maxPages = 30,
+  safeRemote = false,
 ): Promise<PageEntry[]> {
   const all: PageEntry[] = []
   const origin = new URL(urlTemplate.replace('{page}', '1')).origin
@@ -317,11 +329,17 @@ export async function fetchJsonHtmlPages(
         'Referer': origin + '/',
         'X-Requested-With': 'XMLHttpRequest',
       }
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
+      const options = { headers, signal: AbortSignal.timeout(10000) }
+      const res = safeRemote ? await fetchPublicUrl(url, options) : await fetch(url, options)
       if (!res.ok) break
 
+      const contentLength = Number(res.headers.get('content-length') || 0)
+      if (contentLength > 2 * 1024 * 1024) break
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json: any = await res.json()
+      const responseText = await res.text()
+      if (responseText.length > 2 * 1024 * 1024) break
+      const json: any = JSON.parse(responseText)
       const html: string = json?.data?.html ?? json?.html ?? ''
       const more: number = json?.data?.more ?? json?.more ?? 0
 

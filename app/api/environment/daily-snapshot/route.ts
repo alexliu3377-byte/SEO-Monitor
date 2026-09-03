@@ -52,7 +52,7 @@ async function handler(req: Request) {
   let authed = !!(cronSecret && authHeader === `Bearer ${cronSecret}`)
 
   if (!authed) {
-    const authClient = createClient()
+    const authClient = await createClient()
     const { data: { user } } = await authClient.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -282,7 +282,7 @@ async function handler(req: Request) {
   if (segmentRows.length > 0) {
     const { error: segError } = await service.from('environment_segments_daily')
       .upsert(segmentRows, { onConflict: 'date,dimension,segment' })
-    if (segError) return NextResponse.json({ error: segError.message }, { status: 500 })
+    if (segError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 
   // 日期属性
@@ -305,7 +305,7 @@ async function handler(req: Request) {
     crawl_anomaly,
   }, { onConflict: 'date' })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({
     success: true,

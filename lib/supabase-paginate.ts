@@ -18,7 +18,7 @@
 // 算错了才发现）。只按业务需要排的列（比如 stat_date）如果有重复值，同样
 // 不够，还要再加一层按 id 排序兜底去重复。
 export async function fetchAllRows<T>(
-  buildQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
   opts: { pageSize?: number; countHint?: number } = {}
 ): Promise<T[]> {
   const pageSize = opts.pageSize ?? 3000

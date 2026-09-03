@@ -174,9 +174,9 @@ function CompetitorsTab() {
       {selectedId && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex flex-wrap items-center gap-2">
-            <input type="text" value={kwFilter} onChange={e => setKwFilter(e.target.value)} placeholder="搜索关键词…"
+            <input aria-label="输入内容" type="text" value={kwFilter} onChange={e => setKwFilter(e.target.value)} placeholder="搜索关键词…"
               className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as '' | 'app' | 'game')}
+            <select aria-label="选择选项" value={typeFilter} onChange={e => setTypeFilter(e.target.value as '' | 'app' | 'game')}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700">
               <option value="">全部类型</option>
               <option value="app">应用</option>
@@ -189,7 +189,7 @@ function CompetitorsTab() {
           ) : (
             <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table aria-label="数据表格" className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
                     <th className="text-left px-4 py-2 font-medium">操作</th>
@@ -298,7 +298,7 @@ function SiteDiagnosticTab() {
     <div className="space-y-5">
       <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
         <p className="text-sm text-gray-400">直接问问题，可以提到一个站点、好几个站点、或者不提站点纯问大环境——AI会自动识别问题里的域名，读相关站点近90天完整历史数据+大环境对比给出分析。提到多个站点时，除了逐站分析还会帮你找跨站点的共同规律。数据量大时可能要1-3分钟，请耐心等待。</p>
-        <textarea value={question} onChange={e => setQuestion(e.target.value)}
+        <textarea aria-label="输入详细内容" value={question} onChange={e => setQuestion(e.target.value)}
           placeholder={'例如：\n这两个大站点ip下滑\nsj.zol.com.cn\nuzzf.com\n小站ip下滑\npc768.com\n\n或者直接问："最近整体大环境怎么样"'}
           rows={5}
           className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
@@ -512,10 +512,10 @@ function CommercialKeywordsTab() {
       {subView === 'list' && (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <input value={listSearch} onChange={e => { setListSearch(e.target.value); setListPage(0) }}
+            <input aria-label="输入内容" value={listSearch} onChange={e => { setListSearch(e.target.value); setListPage(0) }}
               placeholder="搜索组名或别名…"
               className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-            <select value={listSort} onChange={e => setListSort(e.target.value as typeof listSort)}
+            <select aria-label="选择选项" value={listSort} onChange={e => setListSort(e.target.value as typeof listSort)}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none">
               <option value="pending">待审核最多</option>
               <option value="aliases">别名数量</option>
@@ -650,12 +650,12 @@ function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-gray-800">新增词组</h3>
         <div className="space-y-1.5">
           <label className="text-xs text-gray-500">概念名称</label>
-          <input value={conceptName} onChange={e => setConceptName(e.target.value)} placeholder="例如：纸飞机"
+          <input aria-label="输入内容" value={conceptName} onChange={e => setConceptName(e.target.value)} placeholder="例如：纸飞机"
             className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
         </div>
         <div className="space-y-1.5">
@@ -667,7 +667,7 @@ function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated:
                 <button onClick={() => setAliases(prev => prev.filter(x => x !== a))} className="text-gray-400 hover:text-red-500">×</button>
               </span>
             ))}
-            <input value={aliasInput} onChange={e => setAliasInput(e.target.value)}
+            <input aria-label="输入内容" value={aliasInput} onChange={e => setAliasInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ',' || e.key === '、') { e.preventDefault(); commitAliasInput() } }}
               onBlur={commitAliasInput}
               placeholder="例如：telegram, telegreat, telegraph"
@@ -719,11 +719,11 @@ function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-gray-800">批量导入</h3>
         <p className="text-xs text-gray-400">一行一组，同一组内用顿号/逗号隔开多个别名，单次最多100个词（含别名展开后）。</p>
-        <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
+        <textarea aria-label="输入详细内容" value={pasteText} onChange={e => setPasteText(e.target.value)}
           placeholder={'纸飞机、telegram、telegreat、telegraph\nLetstalk'} rows={8}
           className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
         {error && <p className="text-xs text-red-600">{error}</p>}
@@ -774,7 +774,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
     }).catch(() => setError('查询失败（网络异常），请重试'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { runCoverage(); setRenameValue(groupName) }, [groupName])
+  useEffect(() => { runCoverage(); setRenameValue(groupName) }, [groupName]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}`)
       .then(r => r.json()).then(d => setGroupDiscoveries((d.discoveries ?? []).slice(0, 5)))
@@ -853,7 +853,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
         <div className="flex items-start justify-between gap-3">
           {renaming ? (
             <div className="flex items-center gap-2">
-              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} autoFocus
+              <input aria-label="输入内容" value={renameValue} onChange={e => setRenameValue(e.target.value)} autoFocus
                 onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') setRenaming(false) }}
                 className="text-lg font-semibold border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800" />
               <button onClick={confirmRename} className="text-xs text-green-600 hover:underline">保存</button>
@@ -874,7 +874,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
               <button onClick={() => removeAlias(m.id)} className="text-gray-400 hover:text-red-500">×</button>
             </span>
           ))}
-          <input value={addAliasInput} onChange={e => setAddAliasInput(e.target.value)}
+          <input aria-label="输入内容" value={addAliasInput} onChange={e => setAddAliasInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }}
             placeholder="+ 添加别名，回车确认"
             className="text-xs px-2.5 py-1 rounded-full border border-dashed border-gray-300 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-600 w-32" />
@@ -914,13 +914,13 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between flex-wrap gap-2">
               <span className="text-sm font-semibold text-gray-700">排名覆盖 · {filteredCoverage.length} 条</span>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <select value={filterOwn} onChange={e => setFilterOwn(e.target.value as typeof filterOwn)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterOwn} onChange={e => setFilterOwn(e.target.value as typeof filterOwn)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="all">全部站点</option><option value="own">自己</option><option value="ref">竞品</option>
                 </select>
-                <select value={filterPlatform} onChange={e => setFilterPlatform(e.target.value as typeof filterPlatform)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterPlatform} onChange={e => setFilterPlatform(e.target.value as typeof filterPlatform)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="all">PC+M</option><option value="mobile">M</option><option value="pc">PC</option>
                 </select>
-                <select value={filterAlias} onChange={e => setFilterAlias(e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterAlias} onChange={e => setFilterAlias(e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="">全部别名</option>
                   {members.map(m => <option key={m.id} value={m.keyword}>{m.keyword}</option>)}
                 </select>
@@ -930,7 +930,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
               <p className="text-sm text-gray-300 text-center py-8">没有匹配的排名数据</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table aria-label="数据表格" className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-gray-400 border-b border-gray-100 whitespace-nowrap">
                       <th className="text-left px-4 py-2 font-medium">关键词</th>
@@ -1103,11 +1103,11 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
 
               {acceptingId === d.id && (
                 <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                  <input value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
+                  <input aria-label="输入内容" value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
                     placeholder="要加入的别名文字"
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-40" />
                   <span className="text-xs text-gray-400">归到组</span>
-                  <input value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
+                  <input aria-label="输入内容" value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-32" />
                   <button onClick={() => confirmAccept(d.id)} disabled={!acceptAlias.trim() || !acceptGroup.trim()}
                     className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">确认</button>
@@ -1169,7 +1169,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
     : sites
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[80vh] flex flex-col">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-800">管理竞品站点</h3>
@@ -1178,7 +1178,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
           </button>
         </div>
         <div className="px-6 py-3 border-b border-gray-100">
-          <input type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索域名或站点名…" autoFocus
+          <input aria-label="输入内容" type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索域名或站点名…" autoFocus
             className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
           <p className="text-xs text-gray-400 mt-1.5">勾选的站点会开启"排名"追踪，每天自动统计新增内容的成效</p>
         </div>
@@ -1189,7 +1189,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
             <div className="space-y-0.5">
               {filtered.map(s => (
                 <label key={s.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 text-sm text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={checked.has(s.id)} onChange={() => toggle(s.id)} />
+                  <input aria-label="选择此项" type="checkbox" checked={checked.has(s.id)} onChange={() => toggle(s.id)} />
                   <span className="truncate">{s.domain}</span>
                   <span className="text-xs text-gray-400 truncate">{s.name}</span>
                 </label>
@@ -1388,12 +1388,12 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 
     <div className="space-y-5">
       {periodType !== 'year' && (
         <div className="flex items-center gap-2">
-          <select value={filterYear} onChange={e => changeYear(e.target.value)}
+          <select aria-label="选择选项" value={filterYear} onChange={e => changeYear(e.target.value)}
             className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
             {years.map(y => <option key={y} value={y}>{y}年</option>)}
           </select>
           {periodType === 'week' && (
-            <select value={filterMonth} onChange={e => changeMonth(e.target.value)}
+            <select aria-label="选择选项" value={filterMonth} onChange={e => changeMonth(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
               {monthsInYear.map(m => <option key={m} value={m}>{parseInt(m, 10)}月</option>)}
             </select>

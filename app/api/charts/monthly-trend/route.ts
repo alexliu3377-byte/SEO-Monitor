@@ -4,7 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 // 2026-08-06 用户明确要求"全部组员都能看"——不再限 super/admin，只要登录了
 // 就能查，跟这个页面另一个tab（TapTap/好游快爆）门槛一致。
 async function requireLogin() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +107,7 @@ export async function GET(req: Request) {
     const { data: volumeChangeRows, error: volumeChangeErr } = await service.rpc('monthly_volume_change_top', { p_start: start, p_end: end, p_limit: 300 })
 
     const rpcError = appErr || gameErr || rankupErr || rankdownErr || continuousErr || volumeChangeErr
-    if (rpcError) return NextResponse.json({ error: rpcError.message }, { status: 500 })
+    if (rpcError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
     const volumeChangeList = (volumeChangeRows ?? []) as { keyword: string; volume: number; volume_change: number; domains: string[] }[]
     const volumeRising = volumeChangeList.filter(r => r.volume_change > 0).sort((a, b) => b.volume_change - a.volume_change).slice(0, 100)

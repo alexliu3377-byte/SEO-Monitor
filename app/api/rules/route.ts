@@ -1,32 +1,41 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeRowScore } from '@/lib/tracking-summary'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export async function GET() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
+  if (!profile || !['admin', 'super'].includes(profile.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
-  const [{ data, error }, { data: trackingRows }, { data: claimRows }] = await Promise.all([
+  const [{ data, error }, trackingRows, claimRows] = await Promise.all([
     service.from('rules').select('*').order('rule_number', { ascending: true }),
-    service.from('competitor_tracking_records')
-      .select('rule_id, effectiveness')
+    fetchAllRows<{ id: string; rule_id: string; effectiveness: string }>((from, to) => service
+      .from('competitor_tracking_records')
+      .select('id, rule_id, effectiveness')
       .not('rule_id', 'is', null)
-      .limit(5000),
-    service.from('member_claimed_keywords')
+      .order('id', { ascending: true })
+      .range(from, to)),
+    fetchAllRows<{ id: string; source_rule_id: string }>((from, to) => service
+      .from('member_claimed_keywords')
       .select('id, source_rule_id')
       .not('source_rule_id', 'is', null)
-      .limit(2000),
+      .order('id', { ascending: true })
+      .range(from, to)),
   ])
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   // Aggregate competitor tracked stats per rule_id
   const statsMap = new Map<string, { tracked_success: number; tracked_fail: number; tracked_tracking: number }>()
-  for (const row of (trackingRows ?? []) as { rule_id: string; effectiveness: string }[]) {
+  for (const row of trackingRows) {
     if (!row.rule_id) continue
     const s = statsMap.get(row.rule_id) ?? { tracked_success: 0, tracked_fail: 0, tracked_tracking: 0 }
     if (row.effectiveness === '有效') s.tracked_success++
@@ -37,7 +46,7 @@ export async function GET() {
 
   // Compute avg score per rule from member claims → site_tracking_records
   const claimToRule = new Map<string, string>()
-  for (const c of (claimRows ?? []) as { id: string; source_rule_id: string }[]) {
+  for (const c of claimRows) {
     claimToRule.set(c.id, c.source_rule_id)
   }
 
@@ -50,13 +59,14 @@ export async function GET() {
     const [, { data: envDays }] = await Promise.all([
       (async () => {
         for (let i = 0; i < allClaimIds.length; i += BATCH) {
-          const { data } = await service
+          const rows = await fetchAllRows<typeof siteTrackRows[number]>((from, to) => service
             .from('site_tracking_records')
-            .select('claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date, operation_type, submit_date, index_first_seen')
+            .select('id, claim_id, rank_position, prev_rank_position, rank_volume, is_indexed, record_date, operation_type, submit_date, index_first_seen')
             .in('claim_id', allClaimIds.slice(i, i + BATCH))
             .order('record_date', { ascending: false })
-            .limit(1000)
-          if (data) siteTrackRows.push(...data)
+            .order('id', { ascending: true })
+            .range(from, to))
+          siteTrackRows.push(...rows)
         }
       })(),
       service
@@ -107,7 +117,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -141,6 +151,6 @@ export async function POST(req: Request) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ rule: data })
 }

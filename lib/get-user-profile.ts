@@ -2,7 +2,7 @@ import { createClient, createServiceClient } from './supabase-server'
 import type { UserProfile } from './user-context'
 
 export async function getUserProfile(): Promise<UserProfile | null> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 

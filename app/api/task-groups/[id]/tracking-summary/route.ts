@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeGroupTrackingPayload, type EnrichedTrackRow, type RankMatchWithFlag } from '@/lib/group-tracking-cache'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import { loadGroupTrackingPayload, type EnrichedTrackRow, type RankMatchWithFlag } from '@/lib/group-tracking-cache'
 import {
   currentMonth, monthRange, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
@@ -77,7 +78,7 @@ function buildSummary(
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -98,11 +99,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { data: membersRaw } = await service
     .from('task_group_members').select('user_id, username').eq('group_id', groupId)
   const memberList = (membersRaw || []) as { user_id: string; username: string | null }[]
-  const usernameOf = new Map<string, string>(memberList.map(m => [m.user_id, m.username || m.user_id.slice(0, 8)]))
   const isMember = memberList.some(m => m.user_id === user.id)
 
   if (!canSeeAll && !isMember) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  if (canSeeAll && searchParams.get('refresh') === '1') {
+    const { error: refreshError } = await service
+      .from('group_tracking_cache')
+      .delete()
+      .eq('group_id', groupId)
+    if (refreshError) {
+      return NextResponse.json({ error: 'Failed to refresh tracking data' }, { status: 500 })
+    }
   }
 
   // Non-admins can only ever view their own scope, regardless of what the
@@ -120,16 +130,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // lib/group-tracking-cache.ts）。缓存本身是这个分组的全量历史（不分月），
   // 这里按 submit_date 落在当月区间筛——submit_date 是claim级别固定值，
   // 缓存已经是"每个claim取最新一行"，按它筛不需要再去重一次。
-  const { data: cached } = await service
-    .from('group_tracking_cache').select('payload').eq('group_id', groupId).maybeSingle()
-  let allRows: EnrichedTrackRow[]
-  if (cached?.payload) {
-    allRows = cached.payload as EnrichedTrackRow[]
-  } else {
-    allRows = await computeGroupTrackingPayload(service, groupId)
-    await service.from('group_tracking_cache').upsert({ group_id: groupId, payload: allRows, computed_at: new Date().toISOString() })
-  }
+  const { rows: allRows, computedAt, fromCache } = await loadGroupTrackingPayload(service, groupId)
   const rows = allRows.filter(r => r.submit_date >= start && r.submit_date <= end)
+  const usernameOf = await resolveUserDisplayNames(
+    service,
+    [...memberList.map(m => m.user_id), ...rows.map(r => r.user_id)],
+    memberList
+  )
 
   // matchesByClaim/claimSourceMap/badDates 原来是单独查询得到的，现在直接从
   // 缓存行本身派生（每行已经带 source/rank_matches/env_excluded）——
@@ -183,6 +190,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     month, canSeeAll, isMember, scope: scope === 'member' ? scopeUserId : scope,
     memberList: canSeeAll ? memberList.map(m => ({ userId: m.user_id, username: usernameOf.get(m.user_id)! })) : undefined,
     summary, groupSummary: canSeeAll ? groupSummary : undefined,
-    groupSourceEffectiveness, scopeSourceEffectiveness, ranking,
+    groupSourceEffectiveness, scopeSourceEffectiveness, ranking, computedAt, fromCache,
   })
 }

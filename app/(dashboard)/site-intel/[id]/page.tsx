@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { getBrowserClient } from '@/lib/supabase'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from 'recharts'
@@ -79,7 +80,7 @@ function PaginationBar({ page, total, pageSize, onPageChange, onPageSizeChange }
     <div className="flex items-center justify-between px-5 py-2.5 border-t border-gray-100 bg-gray-50/50 flex-shrink-0 text-xs">
       <div className="flex items-center gap-1.5 text-gray-500">
         每页
-        <select value={pageSize} onChange={e => onPageSizeChange(Number(e.target.value) as ModalPageSize)} className="border border-gray-200 rounded px-1 py-0.5 text-xs">
+        <select aria-label="选择选项" value={pageSize} onChange={e => onPageSizeChange(Number(e.target.value) as ModalPageSize)} className="border border-gray-200 rounded px-1 py-0.5 text-xs">
           {MODAL_PAGE_SIZES.map(s => <option key={s} value={s}>{s} 条</option>)}
         </select>
         <span className="ml-1 text-gray-400">共 {total} 条</span>
@@ -172,18 +173,18 @@ export default function SiteIntelDetailPage() {
     setKwModalLoading(true)
     try {
       const supabase = getBrowserClient()
-      const [appRes, gameRes, appCnt, gameCnt] = await Promise.all([
-        supabase.from('raw_keywords').select('keyword').eq('site_id', id).eq('content_date', date)
-          .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%').limit(5000),
-        supabase.from('raw_keywords').select('keyword').eq('site_id', id).eq('content_date', date)
-          .eq('content_type', 'game').not('keyword', 'like', '%电脑版%').limit(5000),
+      const [appRows, gameRows, appCnt, gameCnt] = await Promise.all([
+        fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase.from('raw_keywords').select('id, keyword').eq('site_id', id).eq('content_date', date)
+          .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%').order('id').range(from, to)),
+        fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase.from('raw_keywords').select('id, keyword').eq('site_id', id).eq('content_date', date)
+          .eq('content_type', 'game').not('keyword', 'like', '%电脑版%').order('id').range(from, to)),
         supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', date)
           .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%'),
         supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', date)
           .eq('content_type', 'game').not('keyword', 'like', '%电脑版%'),
       ])
-      setKwModalAppAll((appRes.data || []).map((r: { keyword: string }) => ({ keyword: r.keyword })))
-      setKwModalGameAll((gameRes.data || []).map((r: { keyword: string }) => ({ keyword: r.keyword })))
+      setKwModalAppAll(appRows.map(r => ({ keyword: r.keyword })))
+      setKwModalGameAll(gameRows.map(r => ({ keyword: r.keyword })))
       setKwModalAppCount(appCnt.count ?? 0)
       setKwModalGameCount(gameCnt.count ?? 0)
     } finally {
@@ -217,14 +218,15 @@ export default function SiteIntelDetailPage() {
         supabase.from('index_snapshots')
           .select('snapshot_date,index_count')
           .eq('site_id', id).gte('snapshot_date', d30ago).order('snapshot_date'),
-        (siteRow.has_rank_title
-          ? supabase.from('site_keyword_ranks').select('keyword,volume,type,stat_date')
+        (async () => ({ data: await fetchAllRows<{ id: string; keyword: string; volume: number; type: string; stat_date: string }>((from, to) => {
+          const q = siteRow.has_rank_title
+          ? supabase.from('site_keyword_ranks').select('id,keyword,volume,type,stat_date')
               .eq('site_id', id).eq('platform', 'mobile').gt('volume', 0)
-              .gte('stat_date', d30ago).order('stat_date', { ascending: false }).limit(5000)
-          : supabase.from('rank_changes').select('keyword,volume,type,stat_date')
+              .gte('stat_date', d30ago)
+          : supabase.from('rank_changes').select('id,keyword,volume,type,stat_date')
               .eq('site_id', id).gte('stat_date', d30ago)
-              .order('stat_date', { ascending: false }).limit(5000)
-        ),
+          return q.order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)
+        }) }))(),
         supabase.from('raw_keywords')
           .select('keyword,content_date,content_type')
           .eq('site_id', id)
@@ -686,7 +688,7 @@ export default function SiteIntelDetailPage() {
         const list = kwModalTab === 'app' ? kwModalAppAll : kwModalGameAll
         const paged = list.slice(kwModalPage * modalPageSize, (kwModalPage + 1) * modalPageSize)
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
                 <div className="flex items-center gap-3">
@@ -694,7 +696,7 @@ export default function SiteIntelDetailPage() {
                   {kwModalLoading ? (
                     <span className="text-xs text-gray-400">加载中…</span>
                   ) : (
-                    <input type="date" value={kwModalDate}
+                    <input aria-label="选择日期" type="date" value={kwModalDate}
                       onChange={e => handleKwDateChange(e.target.value)}
                       className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none" />
                   )}
@@ -747,12 +749,12 @@ export default function SiteIntelDetailPage() {
         const list = rankModalTab === 'up' ? filteredUp : filteredDown
         const paged = list.slice(rankModalPage * modalPageSize, (rankModalPage + 1) * modalPageSize)
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <h3 className="font-semibold text-gray-900">{site.domain} · 排名波动</h3>
-                  <input type="date" value={rankModalDate}
+                  <input aria-label="选择日期" type="date" value={rankModalDate}
                     onChange={e => { setRankModalDate(e.target.value); setRankModalPage(0) }}
                     className="text-xs border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none" />
                 </div>
@@ -773,7 +775,7 @@ export default function SiteIntelDetailPage() {
                 {paged.length === 0 ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无数据</p>
                 ) : (
-                  <table className="w-full text-sm">
+                  <table aria-label="数据表格" className="w-full text-sm">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
                         <th className="px-5 py-2.5 text-left font-medium text-gray-500">关键词</th>
@@ -804,7 +806,7 @@ export default function SiteIntelDetailPage() {
         const list = data.unstableAll
         const paged = list.slice(unstableModalPage * modalPageSize, (unstableModalPage + 1) * modalPageSize)
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
                 <div>
@@ -819,7 +821,7 @@ export default function SiteIntelDetailPage() {
                 {paged.length === 0 ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无不稳定词</p>
                 ) : (
-                  <table className="w-full text-sm">
+                  <table aria-label="数据表格" className="w-full text-sm">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
                         <th className="px-5 py-2.5 text-left font-medium text-gray-500">关键词</th>

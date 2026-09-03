@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
 import type { UserRole } from '@/lib/user-context'
@@ -18,6 +18,25 @@ interface RestrictedSite {
   domain: string
   name: string
   focus_level: number
+}
+
+function useModalEscape(onClose: () => void) {
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    const oldOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.body.style.overflow = oldOverflow
+      document.removeEventListener('keydown', handleKey)
+      previous?.focus()
+    }
+  }, [])
 }
 
 // ─── Role badge ───────────────────────────────────────────────────────────────
@@ -40,6 +59,7 @@ function RoleBadge({ role }: { role: UserRole }) {
 // ─── Change password modal ────────────────────────────────────────────────────
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  useModalEscape(onClose)
   const [newPwd, setNewPwd] = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -63,11 +83,11 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
+    <div role="dialog" aria-modal="true" aria-label="修改密码" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-semibold text-gray-900">修改密码</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label="关闭修改密码窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -76,12 +96,12 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">新密码</label>
-            <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required placeholder="至少 6 位"
+            <input aria-label="输入密码" type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required placeholder="至少 6 位"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">确认密码</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="再次输入"
+            <input aria-label="输入密码" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="再次输入"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           {msg && (
@@ -106,6 +126,7 @@ function AddUserModal({ callerRole, onClose, onCreated }: {
   onClose: () => void
   onCreated: (user: UserRecord) => void
 }) {
+  useModalEscape(onClose)
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -136,11 +157,11 @@ function AddUserModal({ callerRole, onClose, onCreated }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
+    <div role="dialog" aria-modal="true" aria-label="新增账号" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-semibold text-gray-900">新增账号</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label="关闭新增账号窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -150,22 +171,22 @@ function AddUserModal({ callerRole, onClose, onCreated }: {
           onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">用户名 <span className="text-red-500">*</span></label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)} required placeholder="登录时使用的用户名"
+            <input aria-label="输入内容" type="text" value={username} onChange={e => setUsername(e.target.value)} required placeholder="登录时使用的用户名"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">邮箱（仅系统使用）</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="user@example.com"
+            <input aria-label="输入电子邮箱" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="user@example.com"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">初始密码</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="至少 6 位"
+            <input aria-label="输入密码" type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="至少 6 位"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">权限</label>
-            <select value={role} onChange={e => setRole(e.target.value as UserRole)}
+            <select aria-label="选择选项" value={role} onChange={e => setRole(e.target.value as UserRole)}
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
               {roleOptions.map(r => (
                 <option key={r} value={r}>{roleConfig[r].label}</option>
@@ -193,6 +214,7 @@ function EditRoleModal({ user, callerRole, onClose, onUpdated }: {
   onClose: () => void
   onUpdated: (id: string, updates: Partial<UserRecord>) => void
 }) {
+  useModalEscape(onClose)
   const [username, setUsername] = useState(user.username ?? '')
   const [email, setEmail] = useState(user.email)
   const [password, setPassword] = useState('')
@@ -229,11 +251,11 @@ function EditRoleModal({ user, callerRole, onClose, onUpdated }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
+    <div role="dialog" aria-modal="true" aria-label="编辑用户" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-semibold text-gray-900">编辑用户</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label="关闭编辑用户窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -243,22 +265,22 @@ function EditRoleModal({ user, callerRole, onClose, onUpdated }: {
           onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">用户名</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="登录时显示的名称"
+            <input aria-label="输入内容" type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="登录时显示的名称"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">邮箱</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
+            <input aria-label="输入电子邮箱" type="email" value={email} onChange={e => setEmail(e.target.value)} required
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">新密码 <span className="text-gray-400 font-normal">（留空则不修改）</span></label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="留空则保持原密码"
+            <input aria-label="输入密码" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="留空则保持原密码"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">权限</label>
-            <select value={role} onChange={e => setRole(e.target.value as UserRole)}
+            <select aria-label="选择选项" value={role} onChange={e => setRole(e.target.value as UserRole)}
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
               {roleOptions.map(r => (
                 <option key={r} value={r}>{roleConfig[r].label}</option>
@@ -283,6 +305,7 @@ function EditRoleModal({ user, callerRole, onClose, onUpdated }: {
 const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/
 
 function IpWhitelistModal({ user, onClose }: { user: UserRecord; onClose: () => void }) {
+  useModalEscape(onClose)
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -329,11 +352,11 @@ function IpWhitelistModal({ user, onClose }: { user: UserRecord; onClose: () => 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="IP 白名单" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-base font-semibold text-gray-900">IP 白名单</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label="关闭 IP 白名单窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -379,7 +402,7 @@ function IpWhitelistModal({ user, onClose }: { user: UserRecord; onClose: () => 
         )}
 
         <div className="flex gap-2 mb-3">
-          <input
+          <input aria-label="输入内容"
             type="text"
             value={newIp}
             onChange={e => { setNewIp(e.target.value); setError(null) }}
@@ -420,6 +443,7 @@ function IpWhitelistModal({ user, onClose }: { user: UserRecord; onClose: () => 
 // ─── Site access modal ────────────────────────────────────────────────────────
 
 function SiteAccessModal({ user, onClose }: { user: UserRecord; onClose: () => void }) {
+  useModalEscape(onClose)
   const [sites, setSites] = useState<RestrictedSite[]>([])
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -464,11 +488,11 @@ function SiteAccessModal({ user, onClose }: { user: UserRecord; onClose: () => v
   const focusLabel: Record<number, string> = { 1: '重点', 2: '侧重' }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="站点权限" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-base font-semibold text-gray-900">站点权限</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label="关闭站点权限窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -484,7 +508,7 @@ function SiteAccessModal({ user, onClose }: { user: UserRecord; onClose: () => v
           <div className="max-h-72 overflow-y-auto space-y-2 mb-4">
             {sites.map(site => (
               <label key={site.id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" checked={checked.has(site.id)} onChange={() => toggle(site.id)}
+                <input aria-label="选择此项" type="checkbox" checked={checked.has(site.id)} onChange={() => toggle(site.id)}
                   className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 flex-shrink-0" />
                 <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
                   site.focus_level === 1 ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'
@@ -564,12 +588,12 @@ function NormalSettings() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">新密码</label>
-            <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required placeholder="至少 6 位"
+            <input aria-label="输入密码" type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required placeholder="至少 6 位"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">确认密码</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="再次输入"
+            <input aria-label="输入密码" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required placeholder="再次输入"
               className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent" />
           </div>
           {msg && (
@@ -598,6 +622,8 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
   const [accessUser, setAccessUser] = useState<UserRecord | null>(null)
   const [ipWhitelistUser, setIpWhitelistUser] = useState<UserRecord | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRecord | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -611,12 +637,26 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
-  async function handleDelete(user: UserRecord) {
-    if (!confirm(`确定要删除账号 ${user.username ?? user.email}？此操作不可撤销。`)) return
+  function handleDelete(user: UserRecord) {
+    setPendingDeleteUser(user)
+    setDeleteError(null)
+  }
+
+  async function confirmDelete() {
+    const user = pendingDeleteUser
+    if (!user) return
     setDeletingId(user.id)
-    await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' })
-    setDeletingId(null)
-    setUsers(prev => prev.filter(u => u.id !== user.id))
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || '删除失败')
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+      setPendingDeleteUser(null)
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
@@ -651,7 +691,7 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
         {loading ? (
           <div className="h-32 flex items-center justify-center text-gray-400 text-sm">加载中...</div>
         ) : (
-          <table className="w-full">
+          <table aria-label="数据表格" className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="table-th">用户名</th>
@@ -738,6 +778,23 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
       )}
       {ipWhitelistUser && (
         <IpWhitelistModal user={ipWhitelistUser} onClose={() => setIpWhitelistUser(null)} />
+      )}
+      {pendingDeleteUser && (
+        <div role="alertdialog" aria-modal="true" aria-labelledby="delete-user-title" aria-describedby="delete-user-description" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <h2 id="delete-user-title" className="text-lg font-semibold text-gray-900">确认删除账号</h2>
+            <p id="delete-user-description" className="mt-2 text-sm text-gray-600">
+              确定要删除账号 {pendingDeleteUser.username ?? pendingDeleteUser.email}？此操作不可撤销。
+            </p>
+            {deleteError && <p role="alert" className="mt-3 text-sm text-red-600">{deleteError}</p>}
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" className="btn-secondary" disabled={deletingId === pendingDeleteUser.id} onClick={() => setPendingDeleteUser(null)}>取消</button>
+              <button type="button" className="btn-danger" aria-busy={deletingId === pendingDeleteUser.id} disabled={deletingId === pendingDeleteUser.id} onClick={confirmDelete}>
+                {deletingId === pendingDeleteUser.id ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

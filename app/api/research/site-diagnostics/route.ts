@@ -17,7 +17,7 @@ function getMY(offsetDays = 0) {
 }
 
 async function requireAdmin() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
     .insert({ site_ids: siteIds, question, result: result.diagnosis, created_by: user.id })
     .select('id, created_at')
     .single()
-  if (saveErr) return NextResponse.json({ error: saveErr.message }, { status: 500 })
+  if (saveErr) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({
     id: saved.id, created_at: saved.created_at, question, result: result.diagnosis,
@@ -124,7 +124,7 @@ export async function GET(req: Request) {
     .select('id, question, result, created_at, site_ids', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(page * pageSize, (page + 1) * pageSize - 1)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const rows = (data ?? []) as { id: string; question: string | null; result: string; created_at: string; site_ids: string[] }[]
   const allSiteIds = Array.from(new Set(rows.flatMap(r => r.site_ids ?? [])))

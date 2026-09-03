@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 export async function GET(req: Request) {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     .select('id, period_type, period_start, period_end, status, sites_considered, sites_analyzed, sites_skipped, gemini_call_count, gemini_fail_count, error, created_at, completed_at')
     .eq('period_type', periodType)
     .order('period_start', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ reports: reports ?? [] })
 }

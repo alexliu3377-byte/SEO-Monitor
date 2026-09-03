@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 async function requireAdmin() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,7 +34,7 @@ export async function GET() {
     .from('commercial_keywords')
     .select('id, keyword, group_name, created_at')
     .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ keywords: data ?? [] })
 }
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     .from('commercial_keywords')
     .upsert(rows, { onConflict: 'keyword', ignoreDuplicates: true })
     .select('id, keyword, group_name, created_at')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })
 }
@@ -106,7 +106,7 @@ export async function PATCH(req: Request) {
   const { error } = await service.from('commercial_keywords')
     .update({ group_name: newGroupName.trim() })
     .eq('group_name', groupName)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
 
@@ -118,16 +118,16 @@ export async function DELETE(req: Request) {
   const { id, all, groupName } = await req.json() as { id?: string; all?: boolean; groupName?: string }
   if (all) {
     const { error } = await service.from('commercial_keywords').delete().not('id', 'is', null)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
   if (groupName) {
     const { error } = await service.from('commercial_keywords').delete().eq('group_name', groupName)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
   const { error } = await service.from('commercial_keywords').delete().eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

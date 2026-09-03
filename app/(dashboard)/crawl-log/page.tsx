@@ -165,7 +165,7 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
   const okCount = Object.values(progress).filter(s => s === 'ok').length
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
       onClick={running ? undefined : onClose}>
       <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}>
@@ -193,7 +193,7 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
                 return (
                   <div key={site.domain} className="flex items-center justify-between py-1.5">
                     <label className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
-                      <input type="checkbox" checked={selected.has(site.domain)}
+                      <input aria-label="选择此项" type="checkbox" checked={selected.has(site.domain)}
                         onChange={() => toggle(site.domain)} disabled={running}
                         className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-400 flex-shrink-0" />
                       <span className="text-sm text-gray-800 truncate">{site.domain}</span>
@@ -704,7 +704,7 @@ export default function CrawlLogPage() {
 
                 {/* 日期▼ */}
                 <div className="relative">
-                  <select
+                  <select aria-label="选择选项"
                     value={filterDate}
                     onChange={e => { setFilterDate(e.target.value); setPage(1) }}
                     className={SELECT_CLS + (filterDate ? ' border-blue-300 text-blue-600' : '')}
@@ -719,7 +719,7 @@ export default function CrawlLogPage() {
 
                 {/* 类型▼ */}
                 <div className="relative">
-                  <select
+                  <select aria-label="选择选项"
                     value={filterType}
                     onChange={e => { setFilterType(e.target.value); setPage(1) }}
                     className={SELECT_CLS + (filterType ? ' border-blue-300 text-blue-600' : '')}
@@ -733,7 +733,7 @@ export default function CrawlLogPage() {
                 </div>
 
                 {/* 域名搜索 */}
-                <input
+                <input aria-label="输入内容"
                   type="text"
                   placeholder="域名"
                   value={filterDomain}
@@ -758,7 +758,7 @@ export default function CrawlLogPage() {
                 <div className="p-8 text-center text-gray-400 text-sm">暂无记录</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm table-fixed">
+                  <table aria-label="数据表格" className="w-full text-sm table-fixed">
                     <colgroup>
                       <col style={{ width: '150px' }} />
                       <col style={{ width: '80px' }} />
@@ -908,7 +908,7 @@ export default function CrawlLogPage() {
 
       {/* Rules Modal */}
       {rulesStep && rulesSection && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setRulesStep(null)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setRulesStep(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
@@ -935,7 +935,7 @@ export default function CrawlLogPage() {
 
       {/* Detail Modal */}
       {detailActivity && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDetailActivity(null)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDetailActivity(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
@@ -974,7 +974,7 @@ export default function CrawlLogPage() {
               ) : siteLogs.length === 0 ? (
                 <div className="text-center text-gray-400 text-sm py-8">无站点明细记录</div>
               ) : (
-                <table className="w-full text-sm">
+                <table aria-label="数据表格" className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="text-left py-2 text-sm font-medium text-gray-600">域名</th>

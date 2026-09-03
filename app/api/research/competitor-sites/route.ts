@@ -3,7 +3,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchOwnSiteDomains } from '@/lib/tracking-summary'
 
 async function requireAdmin() {
-  const authClient = createClient()
+  const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
       : service.from('sites').select('id, domain, name').eq('has_rank_title', true).order('domain'),
   ])
   const { data: sitesRaw, error } = sitesRes
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   const sites = (sitesRaw ?? []).filter((s: { domain: string }) => !ownDomains.has(s.domain))
 

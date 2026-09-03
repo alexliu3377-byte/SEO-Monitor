@@ -201,6 +201,7 @@ export default function GroupReportPage() {
   }
   interface TrackingSummaryResponse {
     month: string; canSeeAll: boolean; isMember: boolean; scope: string
+    computedAt?: string; fromCache?: boolean
     memberList?: { userId: string; username: string }[]
     summary: TrackingSummary
     groupSummary?: TrackingSummary
@@ -303,6 +304,21 @@ export default function GroupReportPage() {
     if (scope === 'total' || scope === 'own') p.set('scope', scope)
     else { p.set('scope', 'member'); p.set('memberId', scope) }
     return p
+  }
+
+  async function refreshTrackingSummary() {
+    if (!activeTabId || !canSeeAll) return
+    setTrackingLoading(true)
+    try {
+      const params = scopeParams(trackingMonth, trackingScope)
+      params.set('refresh', '1')
+      const response = await fetch(`/api/task-groups/${activeTabId}/tracking-summary?${params}`)
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '刷新失败')
+      setTrackingData(data)
+    } finally {
+      setTrackingLoading(false)
+    }
   }
   useEffect(() => {
     if (reportTab !== 'trackingSummary' || !activeTabId) return
@@ -456,25 +472,25 @@ export default function GroupReportPage() {
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {canSeeAll && report?.members && report.members.length > 1 && (
-                      <select value={oFilterMember} onChange={e => { setOFilterMember(e.target.value); setOPage(0) }}
+                      <select aria-label="选择选项" value={oFilterMember} onChange={e => { setOFilterMember(e.target.value); setOPage(0) }}
                         className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
                         <option value="">全部成员</option>
                         {report.members.map(m => <option key={m.userId} value={m.userId}>{m.username}</option>)}
                       </select>
                     )}
-                    <select value={oFilterOp} onChange={e => { setOFilterOp(e.target.value); setOPage(0) }}
+                    <select aria-label="选择选项" value={oFilterOp} onChange={e => { setOFilterOp(e.target.value); setOPage(0) }}
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
                       <option value="">全部操作</option>
                       <option value="新增">新增</option>
                       <option value="更新">更新</option>
                     </select>
-                    <select value={oFilterIndex} onChange={e => { setOFilterIndex(e.target.value); setOPage(0) }}
+                    <select aria-label="选择选项" value={oFilterIndex} onChange={e => { setOFilterIndex(e.target.value); setOPage(0) }}
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
                       <option value="">全部收录</option>
                       <option value="has">已收录</option>
                       <option value="none">未收录</option>
                     </select>
-                    <select value={oFilterOutcome} onChange={e => { setOFilterOutcome(e.target.value); setOPage(0) }}
+                    <select aria-label="选择选项" value={oFilterOutcome} onChange={e => { setOFilterOutcome(e.target.value); setOPage(0) }}
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
                       <option value="">全部成效</option>
                       <option value="获取排名">获取排名</option>
@@ -482,10 +498,10 @@ export default function GroupReportPage() {
                       <option value="追踪中">追踪中</option>
                       <option value="无效">无效</option>
                     </select>
-                    <input value={oFilterKw} onChange={e => { setOFilterKw(e.target.value); setOPage(0) }}
+                    <input aria-label="输入内容" value={oFilterKw} onChange={e => { setOFilterKw(e.target.value); setOPage(0) }}
                       placeholder="搜索关键词 / 最终词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-44" />
-                    <input value={oFilterRankKw} onChange={e => { setOFilterRankKw(e.target.value); setOPage(0) }}
+                    <input aria-label="输入内容" value={oFilterRankKw} onChange={e => { setOFilterRankKw(e.target.value); setOPage(0) }}
                       placeholder="搜索排名词…"
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-36" />
                   </div>
@@ -729,6 +745,18 @@ export default function GroupReportPage() {
                       ))}
                     </div>
                   )}
+                  <div className="ml-auto flex items-center gap-2 text-xs text-gray-500" aria-live="polite">
+                    {trackingData.computedAt && (
+                      <span title={trackingData.computedAt}>
+                        数据更新于 {new Date(trackingData.computedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Kuala_Lumpur' })}
+                      </span>
+                    )}
+                    {trackingData.canSeeAll && (
+                      <button type="button" onClick={refreshTrackingSummary} className="btn-secondary min-h-11 px-3">
+                        刷新最新数据
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -741,7 +769,7 @@ export default function GroupReportPage() {
                       <span className="text-xs text-gray-400 ml-2">按得分从高到低</span>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[520px]">
+                      <table aria-label="数据表格" className="w-full min-w-[520px]">
                         <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                           <th className="px-4 py-2 text-center font-medium w-14">排名</th>
                           <th className="px-2 py-2 text-left font-medium">成员</th>
@@ -792,7 +820,7 @@ export default function GroupReportPage() {
                         <span className="text-sm font-semibold text-gray-700">获取收录</span>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[560px]">
+                        <table aria-label="数据表格" className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                             <th className="px-4 py-2 text-left font-medium w-28">类目</th>
                             <th className="px-2 pr-6 py-2 text-center font-medium w-20">条数</th>
@@ -827,7 +855,7 @@ export default function GroupReportPage() {
                         <span className="text-sm font-semibold text-gray-700">排名分布</span>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[560px]">
+                        <table aria-label="数据表格" className="w-full min-w-[560px]">
                           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                             <th className="px-4 py-2 text-left font-medium w-28">排名区间</th>
                             <th className="px-2 pr-6 py-2 text-center font-medium w-20">词数</th>
@@ -881,11 +909,11 @@ export default function GroupReportPage() {
                 </div>
                 {period === 'custom' ? (
                   <div className="flex items-center gap-2">
-                    <input type="date" value={customStart} max={customEnd || today}
+                    <input aria-label="选择日期" type="date" value={customStart} max={customEnd || today}
                       onChange={e => setCustomStart(e.target.value)}
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-700" />
                     <span className="text-gray-400 text-sm">~</span>
-                    <input type="date" value={customEnd} min={customStart} max={today}
+                    <input aria-label="选择日期" type="date" value={customEnd} min={customStart} max={today}
                       onChange={e => setCustomEnd(e.target.value)}
                       className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-700" />
                     {customStart && customEnd && customStart > customEnd && (
@@ -924,7 +952,7 @@ export default function GroupReportPage() {
                       <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/60 flex flex-wrap items-center gap-3">
                         <span className="text-sm font-semibold text-gray-700">提交明细</span>
                         {canSeeAll && report.members.length > 1 && (
-                          <select value={filterUserId} onChange={e => { setFilterUserId(e.target.value); setSubPage(0) }}
+                          <select aria-label="选择选项" value={filterUserId} onChange={e => { setFilterUserId(e.target.value); setSubPage(0) }}
                             className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white ml-auto">
                             <option value="all">全部成员</option>
                             {report.members.map(m => <option key={m.userId} value={m.userId}>{m.username}</option>)}
@@ -993,7 +1021,7 @@ export default function GroupReportPage() {
             : u.rankChange != null && u.rankChange <= 0 ? '排名没有实际提升'
             : '没有历史对比数据'
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
+            <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                   <div className="min-w-0">
@@ -1053,7 +1081,7 @@ export default function GroupReportPage() {
           : row.rank_change < 0 ? `排名下跌 ${-row.rank_change} 位`
           : '排名无变化'
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
+          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setScoreDetailRow(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
               <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                 <div className="min-w-0">
@@ -1111,7 +1139,7 @@ export default function GroupReportPage() {
 
       {/* 追踪汇总"查看"详情 Modal */}
       {sourceDetailModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceDetailModal(null)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceDetailModal(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div>
@@ -1207,7 +1235,7 @@ export default function GroupReportPage() {
 
       {/* 关键词详情 Modal */}
       {detailModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDetailModal(null)}>
+        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDetailModal(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div>
@@ -1246,7 +1274,7 @@ export default function GroupReportPage() {
                         </div>
                         <div className="min-w-0">
                           {(canSeeAll || detailModal?.userId === currentUserId) ? (
-                            <input
+                            <input aria-label="输入内容"
                               type="text"
                               defaultValue={kw.page_url ?? ''}
                               placeholder="https://…"

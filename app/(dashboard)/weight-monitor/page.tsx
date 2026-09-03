@@ -102,7 +102,7 @@ export default function WeightMonitorPage() {
     setPage(0)
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     setLoading(true)
@@ -218,7 +218,7 @@ export default function WeightMonitorPage() {
 
       {/* Detail modal */}
       {selected && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+        <div role="dialog" aria-modal="true" aria-label="权重详情" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <div>
@@ -289,7 +289,7 @@ export default function WeightMonitorPage() {
           <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">站点</span>
-              <input
+              <input aria-label="输入内容"
                 type="text"
                 value={filterSite}
                 onChange={(e) => { setFilterSite(e.target.value); setPage(0) }}
@@ -299,7 +299,7 @@ export default function WeightMonitorPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-400">关注级别</span>
-              <select value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+              <select aria-label="选择选项" value={filterFocus} onChange={(e) => { setFilterFocus(e.target.value); setPage(0) }} className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
                 <option value="">全部</option>
                 <option value="1">重点</option>
                 <option value="2">侧重</option>
@@ -309,7 +309,7 @@ export default function WeightMonitorPage() {
             <span className="ml-auto text-xs text-gray-400">共 {visibleRows.length} 条</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table aria-label="数据表格" className="w-full">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="table-th">域名</th>

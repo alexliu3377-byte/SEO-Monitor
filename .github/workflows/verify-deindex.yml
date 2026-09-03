@@ -19,8 +19,10 @@ jobs:
     steps:
       - name: Compute job matrix
         id: gen
+        env:
+          RECHECK_INPUT: ${{ github.event.inputs.recheck_disappeared || 'false' }}
         run: |
-          RECHECK="${{ github.event.inputs.recheck_disappeared || 'false' }}"
+          RECHECK="$RECHECK_INPUT"
           # 2026-08-28：原来20个URL一组，默认每周六的常规路径(verify_needed=true)
           # 现在实测620条待验证URL，ceil(620/20)=31个job，账号是GitHub Free同时
           # 最多跑20个job，这个步骤自己一个人就超了。调到50个一组
@@ -57,9 +59,9 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'

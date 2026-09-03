@@ -138,6 +138,7 @@ LANGUAGE sql STABLE AS $$
     MIN(COALESCE(content_date, discovered_at::date))::date,
     MAX(COALESCE(content_date, discovered_at::date))::date
   FROM raw_keywords
+  WHERE COALESCE(content_date, discovered_at::date) >= p_since
   GROUP BY keyword
 $$;
 

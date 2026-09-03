@@ -28,3 +28,10 @@ next-env.d.ts
 
 # MCP config (contains tokens)
 .mcp.json
+
+# Local AI-agent settings may contain copied commands or credentials
+.claude/settings.json
+.claude/settings.local.json
+
+# Local audit artifacts
+.codex-*.png
