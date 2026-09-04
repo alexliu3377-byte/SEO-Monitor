@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import type { UserRole } from '@/lib/user-context'
@@ -238,7 +237,6 @@ export async function POST(
     return NextResponse.json({ error: '这个词今天已经被组内其他成员认领了' }, { status: 409 })
   }
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ keyword: data })
 }
 
@@ -291,7 +289,6 @@ export async function PATCH(
   const { data: updated, error } = await query.select('id').maybeSingle()
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   if (!updated) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
-  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ success: true })
 }
 
@@ -339,6 +336,5 @@ export async function PUT(
 
   const { error } = await query
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  await invalidateGroupTrackingCache(service, groupId)
   return NextResponse.json({ success: true })
 }

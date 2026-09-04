@@ -235,6 +235,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
       { label: '写入表', text: '2026-09-04 起使用分页缓存：group_tracking_cache_rows 每个claim一行并保存可索引的筛选/排序字段，group_tracking_cache_state 只保存更新时间、行数和小型月度汇总；replace_group_tracking_paged_cache RPC 在一个事务里原子替换。旧 group_tracking_cache 大JSON暂时继续同步，作为迁移期间的兼容兜底' },
       { label: '读取方', text: '"成效追踪"通过 get_group_tracking_outcomes_page 在数据库端筛选、排序、统计，只返回当前20条；"追踪汇总"只读预先算好的月度小型汇总；排名/收录明细通过 get_group_tracking_detail_page 直接分页，不再扫描原始历史表。快速缓存未安装、超过26小时或尚未首次生成时，才退回旧缓存/现场计算' },
+      { label: '缓存连续性', text: '认领、提交、成员调整和每日 tracking 写入不再删除上一版缓存；旧版本会一直可读，直到 post-crawl-refresh 或管理员手动刷新成功后由事务原子替换。这样工作时间有人操作分组时不会出现缓存被清空、页面退回全量计算并超时的空档；报告仍按既定口径在每日任务完成后统一更新' },
       { label: '"追踪汇总"得分口径变化', text: '之前"追踪汇总"的"得分"是现场用简化版公式估算（"更新"型claim不查历史、prev_rank_position为null时保守当非提升处理）；现在跟"成效追踪"共用同一份缓存，缓存里的分数是精确版（带"真新排名"历史查询），两个页面的分数口径统一了' },
       { label: '失败兜底', text: '刷新接口逐个分组处理，某个分组算失败时跳过它、保留它上一次成功算出来的缓存，不会用报错/空结果覆盖掉——照抄 hot_radar_cache 那次"静默失败覆盖好缓存"事故后加的保护逻辑' },
     ],

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
-import { invalidateGroupTrackingCache, normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
+import { normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
 import { canAccessTaskGroup, canAdminUseGroupSites } from '@/lib/task-group-access'
 
 async function getCaller() {
@@ -89,8 +89,6 @@ export async function PUT(
     if (restoreError) console.error('Task group member rollback failed', { groupId: id, code: restoreError.code })
     return NextResponse.json({ error: 'Unable to save group members; previous data was restored' }, { status: 500 })
   }
-  await invalidateGroupTrackingCache(service, id)
-
   return NextResponse.json({ success: true })
 }
 
@@ -127,7 +125,5 @@ export async function DELETE(
   const service = createServiceClient() as any
   const { error } = await service.from('task_groups').delete().eq('id', id)
   if (error) return NextResponse.json({ error: 'Unable to delete task group' }, { status: 500 })
-  await invalidateGroupTrackingCache(service, id)
-
   return NextResponse.json({ success: true })
 }

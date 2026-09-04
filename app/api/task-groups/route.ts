@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
-import { invalidateGroupTrackingCache, normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
+import { normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { canAdminUseGroupSites, filterTaskGroupsForCaller, getAssignedSiteDomains } from '@/lib/task-group-access'
@@ -101,7 +101,5 @@ export async function POST(req: Request) {
     await service.from('task_groups').delete().eq('id', group.id)
     return NextResponse.json({ error: 'Unable to save group members' }, { status: 500 })
   }
-  await invalidateGroupTrackingCache(service, group.id)
-
   return NextResponse.json({ group: { ...group, members: normalized.members } })
 }

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 import type { UserRole } from '@/lib/user-context'
 import { canOffboardUser } from '@/lib/user-offboarding'
 
@@ -51,7 +50,6 @@ export async function POST(
   }
 
   const result = (data ?? {}) as OffboardResult
-  await Promise.all((result.group_ids ?? []).map(groupId => invalidateGroupTrackingCache(service, groupId)))
 
   // Banning is defense in depth. The profile flag is the authoritative gate in
   // proxy.ts and the login route, so a transient Auth failure cannot leave the

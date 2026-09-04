@@ -13,6 +13,8 @@ Before the next production database change:
 
 Apply `migrations/20260904_group_tracking_paged_cache.sql` before deploying the matching application change. It creates service-role-only cache tables and RPCs; it does not delete the legacy `group_tracking_cache` data. After applying it, manually run **Group Tracking Cache Refresh** once so all groups receive paged rows and precomputed monthly summaries immediately. Until that first refresh, the application safely falls back to the legacy cache and remains slower.
 
+Tracking, claim, membership, and offboarding writes deliberately keep the previous successful tracking cache readable. The scheduled/manual refresh atomically replaces it. Do not clear the cache merely to mark source data as changed: a missing cache forces a multi-thousand-row synchronous rebuild and can make the report time out during the gap.
+
 `migrations/20260904_remove_search_activity_logs.sql` intentionally deletes only `activity_log` rows whose type is `search` (dependent site-log rows follow the existing foreign-key behavior) and adds a check constraint so an older browser deployment cannot recreate them. It does not affect automatic or manual crawl logs.
 
 ## Employee offboarding

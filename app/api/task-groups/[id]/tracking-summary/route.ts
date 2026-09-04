@@ -11,7 +11,6 @@ import {
 } from '@/lib/tracking-summary'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
-import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 
 export const maxDuration = 60
 
@@ -111,10 +110,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  if (canSeeAll && searchParams.get('refresh') === '1') {
-    await invalidateGroupTrackingCache(service, groupId)
-  }
-
   // Non-admins can only ever view their own scope, regardless of what the
   // request asks for.
   let scope = canSeeAll ? requestedScope : 'own'
@@ -151,8 +146,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       ? cached.groupSourceEffectiveness
       : selectedMember?.sourceEffectiveness ?? []
     const cachedNames = new Map(cachedMembers.map(member => [member.userId, member.username]))
+    const currentMemberIds = new Set(memberList.map(member => member.user_id))
     const fullRanking = cachedMembers
-      .filter(member => member.isMember)
+      .filter(member => currentMemberIds.has(member.userId))
       .map(member => member.summary)
       .sort((a, b) => b.totalScore - a.totalScore)
     const ranking = fullRanking.map((memberSummary, index) => {

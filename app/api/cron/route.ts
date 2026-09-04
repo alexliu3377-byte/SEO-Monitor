@@ -42,7 +42,6 @@ import {
 import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
 import { fetchAllRows } from '@/lib/supabase-paginate'
-import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 
 interface SiteRecord {
   id: string
@@ -930,10 +929,6 @@ export async function GET(request: Request) {
             await (supabase.from('site_tracking_rank_matches') as any).upsert(chunk, {
               onConflict: 'claim_id,record_date,keyword', ignoreDuplicates: false,
             })
-          }
-          const changedGroupIds = Array.from(new Set(claims.map((claim: ClaimRow) => claim.group_id).filter(Boolean)))
-          if (changedGroupIds.length > 0) {
-            await Promise.all(changedGroupIds.map(groupId => invalidateGroupTrackingCache(supabase, groupId)))
           }
           ownRows = ownUpsertRows.length
         }
