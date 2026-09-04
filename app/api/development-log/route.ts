@@ -49,34 +49,48 @@ function databaseError(error: { code?: string } | null) {
   }, { status: migrationMissing ? 503 : 500 })
 }
 
-export async function GET() {
+function positiveInteger(value: string | null, fallback: number, maximum: number) {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback
+  return Math.min(parsed, maximum)
+}
+
+export async function GET(req: Request) {
   const { caller, service } = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canReadDevelopmentLog(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const [{ data: releases, error: releaseError }, { data: requests, error: requestError }] = await Promise.all([
-    service
-      .from('development_releases')
-      .select('*')
-      .order('release_date', { ascending: false })
-      .order('version', { ascending: false }),
-    service
-      .from('development_requests')
-      .select('*')
-      .order('created_at', { ascending: false }),
-  ])
+  const searchParams = new URL(req.url).searchParams
+  const kind = searchParams.get('kind') === 'requests' ? 'requests' : 'releases'
+  const page = positiveInteger(searchParams.get('page'), 1, 100_000)
+  const pageSize = positiveInteger(searchParams.get('pageSize'), 10, 50)
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+  const permissions = {
+    canSubmitRequest: canSubmitDevelopmentRequest(caller.role),
+    canManage: canManageDevelopmentLog(caller.id),
+  }
 
-  if (releaseError || requestError) return databaseError(releaseError ?? requestError)
-  return NextResponse.json({
-    releases: releases ?? [],
-    requests: requests ?? [],
-    permissions: {
-      canSubmitRequest: canSubmitDevelopmentRequest(caller.role),
-      canManage: canManageDevelopmentLog(caller.id),
-    },
-  })
+  if (kind === 'releases') {
+    const { data, error, count } = await service
+      .from('development_releases')
+      .select('*', { count: 'exact' })
+      .order('release_date', { ascending: false })
+      .order('version', { ascending: false })
+      .range(from, to)
+    if (error) return databaseError(error)
+    return NextResponse.json({ releases: data ?? [], total: count ?? 0, page, pageSize, permissions })
+  }
+
+  const { data, error, count } = await service
+    .from('development_requests')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+  if (error) return databaseError(error)
+  return NextResponse.json({ requests: data ?? [], total: count ?? 0, page, pageSize, permissions })
 }
 
 export async function POST(req: Request) {

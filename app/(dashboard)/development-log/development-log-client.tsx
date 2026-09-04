@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
 
 type ReleaseStatus = 'completed' | 'in_progress' | 'planned'
 type RequestStatus = 'pending' | 'accepted' | 'in_progress' | 'completed' | 'blocked' | 'declined'
@@ -34,6 +34,7 @@ type DevelopmentRequest = {
 
 type Permissions = { canSubmitRequest: boolean; canManage: boolean }
 type Tab = 'releases' | 'requests'
+const PAGE_SIZE = 10
 
 const RELEASE_STATUS: Record<ReleaseStatus, { label: string; className: string }> = {
   completed: { label: '已完成', className: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
@@ -106,6 +107,10 @@ export default function DevelopmentLogClient() {
   const [tab, setTab] = useState<Tab>('releases')
   const [releases, setReleases] = useState<DevelopmentRelease[]>([])
   const [requests, setRequests] = useState<DevelopmentRequest[]>([])
+  const [releasePage, setReleasePage] = useState(1)
+  const [requestPage, setRequestPage] = useState(1)
+  const [releaseTotal, setReleaseTotal] = useState(0)
+  const [requestTotal, setRequestTotal] = useState(0)
   const [permissions, setPermissions] = useState<Permissions>({ canSubmitRequest: false, canManage: false })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -123,15 +128,20 @@ export default function DevelopmentLogClient() {
   const [ownerResponse, setOwnerResponse] = useState('')
   const [savingRequest, setSavingRequest] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (kind: Tab, page: number) => {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/development-log', { cache: 'no-store' })
+      const response = await fetch(`/api/development-log?kind=${kind}&page=${page}&pageSize=${PAGE_SIZE}`, { cache: 'no-store' })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error || '开发日志加载失败')
-      setReleases(body.releases ?? [])
-      setRequests(body.requests ?? [])
+      if (kind === 'releases') {
+        setReleases(body.releases ?? [])
+        setReleaseTotal(body.total ?? 0)
+      } else {
+        setRequests(body.requests ?? [])
+        setRequestTotal(body.total ?? 0)
+      }
       setPermissions(body.permissions ?? { canSubmitRequest: false, canManage: false })
     } catch (err) {
       setError(err instanceof Error ? err.message : '开发日志加载失败')
@@ -140,13 +150,9 @@ export default function DevelopmentLogClient() {
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
-
-  const requestCounts = useMemo(() => ({
-    pending: requests.filter(item => ['pending', 'accepted', 'in_progress'].includes(item.status)).length,
-    blocked: requests.filter(item => item.status === 'blocked').length,
-    completed: requests.filter(item => item.status === 'completed').length,
-  }), [requests])
+  useEffect(() => {
+    void load(tab, tab === 'releases' ? releasePage : requestPage)
+  }, [load, releasePage, requestPage, tab])
 
   async function submitRequest(event: FormEvent) {
     event.preventDefault()
@@ -160,10 +166,11 @@ export default function DevelopmentLogClient() {
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error || '意见提交失败')
-      setRequests(previous => [body.request, ...previous])
       setRequestTitle('')
       setRequestDetails('')
       setMessage('意见已提交，项目负责人可以在这里更新处理进度。')
+      if (requestPage === 1) await load('requests', 1)
+      else setRequestPage(1)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '意见提交失败')
     } finally {
@@ -216,7 +223,8 @@ export default function DevelopmentLogClient() {
       if (editingReleaseId) {
         setReleases(previous => previous.map(item => item.id === editingReleaseId ? body.release : item))
       } else {
-        setReleases(previous => [body.release, ...previous].sort((a, b) => b.release_date.localeCompare(a.release_date)))
+        if (releasePage === 1) await load('releases', 1)
+        else setReleasePage(1)
       }
       setReleaseFormOpen(false)
       setEditingReleaseId(null)
@@ -275,12 +283,12 @@ export default function DevelopmentLogClient() {
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex border-b border-slate-200" role="tablist" aria-label="开发日志分类">
           <button type="button" role="tab" aria-selected={tab === 'releases'} onClick={() => setTab('releases')} className={`border-b-2 px-4 py-3 text-sm font-medium ${tab === 'releases' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>版本开发记录</button>
-          <button type="button" role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`border-b-2 px-4 py-3 text-sm font-medium ${tab === 'requests' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>意见与优化 <span className="ml-1 text-xs">({requests.length})</span></button>
+          <button type="button" role="tab" aria-selected={tab === 'requests'} onClick={() => setTab('requests')} className={`border-b-2 px-4 py-3 text-sm font-medium ${tab === 'requests' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>意见与优化 {requestTotal > 0 && <span className="ml-1 text-xs">({requestTotal})</span>}</button>
         </div>
 
         {message && <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800" role="status">{message}</div>}
         {loading && <div className="space-y-4" aria-label="正在加载"><div className="h-36 animate-pulse rounded-xl bg-slate-200" /><div className="h-56 animate-pulse rounded-xl bg-slate-200" /></div>}
-        {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p>{error}</p><button type="button" onClick={() => void load()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 font-medium hover:bg-red-50">重试</button></div>}
+        {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p>{error}</p><button type="button" onClick={() => void load(tab, tab === 'releases' ? releasePage : requestPage)} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 font-medium hover:bg-red-50">重试</button></div>}
 
         {!loading && !error && tab === 'releases' && (
           <div className="space-y-5">
@@ -323,16 +331,13 @@ export default function DevelopmentLogClient() {
                 </article>
               )
             })}
+            <Pagination page={releasePage} total={releaseTotal} pageSize={PAGE_SIZE} onChange={setReleasePage} label="版本记录" />
           </div>
         )}
 
         {!loading && !error && tab === 'requests' && (
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <SummaryCard label="等待处理" value={requestCounts.pending} tone="blue" />
-              <SummaryCard label="遇到问题" value={requestCounts.blocked} tone="red" />
-              <SummaryCard label="已经完成" value={requestCounts.completed} tone="green" />
-            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">共 {requestTotal} 条意见；每次只从数据库读取当前页的 {PAGE_SIZE} 条记录。</div>
 
             {permissions.canSubmitRequest && (
               <form onSubmit={submitRequest} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -370,6 +375,7 @@ export default function DevelopmentLogClient() {
                 </article>
               )
             })}
+            <Pagination page={requestPage} total={requestTotal} pageSize={PAGE_SIZE} onChange={setRequestPage} label="意见记录" />
           </div>
         )}
       </main>
@@ -377,9 +383,18 @@ export default function DevelopmentLogClient() {
   )
 }
 
-function SummaryCard({ label, value, tone }: { label: string; value: number; tone: 'blue' | 'red' | 'green' }) {
-  const colors = { blue: 'border-blue-200 bg-blue-50 text-blue-900', red: 'border-red-200 bg-red-50 text-red-900', green: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
-  return <div className={`rounded-xl border p-4 ${colors[tone]}`}><p className="text-xs font-medium opacity-70">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></div>
+function Pagination({ page, total, pageSize, onChange, label }: { page: number; total: number; pageSize: number; onChange: (page: number) => void; label: string }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  if (total <= pageSize) return null
+  return (
+    <nav aria-label={`${label}分页`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-sm text-slate-500">第 {page} / {totalPages} 页 · 共 {total} 条</p>
+      <div className="flex gap-2">
+        <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">上一页</button>
+        <button type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">下一页</button>
+      </div>
+    </nav>
+  )
 }
 
 function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
