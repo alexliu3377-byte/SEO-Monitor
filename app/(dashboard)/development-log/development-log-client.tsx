@@ -152,12 +152,13 @@ export default function DevelopmentLogClient() {
       <main className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
         {message && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</div>}
         <section className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-5">
-          <h2 className="font-semibold text-emerald-950">版本记录依据</h2>
-          <p className="mt-2 text-sm leading-6 text-emerald-900/80">已核对从 2026 年 6 月 8 日开始的 Git 提交和 GitHub 中 954 次 Vercel 历史部署。调试记录按真正影响使用方式的阶段归纳，旧 Vercel 账号无法登录也不影响这条时间线。</p>
+          <h2 className="font-semibold text-emerald-950">版本记录规则</h2>
+          <p className="mt-2 text-sm leading-6 text-emerald-900/80">开发日志按系统发展阶段和实际使用变化整理，帮助管理层与后续维护人员快速了解每一轮更新解决了什么问题。</p>
+          <p className="mt-2 rounded-lg bg-white/80 px-3 py-2 text-sm font-medium text-emerald-900">部署不等于版本：同一目标下的多次调整与上线测试合并记录；单独修 Bug、改文案、调样式或补测试不单独升版本。</p>
           <div className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
             <VersionRule version="v1.0.0 / v2.0.0" text="主版本：系统用途或工作方式明显改变" />
             <VersionRule version="v2.1.0" text="次版本：新增一组重要功能或能力" />
-            <VersionRule version="v2.3.1" text="修订版本：权限、性能、稳定性或小幅体验改进" />
+            <VersionRule version="v2.3.1" text="修订版本：完成一整轮权限、性能或稳定性更新" />
           </div>
         </section>
 
@@ -171,7 +172,7 @@ export default function DevelopmentLogClient() {
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-slate-950 px-2.5 py-1 font-mono text-sm font-semibold text-white">{release.version}</span><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${STATUS[release.status].className}`}>{STATUS[release.status].label}</span><span className="text-xs text-slate-500">{dateLabel(release.release_date)}</span>{release.deployment_range && <span className="text-xs text-slate-400">开发范围：{release.deployment_range}</span>}</div>
               <div className="mt-3 flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold text-slate-950">{release.title}</h2><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{release.summary}</p></div>{canManage && <button type="button" onClick={() => startEdit(release)} className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">编辑</button>}</div>
             </div>
-            <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2"><InfoList title="本版本完成内容" items={release.highlights ?? []} /><InfoList title="实现方式（交接重点）" items={release.implementation_notes ?? []} /><div className="lg:col-span-2"><InfoList title="已知限制与维护提醒" items={release.limitations ?? []} warning /></div>{release.source_note && <p className="text-xs text-slate-400 lg:col-span-2">记录依据：{release.source_note}</p>}</div>
+            <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2"><InfoList title="本版本完成内容" items={release.highlights ?? []} /><InfoList title="实现方式（交接重点）" items={release.implementation_notes ?? []} /><div className="lg:col-span-2"><InfoList title="已知限制与维护提醒" items={release.limitations ?? []} warning /></div></div>
           </article>
         ))}
         {!loading && !error && <Pagination page={page} total={total} onChange={setPage} />}
