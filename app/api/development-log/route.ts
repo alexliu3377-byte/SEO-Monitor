@@ -3,7 +3,6 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import {
   canManageDevelopmentLog,
   canReadDevelopmentLog,
-  canSubmitDevelopmentRequest,
   cleanStringList,
   cleanText,
   isReleaseStatus,
@@ -63,34 +62,21 @@ export async function GET(req: Request) {
   }
 
   const searchParams = new URL(req.url).searchParams
-  const kind = searchParams.get('kind') === 'requests' ? 'requests' : 'releases'
   const page = positiveInteger(searchParams.get('page'), 1, 100_000)
   const pageSize = positiveInteger(searchParams.get('pageSize'), 10, 50)
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
-  const permissions = {
-    canSubmitRequest: canSubmitDevelopmentRequest(caller.role),
-    canManage: canManageDevelopmentLog(caller.id),
-  }
-
-  if (kind === 'releases') {
-    const { data, error, count } = await service
-      .from('development_releases')
-      .select('*', { count: 'exact' })
-      .order('release_date', { ascending: false })
-      .order('version', { ascending: false })
-      .range(from, to)
-    if (error) return databaseError(error)
-    return NextResponse.json({ releases: data ?? [], total: count ?? 0, page, pageSize, permissions })
-  }
-
   const { data, error, count } = await service
-    .from('development_requests')
+    .from('development_releases')
     .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false })
+    .order('release_date', { ascending: false })
+    .order('version', { ascending: false })
     .range(from, to)
   if (error) return databaseError(error)
-  return NextResponse.json({ requests: data ?? [], total: count ?? 0, page, pageSize, permissions })
+  return NextResponse.json({
+    releases: data ?? [], total: count ?? 0, page, pageSize,
+    permissions: { canManage: canManageDevelopmentLog(caller.id) },
+  })
 }
 
 export async function POST(req: Request) {
@@ -102,31 +88,6 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ error: '请求内容格式错误' }, { status: 400 })
-
-  if (body.kind === 'request') {
-    if (!canSubmitDevelopmentRequest(caller.role)) {
-      return NextResponse.json({ error: '只有超管可以提交功能意见' }, { status: 403 })
-    }
-    const title = cleanText(body.title, 120)
-    const details = cleanText(body.details, 4000)
-    if (!title || !details) {
-      return NextResponse.json({ error: '请填写意见标题和具体需求' }, { status: 400 })
-    }
-    const createdByName = caller.username || caller.email.split('@')[0] || '超管'
-    const { data, error } = await service
-      .from('development_requests')
-      .insert({
-        title,
-        details,
-        status: 'pending',
-        created_by: caller.id,
-        created_by_name: createdByName,
-      })
-      .select('*')
-      .single()
-    if (error) return databaseError(error)
-    return NextResponse.json({ request: data }, { status: 201 })
-  }
 
   if (body.kind === 'release') {
     if (!canManageDevelopmentLog(caller.id)) {

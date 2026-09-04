@@ -4,7 +4,6 @@ import {
   canManageDevelopmentLog,
   cleanStringList,
   cleanText,
-  isDevelopmentRequestStatus,
   isReleaseStatus,
 } from '@/lib/development-log'
 
@@ -34,26 +33,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params
   const body = await req.json().catch(() => null) as Record<string, unknown> | null
   if (!body || !id) return NextResponse.json({ error: '请求内容格式错误' }, { status: 400 })
-
-  if (body.kind === 'request') {
-    if (!isDevelopmentRequestStatus(body.status)) {
-      return NextResponse.json({ error: '意见状态无效' }, { status: 400 })
-    }
-    const patch = {
-      status: body.status,
-      problem_details: cleanText(body.problemDetails, 4000) || null,
-      owner_response: cleanText(body.ownerResponse, 4000) || null,
-      completed_at: body.status === 'completed' ? new Date().toISOString() : null,
-    }
-    const { data, error } = await auth.service
-      .from('development_requests')
-      .update(patch)
-      .eq('id', id)
-      .select('*')
-      .single()
-    if (error) return NextResponse.json({ error: '意见更新失败' }, { status: 500 })
-    return NextResponse.json({ request: data })
-  }
 
   if (body.kind === 'release') {
     const rawVersion = cleanText(body.version, 30)

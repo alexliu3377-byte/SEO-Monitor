@@ -14,11 +14,11 @@ export const REQUEST_STATUSES = [
 export type DevelopmentRequestStatus = typeof REQUEST_STATUSES[number]
 
 export function canReadDevelopmentLog(role: string | null | undefined): boolean {
-  return role === 'admin' || role === 'super'
+  return role === 'super'
 }
 
 export function canSubmitDevelopmentRequest(role: string | null | undefined): boolean {
-  return role === 'super'
+  return role === 'normal' || role === 'admin' || role === 'super'
 }
 
 export function canManageDevelopmentLog(userId: string | null | undefined): boolean {

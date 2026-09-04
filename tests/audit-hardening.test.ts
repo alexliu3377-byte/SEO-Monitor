@@ -20,6 +20,13 @@ import {
   isReleaseStatus,
 } from '../lib/development-log'
 import { PROJECT_OWNER_ID } from '../lib/project-owner'
+import {
+  canViewFeedback,
+  feedbackScopeFor,
+  feedbackSubmissionLimits,
+  isFeedbackPage,
+  isFeedbackType,
+} from '../lib/feedback-access'
 
 const blockedUrls = [
   'file:///etc/passwd',
@@ -102,12 +109,32 @@ test('keyword exports allow only the configured owner id', () => {
 
 test('development log permissions separate readers, submitters and owner management', () => {
   assert.equal(canReadDevelopmentLog('normal'), false)
-  assert.equal(canReadDevelopmentLog('admin'), true)
+  assert.equal(canReadDevelopmentLog('admin'), false)
   assert.equal(canReadDevelopmentLog('super'), true)
-  assert.equal(canSubmitDevelopmentRequest('admin'), false)
+  assert.equal(canSubmitDevelopmentRequest('normal'), true)
+  assert.equal(canSubmitDevelopmentRequest('admin'), true)
   assert.equal(canSubmitDevelopmentRequest('super'), true)
   assert.equal(canManageDevelopmentLog(PROJECT_OWNER_ID), true)
   assert.equal(canManageDevelopmentLog('11111111-1111-4111-8111-111111111111'), false)
+})
+
+test('feedback visibility separates personal, routine and super priority scopes', () => {
+  assert.equal(feedbackScopeFor('normal', 'super'), 'mine')
+  assert.equal(feedbackScopeFor('admin', 'super'), 'routine')
+  assert.equal(feedbackScopeFor('super', 'super'), 'super')
+  assert.equal(canViewFeedback('member-1', 'normal', 'member-1', 'normal', 'mine'), true)
+  assert.equal(canViewFeedback('member-1', 'normal', 'member-2', 'normal', 'mine'), false)
+  assert.equal(canViewFeedback('admin-1', 'admin', 'member-1', 'normal', 'routine'), true)
+  assert.equal(canViewFeedback('admin-1', 'admin', 'super-1', 'super', 'routine'), false)
+  assert.equal(canViewFeedback('super-1', 'super', 'super-2', 'super', 'super'), true)
+  assert.equal(canViewFeedback('super-1', 'super', 'member-1', 'normal', 'super'), false)
+  assert.deepEqual(feedbackSubmissionLimits('normal'), { daily: 2, open: 3 })
+  assert.deepEqual(feedbackSubmissionLimits('admin'), { daily: 5, open: 10 })
+  assert.deepEqual(feedbackSubmissionLimits('super'), { daily: null, open: null })
+  assert.equal(isFeedbackType('usability'), true)
+  assert.equal(isFeedbackType('spam'), false)
+  assert.equal(isFeedbackPage('task-groups'), true)
+  assert.equal(isFeedbackPage('unknown-page'), false)
 })
 
 test('development log accepts only known statuses and normalizes list input', () => {
