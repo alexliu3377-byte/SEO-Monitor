@@ -1165,7 +1165,7 @@ async function main() {
   const totalStart = Date.now()
   const ip = await getPublicIp()
   console.log(`\n${'▶'.repeat(60)}`)
-  console.log(`  SEO Monitor Crawl${retryFailed ? ' [重试模式]' : ''}${dateOverride ? ` [补抓 ${dateOverride}]` : ''}`)
+  console.log(`  奇心内容发布系统 Crawl${retryFailed ? ' [重试模式]' : ''}${dateOverride ? ` [补抓 ${dateOverride}]` : ''}`)
   console.log(`  step=${step}  site=${siteFilter ?? 'all'}  group=${group}/${totalGroups}  ip=${ip}  启动时间=${ts()} MYT`)
   console.log(`${'▶'.repeat(60)}`)
 

@@ -1,6 +1,24 @@
 name: Daily SEO Crawl
 
 on:
+  workflow_call:
+    inputs:
+      step:
+        type: string
+        required: true
+      site:
+        type: string
+        required: false
+        default: ''
+      date:
+        type: string
+        required: false
+        default: ''
+    secrets:
+      NEXT_PUBLIC_SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_ROLE_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       step:
@@ -22,7 +40,8 @@ on:
     - cron: '30 17 * * *'  # 01:30 MYT (target ~02:30 MYT after ~1h queue) — rank
     - cron: '30 18 * * *'  # 02:30 MYT — rank-title
     - cron: '30 19 * * *'  # 03:30 MYT — index-pages
-    - cron: '45 22 * * *'  # 06:45 MYT — tracking（index-pages retry 完成后）
+    # tracking no longer waits for a separate cron; retry-crawl.yml invokes it
+    # immediately after the final index-pages retry finishes.
 
 jobs:
   setup:
@@ -34,8 +53,8 @@ jobs:
       - name: Compute job matrix
         id: gen
         env:
-          SITE_INPUT: ${{ github.event.inputs.site }}
-          STEP_INPUT: ${{ github.event.inputs.step }}
+          SITE_INPUT: ${{ inputs.site || github.event.inputs.site }}
+          STEP_INPUT: ${{ inputs.step || github.event.inputs.step }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -49,7 +68,7 @@ jobs:
             echo "Single-site run ($SITE) → 1 group"
           else
             # 根据 step 决定每组站点上限
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
               STEP="$STEP_INPUT"
             elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
               STEP="keywords"
@@ -61,8 +80,6 @@ jobs:
               STEP="rank-title"
             elif [ "$EVENT_SCHEDULE" = "30 19 * * *" ]; then
               STEP="index-pages"
-            elif [ "$EVENT_SCHEDULE" = "45 22 * * *" ]; then
-              STEP="tracking"
             else
               STEP="all"
             fi
@@ -132,11 +149,11 @@ jobs:
       - name: Determine step
         id: vars
         env:
-          STEP_INPUT: ${{ github.event.inputs.step }}
+          STEP_INPUT: ${{ inputs.step || github.event.inputs.step }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
             STEP="$STEP_INPUT"
           elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
             STEP="keywords"
@@ -148,8 +165,6 @@ jobs:
             STEP="rank-title"
           elif [ "$EVENT_SCHEDULE" = "30 19 * * *" ]; then
             STEP="index-pages"
-          elif [ "$EVENT_SCHEDULE" = "45 22 * * *" ]; then
-            STEP="tracking"
           else
             STEP="all"
           fi
@@ -169,8 +184,8 @@ jobs:
 
       - name: Run crawl
         env:
-          SITE_INPUT: ${{ github.event.inputs.site }}
-          DATE_INPUT: ${{ github.event.inputs.date }}
+          SITE_INPUT: ${{ inputs.site || github.event.inputs.site }}
+          DATE_INPUT: ${{ inputs.date || github.event.inputs.date }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |

@@ -436,7 +436,7 @@ async function runStage2(reportId: string) {
   const periodLabel = periodType === 'week' ? '这一周' : periodType === 'month' ? '这一个月' : periodType === 'quarter' ? '这一个季度' : '这一年'
   const groupNamesForSchema = ownSummaries.map(g => `"${g.group_name}": "..."`).join(', ')
 
-  const stage2Prompt = `你是 SEO Monitor 的首席分析师，定期综合全站数据写一份报告。除大环境这段外，页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文；大环境这段没有数字单独展示给用户看，需要你完整写清楚。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：
+  const stage2Prompt = `你是奇心内容发布系统的首席分析师，定期综合全站数据写一份报告。除大环境这段外，页面上已经会把下面这些结构化数字直接展示出来，你不用在说明文字里逐条复述这些数字，只需要点出最值得注意的重点、异常、因果关系——简短、抓重点，不要写成大段散文；大环境这段没有数字单独展示给用户看，需要你完整写清楚。以下是${periodLabel}（${periodStart} 至 ${periodEnd}）的全部输入：
 
 【大环境·每日大盘】
 ${envDailyText}

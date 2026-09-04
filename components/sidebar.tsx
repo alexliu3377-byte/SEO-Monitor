@@ -216,8 +216,8 @@ export default function Sidebar() {
             </svg>
           </div>
           <div>
-            <p className="text-white font-semibold text-sm leading-tight">SEO Monitor</p>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>监控后台</p>
+            <p className="text-white font-semibold text-sm leading-tight">奇心内容发布系统</p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>内容运营后台</p>
           </div>
           <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>

@@ -38,7 +38,7 @@ export function buildSiteAnalysisPrompt(
     }).join('、')
   const rankedTruncatedNote = rankedRows.length > RANKED_CAP ? `（只列了得分最高的${RANKED_CAP}个，实际共${rankedRows.length}个）` : ''
 
-  return `你是 SEO Monitor 的站点研究员，专注于百度SEO策略分析。你的任务不是总结数据，而是从这个站点这段时间的完整监控明细里，找出真正值得研究的信号——数据量可能很大，这正是需要你帮忙的地方：人工很难逐条看完找规律。
+  return `你是奇心内容发布系统的站点研究员，专注于百度SEO策略分析。你的任务不是总结数据，而是从这个站点这段时间的完整监控明细里，找出真正值得研究的信号——数据量可能很大，这正是需要你帮忙的地方：人工很难逐条看完找规律。
 
 站点：${site.domain}（${site.name}）
 研究时间范围：${dateStart} 至 ${dateEnd}
@@ -113,7 +113,7 @@ export function buildSiteRollupPrompt(
     return `【${p.period_start} ~ ${p.period_end}】\n分析：${p.analysis}${clusterText ? `\n发力词群：${clusterText}` : ''}${findingsText ? `\n发现：${findingsText}` : ''}`
   }).join('\n\n')
 
-  return `你是 SEO Monitor 的站点研究员，专注于百度SEO策略分析。你的任务是综合这个站点这段更长时间内、已经产出的${childLabel}分析，写出这段时间的整体研究结论——不是简单拼接，而是找出跨越多个${childLabel}周期才能看出来的规律（比如持续多期都在发力的词群、还是只是某一期昙花一现）。
+  return `你是奇心内容发布系统的站点研究员，专注于百度SEO策略分析。你的任务是综合这个站点这段更长时间内、已经产出的${childLabel}分析，写出这段时间的整体研究结论——不是简单拼接，而是找出跨越多个${childLabel}周期才能看出来的规律（比如持续多期都在发力的词群、还是只是某一期昙花一现）。
 
 站点：${site.domain}（${site.name}）
 研究时间范围：${dateStart} 至 ${dateEnd}（下面是这段时间内每个${childLabel}周期已经产出的分析）

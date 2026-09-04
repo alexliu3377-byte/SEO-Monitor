@@ -134,9 +134,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'tracking',
     title: '成效追踪（竞品 + 自己站点）',
-    badge: 'step=tracking · GitHub Actions · 06:45 MYT（cron 22:45 UTC，index-pages retry 完成后）',
+    badge: 'step=tracking · GitHub Actions · index-pages 最后重试完成后立即运行',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 45 22 * * * UTC = 06:45 MYT)，在所有主抓取和重试（含 index-pages retry 06:30 MYT）完成后运行；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可；tracking 步骤按竞品站点数分片（SPG=5）' },
+      { label: '触发方式', text: 'retry-crawl.yml 的 index-pages 最后重试完成后，立即通过可复用的 daily-crawl.yml 运行 tracking，不再等待原来 06:45 MYT 的独立 cron；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可；tracking 步骤按竞品站点数分片（SPG=5）' },
       { label: '自己站点提交查询（2026-08-26 修复两处问题）', text: '① 分页：查全站90天内 status=submitted 的提交之前没分页，全站量超3000行会被 Supabase 硬顶截断，且没有排序时被截的偏偏是最近提交的部分（回补前实测92%的近两周提交从未写入 site_tracking_records）——已改成 fetchAllRows 真分页；② 分片重复：这部分处理的是全站claims、不是按分片的sites参数过滤，之前每个分片都会重新处理一遍全量claims（tracking步骤SPG=5，有几个分片就重复写几次同样的数据）——手动回补当天5194条积压时被5个分片并发放大、直接打出一波 Supabase Postgres/API Gateway 错误尖峰，已改成只由 group 0 处理一次，跟同一天 rank/rank-title 步骤那次同款修复一样' },
       { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同；网站管理列表里显示为"排名"）' },
       { label: '竞品信号来源', text: '① 排名信号（by keyword + by URL）：site_keyword_ranks 表中 stat_date=today + platform=mobile 的当日涨跌词；还通过 site_keyword_ranks.url 与 raw_keywords.source_url 交叉匹配（URL 优先级高，能捕获 keyword 名称不一致的案例）；② 收录信号：site_indexed_pages 表中 first_seen_date=today 的新收录 URL，通过 source_url 反查 raw_keywords 得到关键词' },
@@ -198,9 +198,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'environment-snapshot',
     title: '环境快照',
-    badge: 'environment-snapshot.yml · GitHub Actions · 每日 07:15 MYT（cron 23:15 UTC）',
+    badge: 'retry-crawl.yml · tracking 完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions environment-snapshot.yml（cron 15 23 * * * UTC = 07:15 MYT），在所有日常抓取和重试完成后运行；也可 workflow_dispatch 手动指定日期；调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET）' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 在 index-pages 最后重试及 tracking 全部完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），不再等待固定时刻，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
       { label: '计算来源', text: '① rank_changes：统计目标日期全站涨/跌排名词总数及有数据站点数；② index_snapshots：对比目标日期与前一日各站收录数，计算平均变化百分比；③ 日期本身：计算星期几、是否中国大陆法定节假日、是否学生放假期间（暑假7-8月、寒假1月20日-2月底）' },
       { label: '写入表', text: 'environment_daily（按 date 唯一 upsert；字段：date, weekday, is_holiday, is_school_holiday, total_rankup, total_rankdown, sites_with_rank_data, avg_index_change_pct, sites_with_index_data, crawl_anomaly；永久保留）' },
       { label: 'crawl_anomaly 判定', text: '当日 total_rankup + total_rankdown = 0 时标记为 true，表示排名数据疑似未抓取到；用于在评分时排除异常日期的数据' },
@@ -211,9 +211,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'hot-radar-cache',
     title: '热词雷达缓存',
-    badge: 'hot-radar-cache.yml · GitHub Actions · 每日 08:00 MYT（cron 0 0 UTC）',
+    badge: 'retry-crawl.yml · 环境快照完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions hot-radar-cache.yml（cron 0 0 * * * UTC = 08:00 MYT，在所有日常抓取/重试/环境快照都完成后运行），调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET）；也可 workflow_dispatch 手动触发' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 的同一个 post-crawl-refresh job 在环境快照完成后立即调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET），不再单独排队启动定时 runner，也不需要进入页面；hot-radar-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-11 新增）', text: '热词雷达（研究中心/分组任务共用同一个 /api/hot-radar 接口）之前每次打开页面都现场跑 get_hot_new_words/get_hot_rank_words/get_hot_streak_words 三个 RPC，各自要扫 rank_changes/site_keyword_ranks 近30天全量数据——这两张表永久保留、每天持续写入，随数据量增长单次调用要2-8秒，实测 get_hot_rank_words 通过真实 PostgREST 接口（8秒默认超时）会直接超时报错，页面表现为"暂无数据"（用户反馈"每天打开都很慢"）；已同时给 site_keyword_ranks 补上覆盖索引（跟 rank_changes 那边已有的同款）、调大这三个函数的 work_mem/statement_timeout，但即使修好索引这类"扫全量近30天数据"的查询仍会随表继续增长而变慢，遂改成定时预算好+缓存' },
       { label: '计算逻辑', text: 'lib/hot-radar.ts 的 computeHotRadarPayload()——原本写在 /api/hot-radar/route.ts 里的聚合逻辑原样抽出来，供读接口（缓存未命中兜底）和刷新接口共用同一份代码，不会出现两边逻辑长出差异' },
       { label: '写入表', text: 'hot_radar_cache（单行，id 固定为 \'latest\'，upsert；字段 payload 存完整JSON结果，computed_at 记录算的时间）' },
@@ -228,9 +228,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'group-tracking-cache',
     title: '分组报告缓存',
-    badge: 'group-tracking-cache.yml · GitHub Actions · 每日 08:05 MYT（cron 5 0 UTC）',
+    badge: 'retry-crawl.yml · 热词缓存完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions group-tracking-cache.yml（cron 5 0 * * * UTC = 08:05 MYT，在 tracking 抓取步骤06:45、环境快照07:15都完成后运行），调用 GET /api/tracking-cache/refresh（Bearer CRON_SECRET）；也可 workflow_dispatch 手动触发' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 的同一个 post-crawl-refresh job 在 tracking、环境快照和热词缓存之后立即调用 GET /api/tracking-cache/refresh（Bearer CRON_SECRET），不再等待 08:05 MYT，也不需要进入页面；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-18 新增）', text: '分组报告"成效追踪"（/api/task-groups/[id]/outcomes）和"追踪汇总"（/api/task-groups/[id]/tracking-summary）之前每次打开页面都现场对 site_tracking_records 做全量扫描（这张表永久保留，接口本身不带时间范围限制）+ 批量查认领来源/排名匹配词 + "更新"型claim的真新排名历史判断，多轮查询叠加导致打开很慢（用户反馈）。用户明确接受"数据只到当天早上、当天新提交的记录要等第二天才反映"这个延迟，换成定时预算好+缓存，跟热词雷达同一套思路' },
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
       { label: '写入表', text: 'group_tracking_cache（一个分组一行，group_id 为主键，upsert；payload 存这个分组全部claim的"增强行"JSON数组，已按claim_id去重取最新、带算好的分数；computed_at 记录算的时间）' },

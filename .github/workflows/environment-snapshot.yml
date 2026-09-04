@@ -1,8 +1,8 @@
 name: Environment Daily Snapshot
 
 on:
-  schedule:
-    - cron: '15 23 * * *'  # 07:15 MYT（所有抓取和重试完成后）
+  # Daily execution is chained from retry-crawl.yml after the final retry.
+  # Keep this workflow as a manual recovery/backfill entry point.
   workflow_dispatch:
     inputs:
       date:

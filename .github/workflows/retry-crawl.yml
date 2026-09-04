@@ -167,3 +167,85 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+  # The final index-pages retry is followed immediately by tracking. This
+  # replaces tracking's old independent 06:45 cron and removes the idle gap.
+  tracking:
+    needs: [setup, retry]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.retry.result != 'cancelled' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
+    uses: ./.github/workflows/daily-crawl.yml
+    with:
+      step: tracking
+    secrets: inherit
+
+  # Once tracking has finished, refresh all derived data on one lightweight
+  # runner instead of waiting for three separately scheduled workflows/runners.
+  post-crawl-refresh:
+    needs: tracking
+    if: >-
+      always() &&
+      needs.tracking.result != 'cancelled' &&
+      needs.tracking.result != 'skipped' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Refresh environment daily snapshot
+        id: environment
+        continue-on-error: true
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/environment/daily-snapshot")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+      - name: Refresh hot radar cache
+        id: hot_radar
+        continue-on-error: true
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/hot-radar/refresh")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+      - name: Refresh group tracking cache
+        id: group_tracking
+        continue-on-error: true
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 600 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/tracking-cache/refresh")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+      - name: Verify all refreshes
+        if: always()
+        env:
+          ENVIRONMENT_RESULT: ${{ steps.environment.outcome }}
+          HOT_RADAR_RESULT: ${{ steps.hot_radar.outcome }}
+          GROUP_TRACKING_RESULT: ${{ steps.group_tracking.outcome }}
+        run: |
+          echo "Environment: $ENVIRONMENT_RESULT"
+          echo "Hot radar: $HOT_RADAR_RESULT"
+          echo "Group tracking: $GROUP_TRACKING_RESULT"
+          if [ "$ENVIRONMENT_RESULT" != "success" ] || [ "$HOT_RADAR_RESULT" != "success" ] || [ "$GROUP_TRACKING_RESULT" != "success" ]; then
+            echo "One or more post-crawl refreshes failed"
+            exit 1
+          fi

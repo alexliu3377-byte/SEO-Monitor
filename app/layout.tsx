@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'SEO Monitor — 监控后台',
-  description: 'SEO关键词监控与竞品分析系统',
+  title: '奇心内容发布系统',
+  description: '内容发布、SEO监控与竞品分析系统',
 }
 
 export default function RootLayout({

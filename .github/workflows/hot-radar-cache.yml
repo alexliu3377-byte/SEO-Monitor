@@ -1,8 +1,8 @@
 name: Hot Radar Cache Refresh
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # 08:00 MYT
+  # Daily execution is chained from retry-crawl.yml after the final retry.
+  # Keep this workflow as a manual recovery entry point.
   workflow_dispatch:
 
 jobs:
