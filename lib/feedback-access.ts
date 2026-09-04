@@ -11,6 +11,9 @@ export const FEEDBACK_PAGES = [
 ] as const
 export type FeedbackPage = typeof FEEDBACK_PAGES[number]
 
+export const FEEDBACK_MESSAGE_TYPES = ['discussion', 'research', 'experiment', 'decision'] as const
+export type FeedbackMessageType = typeof FEEDBACK_MESSAGE_TYPES[number]
+
 export const ACTIVE_FEEDBACK_STATUSES = ['pending', 'accepted', 'in_progress', 'blocked'] as const
 
 export function isFeedbackRole(value: unknown): value is FeedbackRole {
@@ -23,6 +26,10 @@ export function isFeedbackType(value: unknown): value is FeedbackType {
 
 export function isFeedbackPage(value: unknown): value is FeedbackPage {
   return typeof value === 'string' && (FEEDBACK_PAGES as readonly string[]).includes(value)
+}
+
+export function isFeedbackMessageType(value: unknown): value is FeedbackMessageType {
+  return typeof value === 'string' && (FEEDBACK_MESSAGE_TYPES as readonly string[]).includes(value)
 }
 
 export function feedbackScopeFor(role: FeedbackRole, requested: string | null): FeedbackScope {

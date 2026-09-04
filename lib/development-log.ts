@@ -6,6 +6,8 @@ export type ReleaseStatus = typeof RELEASE_STATUSES[number]
 export const REQUEST_STATUSES = [
   'pending',
   'accepted',
+  'researching',
+  'trial',
   'in_progress',
   'completed',
   'blocked',

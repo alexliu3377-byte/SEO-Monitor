@@ -24,6 +24,7 @@ import {
   canViewFeedback,
   feedbackScopeFor,
   feedbackSubmissionLimits,
+  isFeedbackMessageType,
   isFeedbackPage,
   isFeedbackType,
 } from '../lib/feedback-access'
@@ -135,12 +136,16 @@ test('feedback visibility separates personal, routine and super priority scopes'
   assert.equal(isFeedbackType('spam'), false)
   assert.equal(isFeedbackPage('task-groups'), true)
   assert.equal(isFeedbackPage('unknown-page'), false)
+  assert.equal(isFeedbackMessageType('research'), true)
+  assert.equal(isFeedbackMessageType('private'), false)
 })
 
 test('development log accepts only known statuses and normalizes list input', () => {
   assert.equal(isReleaseStatus('completed'), true)
   assert.equal(isReleaseStatus('blocked'), false)
   assert.equal(isDevelopmentRequestStatus('blocked'), true)
+  assert.equal(isDevelopmentRequestStatus('researching'), true)
+  assert.equal(isDevelopmentRequestStatus('trial'), true)
   assert.equal(isDevelopmentRequestStatus('unknown'), false)
   assert.deepEqual(cleanStringList([' first ', '', 7, 'second']), ['first', 'second'])
 })
