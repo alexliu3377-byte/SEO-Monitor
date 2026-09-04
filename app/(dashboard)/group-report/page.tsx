@@ -371,11 +371,12 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
     if (!activeTabId || !canSeeAll) return
     setTrackingLoading(true)
     try {
-      const params = scopeParams(trackingMonth, trackingScope)
-      params.set('refresh', '1')
-      const response = await fetch(`/api/task-groups/${activeTabId}/tracking-summary?${params}`)
+      const refreshResponse = await fetch(`/api/tracking-cache/refresh?groupId=${encodeURIComponent(activeTabId)}`)
+      const refreshResult = await refreshResponse.json()
+      if (!refreshResponse.ok || !refreshResult.success) throw new Error(refreshResult.error || '刷新失败')
+      const response = await fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`)
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || '刷新失败')
+      if (!response.ok) throw new Error(data.error || '刷新结果加载失败')
       setTrackingData(data)
       setLoadError(current => current?.scope === 'tracking' ? null : current)
     } catch (error) {
@@ -903,8 +904,8 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       </span>
                     )}
                     {trackingData.canSeeAll && (
-                      <button type="button" onClick={refreshTrackingSummary} className="btn-secondary min-h-11 px-3">
-                        刷新最新数据
+                      <button type="button" onClick={refreshTrackingSummary} disabled={trackingLoading} className="btn-secondary min-h-11 px-3 disabled:cursor-not-allowed disabled:opacity-60">
+                        {trackingLoading ? '正在重建缓存…' : '刷新最新数据'}
                       </button>
                     )}
                   </div>

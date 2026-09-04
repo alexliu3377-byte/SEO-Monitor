@@ -8,6 +8,7 @@ import {
 } from '@/lib/tracking-summary'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
+import { loadFastTrackingDetail } from '@/lib/group-tracking-cache'
 
 interface DetailRow {
   claim_id: string; user_id: string; submit_date: string; record_date: string
@@ -58,6 +59,43 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (scope === 'member') {
     if (!memberList.some(m => m.user_id === requestedMemberId)) scope = 'total'
     else scopeUserId = requestedMemberId
+  }
+
+  const bucket = kind === 'rank' ? RANK_BUCKETS.find(item => item.label === bucketLabel)! : null
+  const fastDetail = await loadFastTrackingDetail(service, {
+    p_group_id: groupId,
+    p_start_date: start,
+    p_end_date: end,
+    p_effectiveness: kind === 'rank' ? '获取排名' : '获取收录',
+    p_scope_user_id: scope === 'total' ? null : scope === 'own' ? user.id : scopeUserId,
+    p_rank_min: bucket?.min ?? null,
+    p_rank_max: bucket?.max ?? null,
+    p_offset: page * pageSize,
+    p_limit: pageSize,
+  }) as { rows?: Array<Record<string, unknown>>; total?: number } | null
+  if (fastDetail) {
+    const fastRows = fastDetail.rows ?? []
+    const names = await resolveUserDisplayNames(
+      service,
+      fastRows.map(row => typeof row.user_id === 'string' ? row.user_id : '').filter(Boolean),
+      memberList,
+    )
+    const rows = fastRows.map(row => {
+      const safeRow = { ...row }
+      const rowUserId = typeof safeRow.user_id === 'string' ? safeRow.user_id : ''
+      if (scope === 'total') safeRow.username = names.get(rowUserId) ?? safeRow.username
+      else delete safeRow.username
+      delete safeRow.user_id
+      return safeRow
+    })
+    return NextResponse.json({
+      kind,
+      bucket: kind === 'rank' ? bucketLabel : undefined,
+      rows,
+      total: fastDetail.total ?? 0,
+      page,
+      pageSize,
+    })
   }
 
   // Supabase/PostgREST 在这个项目上单次查询硬截到3000行，不管 .limit() 传多大——

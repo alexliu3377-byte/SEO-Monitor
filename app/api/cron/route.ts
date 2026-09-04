@@ -42,6 +42,7 @@ import {
 import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 
 interface SiteRecord {
   id: string
@@ -932,8 +933,7 @@ export async function GET(request: Request) {
           }
           const changedGroupIds = Array.from(new Set(claims.map((claim: ClaimRow) => claim.group_id).filter(Boolean)))
           if (changedGroupIds.length > 0) {
-            const { error: cacheError } = await supabase.from('group_tracking_cache').delete().in('group_id', changedGroupIds)
-            if (cacheError) console.error('tracking-cache invalidation failed:', cacheError.code)
+            await Promise.all(changedGroupIds.map(groupId => invalidateGroupTrackingCache(supabase, groupId)))
           }
           ownRows = ownUpsertRows.length
         }

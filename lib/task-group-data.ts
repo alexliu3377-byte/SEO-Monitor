@@ -55,6 +55,11 @@ export async function normalizeTaskGroupMembers(
 }
 
 export async function invalidateGroupTrackingCache(service: any, groupId: string) {
-  const { error } = await service.from('group_tracking_cache').delete().eq('group_id', groupId)
-  if (error) console.error('Failed to invalidate group tracking cache', { groupId, code: error.code })
+  const { error } = await service.rpc('invalidate_group_tracking_paged_cache', { p_group_id: groupId })
+  if (!error) return
+  if (!['42883', 'PGRST202'].includes(error.code ?? '')) {
+    console.error('Failed to invalidate paged group tracking cache', { groupId, code: error.code })
+  }
+  const { error: legacyError } = await service.from('group_tracking_cache').delete().eq('group_id', groupId)
+  if (legacyError) console.error('Failed to invalidate group tracking cache', { groupId, code: legacyError.code })
 }

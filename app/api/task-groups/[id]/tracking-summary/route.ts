@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
-import { loadGroupTrackingPayload, type EnrichedTrackRow, type RankMatchWithFlag } from '@/lib/group-tracking-cache'
+import {
+  loadFastTrackingMonth, loadGroupTrackingPayload,
+  type EnrichedTrackRow, type RankMatchWithFlag,
+} from '@/lib/group-tracking-cache'
 import {
   currentMonth, monthRange, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
 } from '@/lib/tracking-summary'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
+import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 
 export const maxDuration = 60
 
@@ -108,13 +112,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   if (canSeeAll && searchParams.get('refresh') === '1') {
-    const { error: refreshError } = await service
-      .from('group_tracking_cache')
-      .delete()
-      .eq('group_id', groupId)
-    if (refreshError) {
-      return NextResponse.json({ error: 'Failed to refresh tracking data' }, { status: 500 })
-    }
+    await invalidateGroupTrackingCache(service, groupId)
   }
 
   // Non-admins can only ever view their own scope, regardless of what the
@@ -124,6 +122,69 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (scope === 'member') {
     if (!memberList.some(m => m.user_id === requestedMemberId)) scope = 'total'
     else scopeUserId = requestedMemberId
+  }
+
+  const fastMonth = await loadFastTrackingMonth(service, groupId, month)
+  if (fastMonth) {
+    const cached = fastMonth.data
+    const canonicalNames = await resolveUserDisplayNames(
+      service,
+      cached.members.map(member => member.userId),
+      memberList,
+    )
+    const cachedMembers = cached.members.map(member => ({
+      ...member,
+      username: canonicalNames.get(member.userId) ?? member.username,
+      summary: {
+        ...member.summary,
+        username: canonicalNames.get(member.userId) ?? member.summary.username,
+      },
+    }))
+    const selectedUserId = scope === 'own' ? user.id : scope === 'member' ? scopeUserId : ''
+    const selectedMember = selectedUserId
+      ? cachedMembers.find(member => member.userId === selectedUserId)
+      : undefined
+    const summary = scope === 'total'
+      ? cached.groupSummary
+      : selectedMember?.summary ?? buildSummary([], new Map(), selectedUserId, selectedUserId.slice(0, 8))
+    const scopeSourceEffectiveness = scope === 'total'
+      ? cached.groupSourceEffectiveness
+      : selectedMember?.sourceEffectiveness ?? []
+    const cachedNames = new Map(cachedMembers.map(member => [member.userId, member.username]))
+    const fullRanking = cachedMembers
+      .filter(member => member.isMember)
+      .map(member => member.summary)
+      .sort((a, b) => b.totalScore - a.totalScore)
+    const ranking = fullRanking.map((memberSummary, index) => {
+      const visible = canSeeAll || memberSummary.userId === user.id
+      return {
+        rank: index + 1,
+        userId: memberSummary.userId,
+        username: memberSummary.username,
+        submitted: visible ? memberSummary.submitted.total : null,
+        ranked: visible ? memberSummary.ranked.total : null,
+        indexed: visible ? memberSummary.indexed.count : null,
+        totalScore: visible ? memberSummary.totalScore : null,
+      }
+    })
+
+    return NextResponse.json({
+      month,
+      canSeeAll,
+      isMember,
+      scope: scope === 'member' ? scopeUserId : scope,
+      memberList: canSeeAll ? memberList.map(member => ({
+        userId: member.user_id,
+        username: cachedNames.get(member.user_id) ?? member.username ?? member.user_id.slice(0, 8),
+      })) : undefined,
+      summary,
+      groupSummary: canSeeAll ? cached.groupSummary : undefined,
+      groupSourceEffectiveness: cached.groupSourceEffectiveness,
+      scopeSourceEffectiveness,
+      ranking,
+      computedAt: fastMonth.computedAt,
+      fromCache: true,
+    })
   }
 
   // 2026-08-18：这个接口原来的"实时查site_tracking_records当月部分+批量查

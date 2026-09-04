@@ -1751,7 +1751,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   async function openCreateModal() {
     setShowCreate(true); setCreateName(''); setSelectedUsers(new Set()); setMemberTypes({})
     setSelectedRankDomains(new Set()); setSelectedNewDomains(new Set())
-    const [usersRes] = await Promise.all([fetch('/api/admin/users'), loadAllSites()])
+    const [usersRes] = await Promise.all([fetch('/api/admin/users?activeOnly=1'), loadAllSites()])
     const data = await usersRes.json()
     setUserOptions((data.users || []).filter((u: UserOption) => u.role !== 'super'))
   }
@@ -1782,7 +1782,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     for (const m of group.members) types[m.user_id] = m.member_type === 'game' ? 'game' : 'app'
     setEditMemberTypes(types); setShowEdit(true)
     const promises: Promise<unknown>[] = [loadAllSites()]
-    if (userOptions.length === 0) promises.push(fetch('/api/admin/users').then(r => r.json()).then(d => setUserOptions(d.users || [])))
+    if (userOptions.length === 0) promises.push(fetch('/api/admin/users?activeOnly=1').then(r => r.json()).then(d => setUserOptions(d.users || [])))
     await Promise.all(promises)
   }
 

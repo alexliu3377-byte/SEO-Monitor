@@ -10,6 +10,14 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Live user_profiles is managed by Supabase Auth and is not fully reproduced
+-- in this historical snapshot. These columns preserve former employees so
+-- their submitted work continues to resolve to a stable display name.
+ALTER TABLE IF EXISTS user_profiles
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS disabled_by UUID;
+
 -- Sites table
 CREATE TABLE IF NOT EXISTS sites (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -287,6 +295,36 @@ CREATE TABLE IF NOT EXISTS group_tracking_cache (
   group_id    UUID PRIMARY KEY REFERENCES task_groups(id) ON DELETE CASCADE,
   payload     JSONB NOT NULL,
   computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 2026-09-04: server-side paginated replacement for the large JSON cache.
+-- The RPC definitions and permissions live in
+-- migrations/20260904_group_tracking_paged_cache.sql.
+CREATE TABLE IF NOT EXISTS group_tracking_cache_state (
+  group_id        UUID PRIMARY KEY REFERENCES task_groups(id) ON DELETE CASCADE,
+  computed_at     TIMESTAMPTZ NOT NULL,
+  row_count       INTEGER NOT NULL DEFAULT 0 CHECK (row_count >= 0),
+  summary_payload JSONB NOT NULL DEFAULT '{}'::JSONB
+);
+
+CREATE TABLE IF NOT EXISTS group_tracking_cache_rows (
+  group_id          UUID NOT NULL REFERENCES task_groups(id) ON DELETE CASCADE,
+  claim_id          UUID NOT NULL,
+  user_id           UUID NOT NULL,
+  submit_date       DATE NOT NULL,
+  record_date       DATE NOT NULL,
+  keyword           TEXT NOT NULL,
+  final_keyword     TEXT,
+  operation_type    TEXT,
+  search_volume     BIGINT NOT NULL DEFAULT 0,
+  is_indexed        BOOLEAN NOT NULL DEFAULT FALSE,
+  effectiveness     TEXT NOT NULL,
+  rank_keyword      TEXT,
+  best_rank_position INTEGER,
+  total_rank_volume BIGINT NOT NULL DEFAULT 0,
+  score              NUMERIC NOT NULL DEFAULT 0,
+  payload             JSONB NOT NULL,
+  PRIMARY KEY (group_id, claim_id)
 );
 
 -- get_hot_rank_words 含 rank_days（涨排次数 = 不同日期数）

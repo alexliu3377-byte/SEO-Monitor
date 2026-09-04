@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { activityStart, activityEnd } from '@/lib/activity-log'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { isKeywordExportOwner } from '@/lib/kw-export-owner'
-
-async function log(supabase: ReturnType<typeof createServiceClient>, step: string, ok: number, summary: string, t0: number) {
-  const aid = await activityStart(supabase, { type: 'search', source: 'browser', step })
-  if (aid) await activityEnd(supabase, aid, { status: 'done', ok, summary, durationMs: Date.now() - t0 })
-}
 
 export async function GET(req: Request) {
   const authCheck = await createClient()
@@ -22,8 +16,6 @@ export async function GET(req: Request) {
   if ((exportAll || exportToday) && !isKeywordExportOwner(user.id)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const t0 = Date.now()
-
   const supabase = createServiceClient()
 
   if (exportToday) {
@@ -65,7 +57,6 @@ export async function GET(req: Request) {
       })
       .sort((a, b) => b.volume - a.volume)
 
-    await log(supabase, 'kw-export-today', result.length, `今日新词导出 ${result.length} 个`, t0)
     return NextResponse.json({ keywords: result })
   }
 
@@ -86,7 +77,6 @@ export async function GET(req: Request) {
       if (data.length < batchSize) break
       offset += batchSize
     }
-    await log(supabase, 'kw-export-all', allRows.length, `全量导出 ${allRows.length} 个词`, t0)
     return NextResponse.json({ keywords: allRows })
   }
 
@@ -110,6 +100,5 @@ export async function GET(req: Request) {
 
   const results = data || []
   const total = count ?? 0
-  if (q && pg === 0) await log(supabase, 'kw-search', total, `搜索「${q}」→ ${total} 个词`, t0)
   return NextResponse.json({ keywords: results, total })
 }

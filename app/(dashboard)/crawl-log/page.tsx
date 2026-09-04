@@ -6,7 +6,7 @@ import { CRAWL_RULES } from '@/lib/crawl-rules'
 
 type ActivityLog = {
   id: string
-  type: 'cron_task' | 'cron_manual' | 'search'
+  type: 'cron_task' | 'cron_manual'
   source: string | null
   step: string | null
   domain: string | null
@@ -92,7 +92,7 @@ const STEP_TIMES: Record<string, string> = {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  cron_task: '任务cron', cron_manual: '手动cron', search: '搜索',
+  cron_task: '任务cron', cron_manual: '手动cron',
 }
 
 const SITE_STATUS_LABELS: Record<string, string> = {
@@ -364,6 +364,7 @@ export default function CrawlLogPage() {
     const { data: logsData, error: logsErr } = await supabase
       .from('activity_log')
       .select('*')
+      .neq('type', 'search')
       .order('logged_at', { ascending: false })
       .limit(200)
     if (logsErr) errors.push(logsErr.message)
@@ -727,7 +728,6 @@ export default function CrawlLogPage() {
                     <option value="">类型</option>
                     <option value="cron_task">任务cron</option>
                     <option value="cron_manual">手动cron</option>
-                    <option value="search">搜索</option>
                   </select>
                   <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">▼</span>
                 </div>

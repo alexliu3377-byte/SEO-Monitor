@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { loadGroupTrackingPayload } from '@/lib/group-tracking-cache'
+import { loadFastOutcomesPage, loadGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
+import { resolveUserDisplayNames } from '@/lib/user-display-name'
 
 export const maxDuration = 60
 
@@ -38,6 +39,35 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const sortDir              = searchParams.get('sortDir') || 'desc'
   const page                = Math.max(0, parseInt(searchParams.get('page') || '0', 10) || 0)
   const pageSize            = Math.min(200, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10) || 20))
+
+  const memberId = canSeeAll && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(filterMember)
+    ? filterMember
+    : null
+  const fastPage = await loadFastOutcomesPage(service, {
+    p_group_id: groupId,
+    p_visible_user_id: canSeeAll ? null : userId,
+    p_member_id: memberId,
+    p_operation_type: filterOp,
+    p_keyword: filterKw,
+    p_indexed: filterIndex,
+    p_rank_keyword: filterRankKw,
+    p_effectiveness: filterEffectiveness,
+    p_sort_by: sortBy,
+    p_sort_dir: sortDir,
+    p_offset: page * pageSize,
+    p_limit: pageSize,
+  })
+  if (fastPage) {
+    const cachedRows = Array.isArray((fastPage as { rows?: unknown }).rows)
+      ? (fastPage as { rows: EnrichedTrackRow[] }).rows
+      : []
+    const names = await resolveUserDisplayNames(service, cachedRows.map(row => row.user_id))
+    const rows = cachedRows.map(row => ({
+      ...row,
+      username: names.get(row.user_id) ?? row.username,
+    }))
+    return NextResponse.json({ ...fastPage, rows, page, pageSize, truncated: false })
+  }
 
   // 2026-08-18：这张表原来的"实时查site_tracking_records全量+批量查认领来源/
   // 排名匹配词/更新型真新排名历史+逐行算分"那一整套很重（用户反馈"打开很

@@ -10,6 +10,8 @@ interface UserRecord {
   email: string
   username: string | null
   role: UserRole
+  is_active: boolean
+  disabled_at: string | null
   created_at: string
 }
 
@@ -543,7 +545,7 @@ function SiteAccessModal({ user, onClose }: { user: UserRecord; onClose: () => v
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { role: myRole } = useUser()
+  const { id: myId, role: myRole } = useUser()
   const isManager = myRole === 'super' || myRole === 'admin'
 
   // ── Normal user: just change password ──
@@ -551,7 +553,7 @@ export default function SettingsPage() {
     return <NormalSettings />
   }
 
-  return <ManagerSettings callerRole={myRole} />
+  return <ManagerSettings callerId={myId} callerRole={myRole} />
 }
 
 // ─── Normal settings (change password) ───────────────────────────────────────
@@ -615,7 +617,7 @@ function NormalSettings() {
 
 // ─── Manager settings (account management) ────────────────────────────────────
 
-function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
+function ManagerSettings({ callerId, callerRole }: { callerId: string; callerRole: UserRole }) {
   const [users, setUsers] = useState<UserRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [showChangePwd, setShowChangePwd] = useState(false)
@@ -623,9 +625,10 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null)
   const [accessUser, setAccessUser] = useState<UserRecord | null>(null)
   const [ipWhitelistUser, setIpWhitelistUser] = useState<UserRecord | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRecord | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [offboardingId, setOffboardingId] = useState<string | null>(null)
+  const [pendingOffboardUser, setPendingOffboardUser] = useState<UserRecord | null>(null)
+  const [offboardConfirm, setOffboardConfirm] = useState('')
+  const [offboardError, setOffboardError] = useState<string | null>(null)
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -639,25 +642,35 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
-  function handleDelete(user: UserRecord) {
-    setPendingDeleteUser(user)
-    setDeleteError(null)
+  function handleOffboard(user: UserRecord) {
+    setPendingOffboardUser(user)
+    setOffboardConfirm('')
+    setOffboardError(null)
   }
 
-  async function confirmDelete() {
-    const user = pendingDeleteUser
+  async function confirmOffboard() {
+    const user = pendingOffboardUser
     if (!user) return
-    setDeletingId(user.id)
+    const expected = user.username ?? user.email
+    if (offboardConfirm.trim() !== expected) {
+      setOffboardError(`请输入“${expected}”确认`)
+      return
+    }
+    setOffboardingId(user.id)
     try {
-      const response = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' })
+      const response = await fetch(`/api/admin/users/${user.id}/offboard`, { method: 'POST' })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || '删除失败')
-      setUsers(prev => prev.filter(u => u.id !== user.id))
-      setPendingDeleteUser(null)
+      if (!response.ok) throw new Error(data.error || '办理离职失败')
+      setUsers(prev => prev.map(item => item.id === user.id ? {
+        ...item,
+        is_active: false,
+        disabled_at: data.user?.disabled_at ?? new Date().toISOString(),
+      } : item))
+      setPendingOffboardUser(null)
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : '删除失败')
+      setOffboardError(error instanceof Error ? error.message : '办理离职失败')
     } finally {
-      setDeletingId(null)
+      setOffboardingId(null)
     }
   }
 
@@ -698,6 +711,7 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
               <tr>
                 <th className="table-th">用户名</th>
                 <th className="table-th text-center">权限</th>
+                <th className="table-th text-center">状态</th>
                 <th className="table-th">注册时间</th>
                 <th className="table-th text-right">操作</th>
               </tr>
@@ -705,27 +719,37 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
             <tbody className="divide-y divide-gray-100">
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="table-td text-center text-gray-400 py-10">暂无账号</td>
+                  <td colSpan={5} className="table-td text-center text-gray-400 py-10">暂无账号</td>
                 </tr>
               ) : users.map(user => (
-                <tr key={user.id} className="hover:bg-gray-100 transition-colors">
+                <tr key={user.id} className={`hover:bg-gray-100 transition-colors ${user.is_active ? '' : 'bg-gray-50/70'}`}>
                   <td className="table-td">
-                    <span className="font-medium text-gray-900">{user.username ?? <span className="text-gray-400 italic">未设置</span>}</span>
+                    <span className={`font-medium ${user.is_active ? 'text-gray-900' : 'text-gray-500'}`}>{user.username ?? <span className="text-gray-400 italic">未设置</span>}</span>
                     <span className="text-gray-400"> · {user.email}</span>
                   </td>
                   <td className="table-td text-center"><RoleBadge role={user.role} /></td>
+                  <td className="table-td text-center">
+                    {user.is_active ? (
+                      <span className="inline-flex rounded border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">在职</span>
+                    ) : (
+                      <span className="inline-flex rounded border border-gray-200 bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">已离职</span>
+                    )}
+                  </td>
                   <td className="table-td text-gray-500">
-                    {new Date(user.created_at).toLocaleDateString('zh-CN')}
+                    <div>{new Date(user.created_at).toLocaleDateString('zh-CN')}</div>
+                    {!user.is_active && user.disabled_at && (
+                      <div className="mt-0.5 text-xs text-gray-400">停用：{new Date(user.disabled_at).toLocaleDateString('zh-CN')}</div>
+                    )}
                   </td>
                   <td className="table-td text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => setIpWhitelistUser(user)}
-                        className="text-xs text-orange-500 hover:text-orange-700 border border-orange-100 rounded px-1.5 py-0.5 hover:border-orange-200 transition-colors"
-                      >
-                        IP白名单
-                      </button>
-                      {user.role !== 'super' && (callerRole === 'super' || user.role === 'normal') && (
+                      {user.is_active && <button
+                          onClick={() => setIpWhitelistUser(user)}
+                          className="text-xs text-orange-500 hover:text-orange-700 border border-orange-100 rounded px-1.5 py-0.5 hover:border-orange-200 transition-colors"
+                        >
+                          IP白名单
+                        </button>}
+                      {user.is_active && user.role !== 'super' && (callerRole === 'super' || user.role === 'normal') && (
                         <button
                           onClick={() => setAccessUser(user)}
                           className="text-xs text-purple-500 hover:text-purple-700 border border-purple-100 rounded px-1.5 py-0.5 hover:border-purple-200 transition-colors"
@@ -733,7 +757,7 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
                           {user.role === 'admin' ? '负责站点' : '站点权限'}
                         </button>
                       )}
-                      {!(callerRole === 'admin' && user.role === 'super') && (
+                      {user.is_active && !(callerRole === 'admin' && user.role === 'super') && (
                         <button
                           onClick={() => setEditingUser(user)}
                           className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors"
@@ -741,15 +765,16 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
                           编辑
                         </button>
                       )}
-                      {!(callerRole === 'admin' && user.role === 'super') && (
+                      {user.is_active && user.id !== callerId && !(callerRole === 'admin' && user.role !== 'normal') && (
                         <button
-                          onClick={() => handleDelete(user)}
-                          disabled={deletingId === user.id}
-                          className="text-xs text-red-400 hover:text-red-600 border border-red-100 rounded px-1.5 py-0.5 hover:border-red-200 transition-colors disabled:opacity-40"
+                          onClick={() => handleOffboard(user)}
+                          disabled={offboardingId === user.id}
+                          className="text-xs text-red-500 hover:text-red-700 border border-red-100 rounded px-1.5 py-0.5 hover:border-red-200 transition-colors disabled:opacity-40"
                         >
-                          {deletingId === user.id ? '删除中...' : '删除'}
+                          {offboardingId === user.id ? '办理中...' : '办理离职'}
                         </button>
                       )}
+                      {!user.is_active && <span className="text-xs text-gray-400">历史资料已保留</span>}
                     </div>
                   </td>
                 </tr>
@@ -781,18 +806,28 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
       {ipWhitelistUser && (
         <IpWhitelistModal user={ipWhitelistUser} onClose={() => setIpWhitelistUser(null)} />
       )}
-      {pendingDeleteUser && (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="delete-user-title" aria-describedby="delete-user-description" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      {pendingOffboardUser && (
+        <div role="alertdialog" aria-modal="true" aria-labelledby="offboard-user-title" aria-describedby="offboard-user-description" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
-            <h2 id="delete-user-title" className="text-lg font-semibold text-gray-900">确认删除账号</h2>
-            <p id="delete-user-description" className="mt-2 text-sm text-gray-600">
-              确定要删除账号 {pendingDeleteUser.username ?? pendingDeleteUser.email}？此操作不可撤销。
+            <h2 id="offboard-user-title" className="text-lg font-semibold text-gray-900">确认办理离职</h2>
+            <p id="offboard-user-description" className="mt-2 text-sm leading-6 text-gray-600">
+              办理后将立即禁止 <strong>{pendingOffboardUser.username ?? pendingOffboardUser.email}</strong> 登录，自动移出所有分组、撤销站点权限，并取消尚未提交的认领。已提交成果、追踪记录和用户名会继续保留。
             </p>
-            {deleteError && <p role="alert" className="mt-3 text-sm text-red-600">{deleteError}</p>}
+            <label htmlFor="offboard-confirm" className="mt-4 block text-sm font-medium text-gray-700">
+              请输入“{pendingOffboardUser.username ?? pendingOffboardUser.email}”确认
+            </label>
+            <input
+              id="offboard-confirm"
+              autoFocus
+              value={offboardConfirm}
+              onChange={event => setOffboardConfirm(event.target.value)}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
+            />
+            {offboardError && <p role="alert" className="mt-3 text-sm text-red-600">{offboardError}</p>}
             <div className="mt-6 flex justify-end gap-3">
-              <button type="button" className="btn-secondary" disabled={deletingId === pendingDeleteUser.id} onClick={() => setPendingDeleteUser(null)}>取消</button>
-              <button type="button" className="btn-danger" aria-busy={deletingId === pendingDeleteUser.id} disabled={deletingId === pendingDeleteUser.id} onClick={confirmDelete}>
-                {deletingId === pendingDeleteUser.id ? '删除中…' : '确认删除'}
+              <button type="button" className="btn-secondary" disabled={offboardingId === pendingOffboardUser.id} onClick={() => setPendingOffboardUser(null)}>取消</button>
+              <button type="button" className="btn-danger" aria-busy={offboardingId === pendingOffboardUser.id} disabled={offboardingId === pendingOffboardUser.id} onClick={confirmOffboard}>
+                {offboardingId === pendingOffboardUser.id ? '办理中…' : '确认办理离职'}
               </button>
             </div>
           </div>

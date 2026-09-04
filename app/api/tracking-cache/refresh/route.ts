@@ -1,18 +1,20 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeGroupTrackingPayload } from '@/lib/group-tracking-cache'
+import { computeGroupTrackingPayload, saveGroupTrackingPayload } from '@/lib/group-tracking-cache'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
+import type { UserRole } from '@/lib/user-context'
 
-export const maxDuration = 180
+export const maxDuration = 300
 
-// GitHub Actions（.github/workflows/group-tracking-cache.yml，每天08:05 MYT，
-// 在 tracking 抓取步骤06:45和环境快照07:15都跑完之后）调用，逐个分组算好
-// "成效追踪"/"追踪汇总"背后的增强行数据，写进 group_tracking_cache，供两个
-// 路由直接读。鉴权方式照抄 /api/hot-radar/refresh：Bearer CRON_SECRET 或
-// admin/super session。
+// The final retry workflow calls this after tracking, environment snapshot and
+// hot-radar refresh. It atomically writes paged rows, compact monthly summaries
+// and the legacy compatibility cache. Admin/super sessions may also refresh one
+// group with ?groupId=...; CRON_SECRET refreshes every group.
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
   let authed = !!(cronSecret && authHeader === `Bearer ${cronSecret}`)
+  let caller: { id: string; role: UserRole } | null = null
 
   if (!authed) {
     const authClient = await createClient()
@@ -21,22 +23,32 @@ export async function GET(req: Request) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const svc = createServiceClient() as any
     const { data: profile } = await svc.from('user_profiles').select('role').eq('id', user.id).single()
-    if (['super', 'admin'].includes(profile?.role)) authed = true
+    if (['super', 'admin'].includes(profile?.role)) {
+      caller = { id: user.id, role: profile.role as UserRole }
+      authed = true
+    }
   }
   if (!authed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data: groups } = await service.from('task_groups').select('id, name')
+  const requestedGroupId = new URL(req.url).searchParams.get('groupId')
+  if (requestedGroupId && caller && !await canAccessTaskGroup(service, caller.id, caller.role, requestedGroupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  let groupsQuery = service.from('task_groups').select('id, name')
+  if (requestedGroupId) groupsQuery = groupsQuery.eq('id', requestedGroupId)
+  const { data: groups, error: groupsError } = await groupsQuery
+  if (groupsError) return NextResponse.json({ error: 'Unable to load groups' }, { status: 500 })
+  if (requestedGroupId && (groups ?? []).length === 0) {
+    return NextResponse.json({ error: 'Group not found' }, { status: 404 })
+  }
 
   const results: { groupId: string; name: string; ok: boolean; rows?: number; error?: string }[] = []
   for (const g of (groups ?? []) as { id: string; name: string }[]) {
     try {
       const payload = await computeGroupTrackingPayload(service, g.id)
-      const { error } = await service
-        .from('group_tracking_cache')
-        .upsert({ group_id: g.id, payload, computed_at: new Date().toISOString() })
-      if (error) throw new Error(error.message)
+      await saveGroupTrackingPayload(service, g.id, payload)
       results.push({ groupId: g.id, name: g.name, ok: true, rows: payload.length })
     } catch (e) {
       // 某个分组算失败时跳过它、保留它昨天的缓存，不要用错误/空结果覆盖掉

@@ -233,8 +233,8 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '触发方式', text: '每日由 retry-crawl.yml 的同一个 post-crawl-refresh job 在 tracking、环境快照和热词缓存之后立即调用 GET /api/tracking-cache/refresh（Bearer CRON_SECRET），不再等待 08:05 MYT，也不需要进入页面；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-18 新增）', text: '分组报告"成效追踪"（/api/task-groups/[id]/outcomes）和"追踪汇总"（/api/task-groups/[id]/tracking-summary）之前每次打开页面都现场对 site_tracking_records 做全量扫描（这张表永久保留，接口本身不带时间范围限制）+ 批量查认领来源/排名匹配词 + "更新"型claim的真新排名历史判断，多轮查询叠加导致打开很慢（用户反馈）。用户明确接受"数据只到当天早上、当天新提交的记录要等第二天才反映"这个延迟，换成定时预算好+缓存，跟热词雷达同一套思路' },
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
-      { label: '写入表', text: 'group_tracking_cache（一个分组一行，group_id 为主键，upsert；payload 存这个分组全部claim的"增强行"JSON数组，已按claim_id去重取最新、带算好的分数；computed_at 记录算的时间）' },
-      { label: '读取方', text: '"成效追踪"/"追踪汇总"两个接口都直接读 group_tracking_cache 对应分组那一行，不再现场查询；筛选/排序/分页/月份范围等逻辑全部改成对缓存数组做内存过滤，不需要额外查询。缓存未命中时（新建的分组、或刚上线还没跑过一次定时任务）现场算一次并顺手写回，不会一直空着' },
+      { label: '写入表', text: '2026-09-04 起使用分页缓存：group_tracking_cache_rows 每个claim一行并保存可索引的筛选/排序字段，group_tracking_cache_state 只保存更新时间、行数和小型月度汇总；replace_group_tracking_paged_cache RPC 在一个事务里原子替换。旧 group_tracking_cache 大JSON暂时继续同步，作为迁移期间的兼容兜底' },
+      { label: '读取方', text: '"成效追踪"通过 get_group_tracking_outcomes_page 在数据库端筛选、排序、统计，只返回当前20条；"追踪汇总"只读预先算好的月度小型汇总；排名/收录明细通过 get_group_tracking_detail_page 直接分页，不再扫描原始历史表。快速缓存未安装、超过26小时或尚未首次生成时，才退回旧缓存/现场计算' },
       { label: '"追踪汇总"得分口径变化', text: '之前"追踪汇总"的"得分"是现场用简化版公式估算（"更新"型claim不查历史、prev_rank_position为null时保守当非提升处理）；现在跟"成效追踪"共用同一份缓存，缓存里的分数是精确版（带"真新排名"历史查询），两个页面的分数口径统一了' },
       { label: '失败兜底', text: '刷新接口逐个分组处理，某个分组算失败时跳过它、保留它上一次成功算出来的缓存，不会用报错/空结果覆盖掉——照抄 hot_radar_cache 那次"静默失败覆盖好缓存"事故后加的保护逻辑' },
     ],
@@ -242,11 +242,11 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'search',
     title: '站点情报查询',
-    badge: '类型：search · 触发方式：页面搜索',
+    badge: '触发方式：页面查询 · 不写入抓取日志',
     items: [
       { label: '数据来源', text: '已追踪站点：Supabase 历史数据（weight_history / index_snapshots / rank_changes / raw_keywords）；未追踪站点：爱站实时接口' },
       { label: '不写入', text: '搜索操作不修改任何数据库表' },
-      { label: '日志', text: '记录为 search，domain=查询域名，summary 显示是否已追踪及数据最新日期' },
+      { label: '日志', text: '页面查询及涨词/跌词导出不写入 activity_log；抓取日志只保留自动任务和手动抓取任务' },
     ],
   },
   {

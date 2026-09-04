@@ -4,7 +4,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Sb = any
 
-export type ActivityType = 'cron_task' | 'cron_manual' | 'search'
+export type ActivityType = 'cron_task' | 'cron_manual'
 export type SiteLogStatus = 'ok' | 'empty' | 'skip' | 'fail' | 'suspect'
 
 export async function activityStart(sb: Sb, opts: {

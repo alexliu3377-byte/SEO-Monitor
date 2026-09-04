@@ -44,15 +44,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  if (user && pathname === '/login') {
-    const homeUrl = request.nextUrl.clone()
-    homeUrl.pathname = '/'
-    return NextResponse.redirect(homeUrl)
-  }
-
-  // Super administrators are exempt from IP restrictions. All other users
-  // fail closed when their access profile cannot be verified.
-  if (user && !pathname.startsWith('/blocked')) {
+  // Disabled profiles are blocked here even if an old browser session still
+  // has a valid access token. Super administrators are exempt only from IP
+  // restrictions, never from account status checks.
+  if (user) {
     const ip =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       request.headers.get('x-real-ip') ||
@@ -64,13 +59,31 @@ export async function proxy(request: NextRequest) {
       )
       const { data: profile, error } = await service
         .from('user_profiles')
-        .select('role, allowed_ips')
+        .select('role, allowed_ips, is_active')
         .eq('id', user.id)
         .single()
       if (error || !profile) throw error ?? new Error('Profile not found')
+
+      if (profile.is_active === false) {
+        if (isApi) {
+          return NextResponse.json({ error: '账号已停用' }, { status: 403 })
+        }
+        if (pathname.startsWith('/login')) return supabaseResponse
+        const loginUrl = request.nextUrl.clone()
+        loginUrl.pathname = '/login'
+        loginUrl.searchParams.set('reason', 'account-disabled')
+        return NextResponse.redirect(loginUrl)
+      }
+
+      if (pathname === '/login') {
+        const homeUrl = request.nextUrl.clone()
+        homeUrl.pathname = '/'
+        return NextResponse.redirect(homeUrl)
+      }
+
       const isSuperAdmin = profile.role === 'super'
       const allowedIps: string[] = profile.allowed_ips ?? []
-      if (!isSuperAdmin && allowedIps.length > 0 && !allowedIps.includes(ip)) {
+      if (!pathname.startsWith('/blocked') && !isSuperAdmin && allowedIps.length > 0 && !allowedIps.includes(ip)) {
         if (isApi) {
           return NextResponse.json({ error: 'IP address is not allowed' }, { status: 403 })
         }

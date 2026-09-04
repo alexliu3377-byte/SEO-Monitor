@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
   const { data: profile, error: profileError } = await service
     .from('user_profiles')
-    .select('id')
+    .select('id, is_active')
     .ilike('username', normalizedUsername)
     .maybeSingle()
 
@@ -85,6 +85,10 @@ export async function POST(req: Request) {
 
   if (!profile?.id) {
     return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 })
+  }
+
+  if (profile.is_active === false) {
+    return NextResponse.json({ error: '账号已停用，请联系管理员' }, { status: 403 })
   }
 
   const { data: { user }, error: userError } = await service.auth.admin.getUserById(profile.id)

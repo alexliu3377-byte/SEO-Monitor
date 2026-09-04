@@ -1,6 +1,10 @@
 import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import {
+  computeSourceEffectiveness, currentMonth, effectiveMatchesForClaim, RANK_BUCKETS,
+  type RankMatch, type SourceEffectivenessEntry,
+} from '@/lib/tracking-summary'
 
 export interface RankMatchWithFlag {
   keyword: string
@@ -29,6 +33,241 @@ export interface EnrichedTrackRow {
   rank_matches: RankMatchWithFlag[]
 }
 
+export interface CachedMemberSummary {
+  userId: string
+  username: string
+  submitted: { total: number }
+  indexed: { count: number; volume: number; bySource: { source: string; count: number }[] }
+  ranked: {
+    total: number
+    totalVolume: number
+    buckets: { label: string; count: number; volume: number; bySource: { source: string; count: number }[] }[]
+  }
+  totalScore: number
+}
+
+export interface CachedTrackingMonth {
+  groupSummary: CachedMemberSummary
+  groupSourceEffectiveness: SourceEffectivenessEntry[]
+  members: Array<{
+    userId: string
+    username: string
+    isMember: boolean
+    summary: CachedMemberSummary
+    sourceEffectiveness: SourceEffectivenessEntry[]
+  }>
+}
+
+interface GroupTrackingSummaryPayload {
+  version: 1
+  months: Record<string, CachedTrackingMonth>
+}
+
+const FAST_CACHE_MISSING_CODES = new Set(['42P01', '42883', 'PGRST202', 'PGRST205'])
+
+function fastCacheUnavailable(error: { code?: string } | null | undefined) {
+  return !!error && FAST_CACHE_MISSING_CODES.has(error.code ?? '')
+}
+
+export function buildCachedMemberSummary(
+  rows: EnrichedTrackRow[],
+  userId: string,
+  username: string,
+): CachedMemberSummary {
+  const matchesByClaim = new Map<string, RankMatch[]>(
+    rows.map(row => [`${row.claim_id}|${row.record_date}`, row.rank_matches])
+  )
+  let indexedCount = 0
+  let indexedVolume = 0
+  let rankedTotal = 0
+  let scoreTotal = 0
+  const indexedBySource = new Map<string, number>()
+  const buckets = RANK_BUCKETS.map(bucket => ({
+    label: bucket.label,
+    count: 0,
+    volume: 0,
+    bySource: new Map<string, number>(),
+  }))
+
+  for (const row of rows) {
+    const source = row.source ?? '未知'
+    if (row.effectiveness === '获取收录') {
+      indexedCount++
+      indexedVolume += row.search_volume || 0
+      indexedBySource.set(source, (indexedBySource.get(source) ?? 0) + 1)
+    } else if (row.effectiveness === '获取排名') {
+      rankedTotal++
+      for (const match of effectiveMatchesForClaim(row, matchesByClaim)) {
+        if (match.rank_position == null) continue
+        const definition = RANK_BUCKETS.find(bucket => match.rank_position! >= bucket.min && match.rank_position! <= bucket.max)
+        if (!definition) continue
+        const target = buckets.find(bucket => bucket.label === definition.label)!
+        target.count++
+        target.volume += match.volume || 0
+        target.bySource.set(source, (target.bySource.get(source) ?? 0) + 1)
+      }
+    }
+    if (!row.env_excluded) scoreTotal += row.score
+  }
+
+  const bucketPayload = buckets.map(bucket => ({
+    label: bucket.label,
+    count: bucket.count,
+    volume: bucket.volume,
+    bySource: Array.from(bucket.bySource.entries())
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count),
+  }))
+
+  return {
+    userId,
+    username,
+    submitted: { total: rows.length },
+    indexed: {
+      count: indexedCount,
+      volume: indexedVolume,
+      bySource: Array.from(indexedBySource.entries())
+        .map(([source, count]) => ({ source, count }))
+        .sort((a, b) => b.count - a.count),
+    },
+    ranked: {
+      total: rankedTotal,
+      totalVolume: bucketPayload.reduce((sum, bucket) => sum + bucket.volume, 0),
+      buckets: bucketPayload,
+    },
+    totalScore: Math.round(scoreTotal * 10) / 10,
+  }
+}
+
+async function buildSummaryPayload(
+  service: any,
+  groupId: string,
+  rows: EnrichedTrackRow[],
+): Promise<GroupTrackingSummaryPayload> {
+  const { data: membersRaw, error } = await service
+    .from('task_group_members')
+    .select('user_id, username')
+    .eq('group_id', groupId)
+  if (error) throw error
+  const members = (membersRaw ?? []) as { user_id: string; username: string | null }[]
+  const names = await resolveUserDisplayNames(
+    service,
+    [...members.map(member => member.user_id), ...rows.map(row => row.user_id)],
+    members,
+  )
+  const months = new Set(rows.map(row => row.submit_date.slice(0, 7)))
+  const current = currentMonth()
+  months.add(current)
+  const sortedDataMonths = Array.from(months).sort()
+  const first = sortedDataMonths[0] ?? current
+  let cursor = new Date(`${first}-01T00:00:00Z`)
+  const last = new Date(`${current}-01T00:00:00Z`)
+  while (cursor <= last) {
+    months.add(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`)
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))
+  }
+  const payload: GroupTrackingSummaryPayload = { version: 1, months: {} }
+  const memberIds = new Set(members.map(member => member.user_id))
+  const actors = [
+    ...members,
+    ...Array.from(new Set(rows.map(row => row.user_id)))
+      .filter(userId => !memberIds.has(userId))
+      .map(userId => ({ user_id: userId, username: names.get(userId) ?? null })),
+  ]
+
+  for (const month of months) {
+    const monthRows = rows.filter(row => row.submit_date.startsWith(month))
+    const sourceByClaim = new Map(monthRows.map(row => [row.claim_id, row.source]))
+    payload.months[month] = {
+      groupSummary: buildCachedMemberSummary(monthRows, groupId, '全组汇总'),
+      groupSourceEffectiveness: computeSourceEffectiveness(monthRows, sourceByClaim),
+      members: actors.map(member => {
+        const memberRows = monthRows.filter(row => row.user_id === member.user_id)
+        return {
+          userId: member.user_id,
+          username: names.get(member.user_id) ?? member.user_id.slice(0, 8),
+          isMember: memberIds.has(member.user_id),
+          summary: buildCachedMemberSummary(
+            memberRows,
+            member.user_id,
+            names.get(member.user_id) ?? member.user_id.slice(0, 8),
+          ),
+          sourceEffectiveness: computeSourceEffectiveness(
+            memberRows,
+            new Map(memberRows.map(row => [row.claim_id, row.source])),
+          ),
+        }
+      }),
+    }
+  }
+
+  return payload
+}
+
+export async function saveGroupTrackingPayload(
+  service: any,
+  groupId: string,
+  rows: EnrichedTrackRow[],
+  computedAt = new Date().toISOString(),
+): Promise<{ fastCache: boolean }> {
+  const summaryPayload = await buildSummaryPayload(service, groupId, rows)
+  const { error } = await service.rpc('replace_group_tracking_paged_cache', {
+    p_group_id: groupId,
+    p_rows: rows,
+    p_summary_payload: summaryPayload,
+    p_computed_at: computedAt,
+  })
+
+  if (!error) return { fastCache: true }
+  if (!fastCacheUnavailable(error)) throw error
+
+  const { error: legacyError } = await service
+    .from('group_tracking_cache')
+    .upsert({ group_id: groupId, payload: rows, computed_at: computedAt })
+  if (legacyError) throw legacyError
+  return { fastCache: false }
+}
+
+export async function loadFastTrackingMonth(
+  service: any,
+  groupId: string,
+  month: string,
+): Promise<{ data: CachedTrackingMonth; computedAt: string } | null> {
+  const { data, error } = await service
+    .from('group_tracking_cache_state')
+    .select('computed_at, summary_payload')
+    .eq('group_id', groupId)
+    .maybeSingle()
+  if (error) {
+    if (fastCacheUnavailable(error)) return null
+    throw error
+  }
+  const computedAt = data?.computed_at as string | undefined
+  const cachedAt = computedAt ? Date.parse(computedAt) : NaN
+  if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > TRACKING_CACHE_MAX_AGE_MS) return null
+  const payload = data?.summary_payload as GroupTrackingSummaryPayload | undefined
+  const monthData = payload?.version === 1 ? payload.months?.[month] : undefined
+  return monthData ? { data: monthData, computedAt: computedAt! } : null
+}
+
+export async function loadFastOutcomesPage(service: any, params: Record<string, unknown>) {
+  const { data, error } = await service.rpc('get_group_tracking_outcomes_page', params)
+  if (error) {
+    if (fastCacheUnavailable(error)) return null
+    throw error
+  }
+  return data && typeof data === 'object' ? data : null
+}
+
+export async function loadFastTrackingDetail(service: any, params: Record<string, unknown>) {
+  const { data, error } = await service.rpc('get_group_tracking_detail_page', params)
+  if (error) {
+    if (fastCacheUnavailable(error)) return null
+    throw error
+  }
+  return data && typeof data === 'object' ? data : null
+}
+
 const TRACKING_CACHE_MAX_AGE_MS = 26 * 60 * 60 * 1000
 
 export async function loadGroupTrackingPayload(service: any, groupId: string): Promise<{
@@ -49,10 +288,11 @@ export async function loadGroupTrackingPayload(service: any, groupId: string): P
   let computedAt = cacheIsFresh ? cached.computed_at as string : new Date().toISOString()
 
   if (!cacheIsFresh) {
-    const { error } = await service
-      .from('group_tracking_cache')
-      .upsert({ group_id: groupId, payload: rows, computed_at: computedAt })
-    if (error) console.error('Group tracking cache write failed', { groupId, code: error.code })
+    try {
+      await saveGroupTrackingPayload(service, groupId, rows, computedAt)
+    } catch (error) {
+      console.error('Group tracking cache write failed', { groupId, error })
+    }
   }
 
   // Repair historical cached rows at read time as well. This makes profile name

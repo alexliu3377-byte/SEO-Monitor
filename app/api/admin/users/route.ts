@@ -13,7 +13,7 @@ async function getCallerRole(): Promise<UserRole | null> {
 }
 
 // GET /api/admin/users
-export async function GET() {
+export async function GET(req: Request) {
   const callerRole = await getCallerRole()
   if (!callerRole || callerRole === 'normal') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -24,10 +24,25 @@ export async function GET() {
   const { data: { users }, error } = await service.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
-  const { data: profiles } = await service.from('user_profiles').select('id, role, username')
-  const profileMap = new Map<string, { role: UserRole; username: string | null }>(
-    ((profiles ?? []) as { id: string; role: UserRole; username: string | null }[])
-      .map((p) => [p.id, { role: p.role, username: p.username }])
+  const { data: profiles } = await service.from('user_profiles').select('id, role, username, is_active, disabled_at')
+  const profileMap = new Map<string, {
+    role: UserRole
+    username: string | null
+    is_active: boolean
+    disabled_at: string | null
+  }>(
+    ((profiles ?? []) as Array<{
+      id: string
+      role: UserRole
+      username: string | null
+      is_active?: boolean
+      disabled_at?: string | null
+    }>).map((p) => [p.id, {
+      role: p.role,
+      username: p.username,
+      is_active: p.is_active !== false,
+      disabled_at: p.disabled_at ?? null,
+    }])
   )
 
   const result = (users as { id: string; email: string; created_at: string }[]).map(u => ({
@@ -35,12 +50,17 @@ export async function GET() {
     email: u.email ?? '',
     username: profileMap.get(u.id)?.username ?? null,
     role: profileMap.get(u.id)?.role ?? 'normal' as UserRole,
+    is_active: profileMap.get(u.id)?.is_active ?? true,
+    disabled_at: profileMap.get(u.id)?.disabled_at ?? null,
     created_at: u.created_at,
   }))
 
-  const filtered = callerRole === 'admin'
+  let filtered = callerRole === 'admin'
     ? result.filter(u => u.role === 'normal')
     : result
+  if (new URL(req.url).searchParams.get('activeOnly') === '1') {
+    filtered = filtered.filter(user => user.is_active)
+  }
 
   return NextResponse.json({ users: filtered })
 }
@@ -101,6 +121,14 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
-    user: { id: user.id, email: user.email ?? '', username: normalizedUsername, role, created_at: user.created_at }
+    user: {
+      id: user.id,
+      email: user.email ?? '',
+      username: normalizedUsername,
+      role,
+      is_active: true,
+      disabled_at: null,
+      created_at: user.created_at,
+    }
   })
 }
