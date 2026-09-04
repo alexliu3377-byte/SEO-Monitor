@@ -127,21 +127,19 @@ export function BaiduCookiePoolManager() {
               {cookiePool.length > 0 && (
                 <div className="space-y-2">
                   {cookiePool.map((entry, idx) => (
-                    <div key={idx} className="grid grid-cols-[42px_minmax(100px,140px)_1fr_28px] items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                    <div key={idx} className="grid grid-cols-[42px_minmax(100px,160px)_1fr_36px] items-center gap-3 bg-gray-50 rounded-lg px-3 py-2.5">
                       <span className="text-[10px] text-gray-400 font-mono w-10 flex-shrink-0" title={entry.addedAt ? `添加于 ${entry.addedAt}` : '添加日期未知（早期记录）'}>
                         {entry.addedAt ? entry.addedAt.slice(5) : '—'}
                       </span>
-                      <input aria-label={`第 ${idx + 1} 个 Cookie 名称`} value={entry.name}
-                        onChange={event => setCookiePool(previous => previous.map((item, itemIndex) => itemIndex === idx ? { ...item, name: event.target.value } : item))}
-                        className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500" />
-                      <input aria-label={`更新 ${entry.name} 的 Cookie 内容`} type="password" value={entry.value}
-                        onChange={event => setCookiePool(previous => previous.map((item, itemIndex) => itemIndex === idx ? { ...item, value: event.target.value, addedAt: todayMY() } : item))}
-                        className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 font-mono text-xs text-gray-600 focus-visible:ring-2 focus-visible:ring-blue-500" />
+                      <span className="min-w-0 truncate text-xs font-medium text-gray-700">{entry.name}</span>
+                      <span className="min-w-0 truncate font-mono text-xs text-gray-400" aria-label={`${entry.name} 的 Cookie 内容已保存`}>
+                        Cookie 内容已保存
+                      </span>
                       <button
                         type="button"
                         aria-label={`删除 ${entry.name}`}
                         onClick={() => setCookiePool(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-gray-300 hover:text-red-400 flex-shrink-0 transition-colors"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 flex-shrink-0 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
