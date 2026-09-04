@@ -1,24 +1,31 @@
 import { NextResponse } from 'next/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
 import { invalidateGroupTrackingCache, normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
+import { canAccessTaskGroup, canAdminUseGroupSites } from '@/lib/task-group-access'
 
-async function getCallerRole(): Promise<UserRole | null> {
+async function getCaller() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  return (data?.role ?? 'normal') as UserRole
+  const { data } = await service.from('user_profiles').select('role, username').eq('id', user.id).single()
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    username: String(data?.username ?? '').trim(),
+    role: (data?.role ?? 'normal') as UserRole,
+  }
 }
 
 export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const role = await getCallerRole()
-  if (!role || role === 'normal') {
+  const caller = await getCaller()
+  if (!caller || caller.role === 'normal') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -39,6 +46,9 @@ export async function PUT(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  if (!await canAccessTaskGroup(service, caller.id, caller.role, id)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const normalized = await normalizeTaskGroupMembers(service, members)
   if (normalized.error) return NextResponse.json({ error: normalized.error }, { status: 400 })
   const safeName = typeof name === 'string' ? name.trim().slice(0, 100) : ''
@@ -54,10 +64,14 @@ export async function PUT(
   ])
   if (groupError || !previousGroup) return NextResponse.json({ error: 'Task group not found' }, { status: 404 })
   if (membersError) return NextResponse.json({ error: 'Unable to load current group members' }, { status: 500 })
+  const normalizedSiteDomains = normalizeDomains(site_domains)
+  if (!await canAdminUseGroupSites(service, caller.id, caller.role, normalizedSiteDomains)) {
+    return NextResponse.json({ error: '只能把分组关联到你负责的站点' }, { status: 403 })
+  }
 
   const { error: updateErr } = await service
     .from('task_groups')
-    .update({ name: safeName, rank_domains: normalizeDomains(rank_domains), new_domains: normalizeDomains(new_domains), associated_domains: normalizeDomains(associated_domains), competitor_domains: normalizeDomains(competitor_domains), site_domains: normalizeDomains(site_domains) })
+    .update({ name: safeName, rank_domains: normalizeDomains(rank_domains), new_domains: normalizeDomains(new_domains), associated_domains: normalizeDomains(associated_domains), competitor_domains: normalizeDomains(competitor_domains), site_domains: normalizedSiteDomains })
     .eq('id', id)
   if (updateErr) return NextResponse.json({ error: 'Unable to update task group' }, { status: 500 })
 
@@ -81,13 +95,32 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const role = await getCallerRole()
-  if (!role || role === 'normal') {
+  const caller = await getCaller()
+  if (!caller || caller.role !== 'super') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const contentLength = Number(req.headers.get('content-length') || 0)
+  if (contentLength > 8_192) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
+  const { username, password } = await req.json().catch(() => ({})) as { username?: string; password?: string }
+  const normalizedUsername = username?.trim() ?? ''
+  if (!normalizedUsername || !password || password.length > 1_024) {
+    return NextResponse.json({ error: '请输入当前超管的用户名和密码' }, { status: 400 })
+  }
+  if (!caller.username || normalizedUsername.toLocaleLowerCase() !== caller.username.toLocaleLowerCase()) {
+    return NextResponse.json({ error: '用户名或密码错误' }, { status: 403 })
+  }
+
+  const verifier = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  )
+  const { error: passwordError } = await verifier.auth.signInWithPassword({ email: caller.email, password })
+  if (passwordError) return NextResponse.json({ error: '用户名或密码错误' }, { status: 403 })
 
   const { id } = await params
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

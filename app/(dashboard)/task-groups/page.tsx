@@ -1,9 +1,12 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
@@ -30,6 +33,17 @@ interface ClaimedKeyword {
   claimed_date?: string
 }
 
+interface SubmissionHistoryRow {
+  id: string
+  user_id: string
+  keyword: string
+  final_keyword: string | null
+  page_url: string | null
+  operation_type: string | null
+  submitted_at: string | null
+  claimed_date: string
+}
+
 type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
@@ -50,6 +64,29 @@ function fmtVol(v: number) {
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '—' }
 function normalizeUrl(raw: string): string {
   return raw.trim().replace(/^https?:\/\/(www\.|m\.)?/, '')
+}
+
+async function apiError(response: Response, fallback: string) {
+  const body = await response.json().catch(() => ({})) as { error?: string }
+  return body.error || fallback
+}
+
+function buildSubmissionHistory(rows: SubmissionHistoryRow[]) {
+  const kwMap = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
+  const urlSet = new Set<string>()
+  for (const row of rows) {
+    const keyword = (row.final_keyword || row.keyword).toLowerCase()
+    const submittedAt = row.submitted_at || row.claimed_date
+    const updateCount = row.operation_type === '更新' ? 1 : 0
+    const existing = kwMap.get(keyword)
+    if (!existing) kwMap.set(keyword, { lastSubmittedAt: submittedAt, updateCount })
+    else kwMap.set(keyword, {
+      lastSubmittedAt: submittedAt > existing.lastSubmittedAt ? submittedAt : existing.lastSubmittedAt,
+      updateCount: existing.updateCount + updateCount,
+    })
+    if (row.page_url) urlSet.add(normalizeUrl(row.page_url).toLowerCase())
+  }
+  return { kwMap, urlSet }
 }
 
 // site_keyword_ranks 30天窗口里同一个关键词经常在好几个不同 stat_date 都有
@@ -171,23 +208,49 @@ interface KwRowProps {
 }
 function KwRow({ keyword, claimed, onClaim, onView, dateCell, children }: KwRowProps) {
   return (
-    <tr onDoubleClick={onClaim}
+    <tr onDoubleClick={() => { if (!claimed) onClaim() }}
       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-      title={claimed ? '已认领' : '双击认领'}>
+      title={claimed ? '已认领' : '点击认领按钮，或双击此行快捷认领'}>
       {dateCell}
       <td className="px-2 py-2 max-w-0">
         <div className="flex items-center gap-1 min-w-0">
           <span className="text-sm text-gray-800 truncate select-text cursor-text" title={keyword}
-            onDoubleClick={e => { e.stopPropagation(); onClaim() }}>{keyword}</span>
+            onDoubleClick={e => { e.stopPropagation(); if (!claimed) onClaim() }}>{keyword}</span>
           {claimed && <span className="text-[10px] text-green-500 flex-shrink-0">✓</span>}
         </div>
       </td>
       {children}
       <td className="px-2 py-2 text-right whitespace-nowrap">
-        <button onClick={e => { e.stopPropagation(); onView() }}
-          className="text-xs text-blue-400 hover:text-blue-600 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-300 transition-colors">查看</button>
+        <div className="flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            disabled={claimed}
+            aria-label={claimed ? `${keyword} 已认领` : `认领 ${keyword}`}
+            onClick={e => { e.stopPropagation(); onClaim() }}
+            className="text-xs rounded px-2 py-1 border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500"
+          >{claimed ? '已认领' : '认领'}</button>
+          <button type="button" aria-label={`查看 ${keyword} 详情`} onClick={e => { e.stopPropagation(); onView() }}
+            className="text-xs text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 hover:border-blue-400 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">查看</button>
+        </div>
       </td>
     </tr>
+  )
+}
+
+function ClaimAction({ keyword, claimed, onClaim, compact = false }: {
+  keyword: string
+  claimed: boolean
+  onClaim: () => void
+  compact?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      disabled={claimed}
+      aria-label={claimed ? `${keyword} 已认领` : `认领 ${keyword}`}
+      onClick={event => { event.stopPropagation(); onClaim() }}
+      className={`${compact ? 'px-1.5 py-0.5' : 'px-2 py-1'} text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500`}
+    >{claimed ? '已认领' : '认领'}</button>
   )
 }
 
@@ -482,15 +545,20 @@ function MemberModal({
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function TaskGroupsPage() {
+export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const { role, id: currentUserId } = useUser()
+  const router = useRouter()
   const canManage = role === 'super' || role === 'admin'
+  const isSuper = role === 'super'
+  const isWorkspaceRoute = !!groupId
   const today = useMemo(() => getMYDate(), [])
   const yesterday = useMemo(() => getMYDate(-1), [])
 
   const [groups, setGroups] = useState<TaskGroup[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<{ scope: 'groups' | 'claimed' | 'radar' | 'distributed' | 'recommendations'; message: string } | null>(null)
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(groupId ?? null)
+  const [workspaceOpen, setWorkspaceOpen] = useState(isWorkspaceRoute)
 
   const [viewingMemberId, setViewingMemberId] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(today)
@@ -595,6 +663,10 @@ export default function TaskGroupsPage() {
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleteUsername, setDeleteUsername] = useState('')
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [editName, setEditName] = useState('')
   const [editMemberTypes, setEditMemberTypes] = useState<Record<string, 'app' | 'game'>>({})
@@ -726,8 +798,8 @@ export default function TaskGroupsPage() {
 
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
 
-  async function loadSiteRankdown() {
-    if (!activeGroup || siteRankdownGroupId === activeGroup.id || siteRankdownLoading) return
+  async function loadSiteRankdown(force = false) {
+    if (!activeGroup || (!force && siteRankdownGroupId === activeGroup.id) || siteRankdownLoading) return
     const ownDomains = activeGroup.site_domains
     // 之前这里domains为空就直接return，没清空siteRankdownData——切到一个没配
     // 自己站点的分组时，屏幕上会一直留着上一个分组的"跌词更新"数据没消失，
@@ -746,14 +818,18 @@ export default function TaskGroupsPage() {
         // lib/hot-radar.ts 同名注释）——不再现场扫 site_keyword_ranks 30天窗口，
         // 用列别名对齐原来的字段名，下面的 dedupeByKeyword/展示逻辑不用改。
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data } = await (supabase.from('keyword_signal_rollup') as any)
-          .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
-          .in('site_id', siteIds)
-          .eq('type', 'rankdown')
-          .gte('last_seen', since)
-          .order('last_seen', { ascending: false })
-          .order('max_volume', { ascending: false })
-        const rawRows = (data || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]
+        const rawRows = await fetchAllRows<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }>((from, to) =>
+          (supabase.from('keyword_signal_rollup') as any)
+            .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
+            .in('site_id', siteIds)
+            .eq('type', 'rankdown')
+            .gte('last_seen', since)
+            .order('last_seen', { ascending: false })
+            .order('max_volume', { ascending: false })
+            .order('site_id', { ascending: true })
+            .order('keyword', { ascending: true })
+            .range(from, to)
+        )
         const rows = dedupeByKeyword(rawRows)
         setSiteRankdownData(rows)
         // Default date = most recent stat_date in data
@@ -763,6 +839,8 @@ export default function TaskGroupsPage() {
       }
       setSiteRankdownGroupId(activeGroup.id)
       setRdPage(0)
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '跌排推荐加载失败' })
     } finally { setSiteRankdownLoading(false) }
   }
 
@@ -775,8 +853,8 @@ export default function TaskGroupsPage() {
   //    这批涨排里同一个url，只要词一样就算我们已经覆盖了。
   // 4. "排名页面"优先显示我们自己历史上给这个词提交过的URL（哪怕还没排名，
   //    有页面可以直接改），没有的话才显示竞品的URL当参考。
-  async function loadCompetitorRankup() {
-    if (!activeGroup || competitorRankupGroupId === activeGroup.id || competitorRankupLoading) return
+  async function loadCompetitorRankup(force = false) {
+    if (!activeGroup || (!force && competitorRankupGroupId === activeGroup.id) || competitorRankupLoading) return
     const ownDomains = activeGroup.site_domains
     if (ownDomains.length === 0) { setCompetitorRankupData([]); setCompetitorRankupGroupId(activeGroup.id); return }
     setCompetitorRankupLoading(true)
@@ -808,14 +886,19 @@ export default function TaskGroupsPage() {
       const since = getMYDate(-30)
       // 2026-08-20 改读 keyword_signal_rollup，理由同 loadSiteRankdown。
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: rankupRows } = await (supabase.from('keyword_signal_rollup') as any)
-        .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
-        .in('site_id', competitorSiteIds)
-        .eq('type', 'rankup')
-        .gte('last_seen', since)
-        .order('last_seen', { ascending: false })
-        .order('max_volume', { ascending: false })
-      const candidates = dedupeByKeyword((rankupRows || []) as { keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[])
+      const rankupRows = await fetchAllRows<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }>((from, to) =>
+        (supabase.from('keyword_signal_rollup') as any)
+          .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
+          .in('site_id', competitorSiteIds)
+          .eq('type', 'rankup')
+          .gte('last_seen', since)
+          .order('last_seen', { ascending: false })
+          .order('max_volume', { ascending: false })
+          .order('site_id', { ascending: true })
+          .order('keyword', { ascending: true })
+          .range(from, to)
+      )
+      const candidates = dedupeByKeyword(rankupRows)
 
       // 分批查：这批词是不是我们自己站已经有排名了（有排名≈已经收录，见
       // 项目里"没排名不判定收录"的自愈逻辑同一个道理，不用再单独查收录表）。
@@ -831,14 +914,17 @@ export default function TaskGroupsPage() {
       }
       await Promise.all(kwChunks(distinctKeywords).map(async chunk => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: ownRanks, error } = await (supabase.from('site_keyword_ranks') as any)
-          .select('keyword')
-          .in('site_id', ownSiteIds)
-          .in('keyword', chunk)
-          .eq('platform', 'mobile')
-          .not('rank_position', 'is', null)
-        if (error) return
-        for (const r of (ownRanks || []) as { keyword: string }[]) ownRankedKeywords.add(r.keyword)
+        const ownRanks = await fetchAllRows<{ id: string; keyword: string }>((from, to) =>
+          (supabase.from('site_keyword_ranks') as any)
+            .select('id, keyword')
+            .in('site_id', ownSiteIds)
+            .in('keyword', chunk)
+            .eq('platform', 'mobile')
+            .not('rank_position', 'is', null)
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
+        for (const r of ownRanks) ownRankedKeywords.add(r.keyword)
       }))
       const gaps = candidates.filter(c => !ownRankedKeywords.has(c.keyword))
 
@@ -859,15 +945,21 @@ export default function TaskGroupsPage() {
       await Promise.all(kwChunks(gapKeywordsOriginalCase).map(async chunk => {
         const [byKeyword, byFinal] = await Promise.all([
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (supabase.from('member_claimed_keywords') as any)
-            .select('keyword, final_keyword, page_url, user_id, created_at')
-            .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('keyword', chunk),
+          fetchAllRows<{ id: string; keyword: string; final_keyword: string | null; page_url: string | null; user_id: string; created_at: string }>((from, to) =>
+            (supabase.from('member_claimed_keywords') as any)
+              .select('id, keyword, final_keyword, page_url, user_id, created_at')
+              .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('keyword', chunk)
+              .order('id', { ascending: true }).range(from, to)
+          ),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (supabase.from('member_claimed_keywords') as any)
-            .select('keyword, final_keyword, page_url, user_id, created_at')
-            .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('final_keyword', chunk),
+          fetchAllRows<{ id: string; keyword: string; final_keyword: string | null; page_url: string | null; user_id: string; created_at: string }>((from, to) =>
+            (supabase.from('member_claimed_keywords') as any)
+              .select('id, keyword, final_keyword, page_url, user_id, created_at')
+              .eq('group_id', activeGroup.id).not('page_url', 'is', null).in('final_keyword', chunk)
+              .order('id', { ascending: true }).range(from, to)
+          ),
         ])
-        for (const r of [...(byKeyword.data || []), ...(byFinal.data || [])] as { keyword: string; final_keyword: string | null; page_url: string | null; user_id: string; created_at: string }[]) {
+        for (const r of [...byKeyword, ...byFinal]) {
           if (!r.page_url) continue
           const kw = (r.final_keyword || r.keyword).toLowerCase()
           const existing = ownUrlByKeyword.get(kw)
@@ -886,6 +978,8 @@ export default function TaskGroupsPage() {
       setCompetitorRankupData(rows)
       setCompetitorRankupGroupId(activeGroup.id)
       setRdPage(0)
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '涨排推荐加载失败' })
     } finally { setCompetitorRankupLoading(false) }
   }
 
@@ -899,30 +993,21 @@ export default function TaskGroupsPage() {
     try {
       const supabase = getBrowserClient()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabase.from('member_claimed_keywords') as any)
-        .select('keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
-        .eq('group_id', activeGroup.id)
-        .eq('user_id', effectiveViewingId)
-        .eq('status', 'submitted')
-      const map = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
-      const urlSet = new Set<string>()
-      for (const r of (data || []) as { keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; submitted_at: string | null; claimed_date: string }[]) {
-        const kw = (r.final_keyword || r.keyword).toLowerCase()
-        const at = r.submitted_at || r.claimed_date
-        const isUpdate = r.operation_type === '更新' ? 1 : 0
-        const existing = map.get(kw)
-        if (!existing) map.set(kw, { lastSubmittedAt: at, updateCount: isUpdate })
-        else map.set(kw, {
-          lastSubmittedAt: at > existing.lastSubmittedAt ? at : existing.lastSubmittedAt,
-          updateCount: existing.updateCount + isUpdate,
-        })
-        if (r.page_url) urlSet.add(normalizeUrl(r.page_url).toLowerCase())
-      }
-      setSubmissionHistoryMap(map)
+      const rows = await fetchAllRows<SubmissionHistoryRow>((from, to) =>
+        (supabase.from('member_claimed_keywords') as any)
+          .select('id, user_id, keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
+          .eq('group_id', activeGroup.id)
+          .eq('user_id', effectiveViewingId)
+          .eq('status', 'submitted')
+          .order('id', { ascending: true })
+          .range(from, to)
+      )
+      const { kwMap, urlSet } = buildSubmissionHistory(rows)
+      setSubmissionHistoryMap(kwMap)
       setSubmissionHistoryUrlSet(urlSet)
       setSubmissionHistoryKey(key)
-    } catch {
-      // network error — recommendations just fall back to no-cooldown-info this render
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '提交历史加载失败' })
     }
   }
 
@@ -938,47 +1023,44 @@ export default function TaskGroupsPage() {
       for (const r of (data || []) as { keyword: string; dismissed_at: string }[]) map.set(r.keyword, r.dismissed_at)
       setDismissedRecMap(map)
       setDismissedRecKey(key)
-    } catch {
-      // network error — dismissed items just won't be filtered this render
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '已移除推荐加载失败' })
     }
   }
 
   // 管理员"今日推荐"合并视图用——一次性把全组每个组员各自的历史提交记录都
   // 拉回来（跟 loadSubmissionHistory 同一份查询逻辑，只是不锁定某一个
-  // effectiveViewingId，对 activeGroup.members 里每个人各查一份）。
+  // effectiveViewingId）。这里一次查询全组再在内存中分组，避免成员越多就
+  // 多发一条查询的 N+1 问题。
   async function loadAllMembersSubmissionHistory() {
     if (!activeGroup || !canManage || activeGroup.members.length === 0) return
     const key = activeGroup.id
     if (allMembersHistoryKey === key) return
     try {
       const supabase = getBrowserClient()
-      const results = await Promise.all(activeGroup.members.map(async m => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data } = await (supabase.from('member_claimed_keywords') as any)
-          .select('keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
+      const memberIds = activeGroup.members.map(member => member.user_id)
+      const rows = await fetchAllRows<SubmissionHistoryRow>((from, to) =>
+        (supabase.from('member_claimed_keywords') as any)
+          .select('id, user_id, keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date')
           .eq('group_id', activeGroup.id)
-          .eq('user_id', m.user_id)
+          .in('user_id', memberIds)
           .eq('status', 'submitted')
-        const kwMap = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
-        const urlSet = new Set<string>()
-        for (const r of (data || []) as { keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; submitted_at: string | null; claimed_date: string }[]) {
-          const kw = (r.final_keyword || r.keyword).toLowerCase()
-          const at = r.submitted_at || r.claimed_date
-          const isUpdate = r.operation_type === '更新' ? 1 : 0
-          const existing = kwMap.get(kw)
-          if (!existing) kwMap.set(kw, { lastSubmittedAt: at, updateCount: isUpdate })
-          else kwMap.set(kw, {
-            lastSubmittedAt: at > existing.lastSubmittedAt ? at : existing.lastSubmittedAt,
-            updateCount: existing.updateCount + isUpdate,
-          })
-          if (r.page_url) urlSet.add(normalizeUrl(r.page_url).toLowerCase())
-        }
-        return [m.user_id, { kwMap, urlSet }] as const
-      }))
+          .order('id', { ascending: true })
+          .range(from, to)
+      )
+      const rowsByMember = new Map<string, SubmissionHistoryRow[]>()
+      for (const row of rows) {
+        if (!rowsByMember.has(row.user_id)) rowsByMember.set(row.user_id, [])
+        rowsByMember.get(row.user_id)!.push(row)
+      }
+      const results = activeGroup.members.map(member => [
+        member.user_id,
+        buildSubmissionHistory(rowsByMember.get(member.user_id) || []),
+      ] as const)
       setAllMembersHistory(new Map(results))
       setAllMembersHistoryKey(key)
-    } catch {
-      // network error — combined view just falls back to no-cooldown-info this render
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '全组提交历史加载失败' })
     }
   }
 
@@ -997,8 +1079,8 @@ export default function TaskGroupsPage() {
       }
       setAllMembersDismissed(byMember)
       setAllMembersDismissedKey(key)
-    } catch {
-      // network error — combined view just falls back to no-dismiss-info this render
+    } catch (error) {
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '全组移除记录加载失败' })
     }
   }
 
@@ -1060,10 +1142,21 @@ export default function TaskGroupsPage() {
     setLoading(true)
     try {
       const res = await fetch('/api/task-groups')
+      if (!res.ok) throw new Error(await apiError(res, '分组加载失败'))
       const data = await res.json()
       const list: TaskGroup[] = data.groups || []
       setGroups(list)
-      if (list.length > 0 && !activeGroupId) setActiveGroupId(list[0].id)
+      if (groupId) {
+        const hasRequestedGroup = list.some(group => group.id === groupId)
+        setActiveGroupId(hasRequestedGroup ? groupId : null)
+        setWorkspaceOpen(hasRequestedGroup)
+      } else {
+        setActiveGroupId(current => current && list.some(group => group.id === current) ? current : null)
+        setWorkspaceOpen(false)
+      }
+      setLoadError(current => current?.scope === 'groups' ? null : current)
+    } catch (error) {
+      setLoadError({ scope: 'groups', message: error instanceof Error ? error.message : '分组加载失败' })
     } finally { setLoading(false) }
   }
 
@@ -1073,8 +1166,12 @@ export default function TaskGroupsPage() {
     setInvalidClaimIds(new Set())
     try {
       const res = await fetch(`/api/task-groups/${groupId}/claimed?userId=${userId}&date=${date}`)
+      if (!res.ok) throw new Error(await apiError(res, '认领记录加载失败'))
       const data = await res.json()
       setClaimedKeywords(data.keywords || [])
+      setLoadError(current => current?.scope === 'claimed' ? null : current)
+    } catch (error) {
+      setLoadError({ scope: 'claimed', message: error instanceof Error ? error.message : '认领记录加载失败' })
     } finally { setClaimedLoading(false) }
   }
 
@@ -1083,8 +1180,12 @@ export default function TaskGroupsPage() {
     setRadarLoading(true)
     try {
       const res = await fetch('/api/hot-radar')
+      if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
       setRadarData(rd); setRadarLoaded(true)
+      setLoadError(current => current?.scope === 'radar' ? null : current)
+    } catch (error) {
+      setLoadError({ scope: 'radar', message: error instanceof Error ? error.message : '推荐数据加载失败' })
     } finally { setRadarLoading(false) }
   }
 
@@ -1093,8 +1194,12 @@ export default function TaskGroupsPage() {
     setDistributedLoading(true)
     try {
       const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`)
+      if (!res.ok) throw new Error(await apiError(res, '分发词加载失败'))
       const d = await res.json()
       setDistributedWords(d.keywords || [])
+      setLoadError(current => current?.scope === 'distributed' ? null : current)
+    } catch (error) {
+      setLoadError({ scope: 'distributed', message: error instanceof Error ? error.message : '分发词加载失败' })
     } finally { setDistributedLoading(false) }
   }
 
@@ -1406,12 +1511,16 @@ export default function TaskGroupsPage() {
       const since = getMYDate(-30)
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: raw } = await (supabase.from('rank_changes') as any)
-          .select('site_id, stat_date, type')
-          .eq('keyword', keyword).gte('stat_date', since)
-          .order('stat_date', { ascending: false })
+        const raw = await fetchAllRows<{ id: string; site_id: string; stat_date: string; type: string }>((from, to) =>
+          (supabase.from('rank_changes') as any)
+            .select('id, site_id, stat_date, type')
+            .eq('keyword', keyword).gte('stat_date', since)
+            .order('stat_date', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
         const vRows: VolumeRisingDetailRow[] = []
-        for (const r of (raw || [])) {
+        for (const r of raw) {
           const domain = idMap.get(r.site_id)
           if (domain && (r.type === 'rankup' || r.type === 'rankdown')) {
             vRows.push({ date: String(r.stat_date).slice(0, 10), domain, type: r.type })
@@ -1438,13 +1547,17 @@ export default function TaskGroupsPage() {
         if (siteIds.length > 0) {
           const since = getMYDate(-30)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: raw } = await (supabase.from('raw_keywords') as any)
-            .select('site_id, keyword')
-            .in('site_id', siteIds)
-            .like('keyword', `${keyword}%`)
-            .gte('discovered_at', since)
+          const raw = await fetchAllRows<{ id: string; site_id: string; keyword: string }>((from, to) =>
+            (supabase.from('raw_keywords') as any)
+              .select('id, site_id, keyword')
+              .in('site_id', siteIds)
+              .like('keyword', `${keyword}%`)
+              .gte('discovered_at', since)
+              .order('id', { ascending: true })
+              .range(from, to)
+          )
           const bySite = new Map<string, Set<string>>()
-          for (const r of (raw || [])) {
+          for (const r of raw) {
             const domain = idMap.get(r.site_id)
             if (!domain) continue
             if (!bySite.has(domain)) bySite.set(domain, new Set())
@@ -1471,22 +1584,30 @@ export default function TaskGroupsPage() {
       const rRows: DetailRow[] = []
       if (needsNew) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: raw } = await (supabase.from('raw_keywords') as any)
-          .select('site_id, content_date')
-          .eq('keyword', keyword).gte('content_date', since)
-          .order('content_date', { ascending: false })
-        for (const r of (raw || [])) {
+        const raw = await fetchAllRows<{ id: string; site_id: string; content_date: string }>((from, to) =>
+          (supabase.from('raw_keywords') as any)
+            .select('id, site_id, content_date')
+            .eq('keyword', keyword).gte('content_date', since)
+            .order('content_date', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
+        for (const r of raw) {
           const domain = idMap.get(r.site_id)
           if (domain) nRows.push({ date: String(r.content_date).slice(0, 10), domain })
         }
       }
       if (needsRank) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: raw } = await (supabase.from('rank_changes') as any)
-          .select('site_id, stat_date')
-          .eq('keyword', keyword).eq('type', 'rankup').gte('stat_date', since)
-          .order('stat_date', { ascending: false })
-        for (const r of (raw || [])) {
+        const raw = await fetchAllRows<{ id: string; site_id: string; stat_date: string }>((from, to) =>
+          (supabase.from('rank_changes') as any)
+            .select('id, site_id, stat_date')
+            .eq('keyword', keyword).eq('type', 'rankup').gte('stat_date', since)
+            .order('stat_date', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
+        for (const r of raw) {
           const domain = idMap.get(r.site_id)
           if (domain) rRows.push({ date: String(r.stat_date).slice(0, 10), domain })
         }
@@ -1514,28 +1635,36 @@ export default function TaskGroupsPage() {
 
   // ── Effects ─────────────────────────────────────────────────────────────────
 
-  useEffect(() => { loadGroups(); loadDomainInfo() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadGroups() }, [groupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!loading && !isWorkspaceRoute && !canManage && groups.length > 0) {
+      router.replace(`/task-groups/${encodeURIComponent(groups[0].id)}`)
+    }
+  }, [loading, isWorkspaceRoute, canManage, groups, router])
+  useEffect(() => {
+    if (isWorkspaceRoute && detailKw) void loadDomainInfo()
+  }, [isWorkspaceRoute, detailKw]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!claimErrorMsg) return
     const t = setTimeout(() => setClaimErrorMsg(null), 3500)
     return () => clearTimeout(t)
   }, [claimErrorMsg])
-  useEffect(() => { if (activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate) }, [activeGroupId, effectiveViewingId, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate) }, [isWorkspaceRoute, activeGroupId, effectiveViewingId, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (currentUserId && !viewingMemberId) setViewingMemberId(currentUserId) }, [currentUserId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'distribute') loadDistributed() }, [rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown')) loadSiteRankdown() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'recommend' && recSubTab === 'rankup') loadCompetitorRankup() }, [rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'recommend') loadSubmissionHistory() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'recommend') loadDismissedRec() }, [rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (rightTab === 'recommend' && canManage) { loadAllMembersSubmissionHistory(); loadAllMembersDismissed() } }, [rightTab, activeGroupId, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown'))) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend' && recSubTab === 'rankup') loadCompetitorRankup() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadSubmissionHistory() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadDismissedRec() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend' && canManage) { loadAllMembersSubmissionHistory(); loadAllMembersDismissed() } }, [isWorkspaceRoute, rightTab, activeGroupId, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
   }, [displayedClaims.length])
 
   useEffect(() => {
-    if (rightTab !== 'wordLib' || wordLibLoaded || wordLibLoading) return
+    if (!isWorkspaceRoute || rightTab !== 'wordLib' || wordLibLoaded || wordLibLoading) return
     setWordLibLoading(true)
     fetch('/api/wordlib')
       .then(r => r.json())
@@ -1557,10 +1686,10 @@ export default function TaskGroupsPage() {
       })
       .catch(() => { setWordLibData([]) })
       .finally(() => { setWordLibLoading(false) })
-  }, [rightTab, wordLibLoaded, wordLibLoading, today])
+  }, [isWorkspaceRoute, rightTab, wordLibLoaded, wordLibLoading, today])
 
   useEffect(() => {
-    if (!activeGroupId || selectedDate !== today) return
+    if (!isWorkspaceRoute || !activeGroupId || selectedDate !== today) return
     const supabase = getBrowserClient()
     const channel = supabase
       .channel(`claimed-${activeGroupId}`)
@@ -1579,7 +1708,7 @@ export default function TaskGroupsPage() {
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [activeGroupId, effectiveViewingId, selectedDate, today]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isWorkspaceRoute, activeGroupId, effectiveViewingId, selectedDate, today]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function setPage(tab: RightTab, p: number) { setTabPage(prev => ({ ...prev, [tab]: p })) }
 
@@ -1587,25 +1716,31 @@ export default function TaskGroupsPage() {
 
   async function loadAllSites() {
     if (allSites.length > 0) return
-    const supabase = getBrowserClient()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (supabase.from('sites') as any).select('id, domain, name, category, is_enabled, has_rank_data, friend_links')
+    const response = await fetch('/api/sites')
+    const data = response.ok ? await response.json() as { sites?: SiteInfo[] } : { sites: [] }
     const CAT_ORDER: Record<string, number> = { large: 0, medium: 1, small: 2 }
-    setAllSites(((data || []) as SiteInfo[]).sort((a, b) => (CAT_ORDER[a.category] ?? 9) - (CAT_ORDER[b.category] ?? 9) || a.domain.localeCompare(b.domain)))
+    setAllSites((data.sites || []).sort((a, b) => (CAT_ORDER[a.category] ?? 9) - (CAT_ORDER[b.category] ?? 9) || a.domain.localeCompare(b.domain)))
   }
 
   async function loadDomainInfo() {
     const supabase = getBrowserClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [sitesRes, weightRes] = await Promise.all([
+    const [sitesRes, weightRows] = await Promise.all([
       (supabase.from('sites') as any).select('id, domain, friend_links'),
-      (supabase.from('weight_history') as any).select('site_id, pc_weight, mobile_weight').gte('record_date', getMYDate(-30)).order('record_date'),
+      fetchAllRows<{ id: string; site_id: string; pc_weight: number; mobile_weight: number }>((from, to) =>
+        (supabase.from('weight_history') as any)
+          .select('id, site_id, pc_weight, mobile_weight')
+          .gte('record_date', getMYDate(-30))
+          .order('record_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to)
+      ),
     ])
     const sites: { id: string; domain: string; friend_links?: string[] | null }[] = sitesRes.data || []
     const idToDomain = new Map<string, string>(sites.map((s: { id: string; domain: string }) => [s.id, s.domain]))
     // weight: iterate asc so last write = latest
     const wMap = new Map<string, { pc: number; mobile: number }>()
-    for (const r of (weightRes.data || []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
+    for (const r of weightRows) {
       const domain = idToDomain.get(r.site_id)
       if (domain) wMap.set(domain, { pc: r.pc_weight, mobile: r.mobile_weight })
     }
@@ -1635,15 +1770,16 @@ export default function TaskGroupsPage() {
     } finally { setCreating(false) }
   }
 
-  async function openEditModal() {
-    if (!activeGroup) return
-    setEditName(activeGroup.name)
-    setEditSelectedUsers(new Set(activeGroup.members.map(m => m.user_id)))
-    setEditSelectedRankDomains(new Set(activeGroup.rank_domains || []))
-    setEditSelectedNewDomains(new Set(activeGroup.new_domains || []))
-    setEditSelectedSiteDomains(new Set(activeGroup.site_domains || []))
+  async function openEditModal(group: TaskGroup | null = activeGroup) {
+    if (!group) return
+    setActiveGroupId(group.id)
+    setEditName(group.name)
+    setEditSelectedUsers(new Set(group.members.map(m => m.user_id)))
+    setEditSelectedRankDomains(new Set(group.rank_domains || []))
+    setEditSelectedNewDomains(new Set(group.new_domains || []))
+    setEditSelectedSiteDomains(new Set(group.site_domains || []))
     const types: Record<string, 'app' | 'game'> = {}
-    for (const m of activeGroup.members) types[m.user_id] = m.member_type === 'game' ? 'game' : 'app'
+    for (const m of group.members) types[m.user_id] = m.member_type === 'game' ? 'game' : 'app'
     setEditMemberTypes(types); setShowEdit(true)
     const promises: Promise<unknown>[] = [loadAllSites()]
     if (userOptions.length === 0) promises.push(fetch('/api/admin/users').then(r => r.json()).then(d => setUserOptions(d.users || [])))
@@ -1665,13 +1801,48 @@ export default function TaskGroupsPage() {
   }
 
   async function handleDelete(id: string) {
-    const res = await fetch(`/api/task-groups/${id}`, { method: 'DELETE' })
-    if (res.ok) {
+    if (!isSuper || deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const res = await fetch(`/api/task-groups/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: deleteUsername.trim(), password: deletePassword }),
+      })
+      if (!res.ok) {
+        setDeleteError(await apiError(res, '删除失败'))
+        return
+      }
       const remaining = groups.filter(g => g.id !== id)
       setGroups(remaining)
-      if (activeGroupId === id) setActiveGroupId(remaining[0]?.id ?? null)
+      if (activeGroupId === id) {
+        setActiveGroupId(null)
+        setWorkspaceOpen(false)
+      }
+      setDeleteId(null)
+      setDeleteUsername('')
+      setDeletePassword('')
+    } catch {
+      setDeleteError('删除失败，请检查网络后重试')
+    } finally {
+      setDeleting(false)
     }
+  }
+
+  function openDeleteModal(id: string) {
+    setDeleteId(id)
+    setDeleteUsername('')
+    setDeletePassword('')
+    setDeleteError('')
+  }
+
+  function closeDeleteModal() {
+    if (deleting) return
     setDeleteId(null)
+    setDeleteUsername('')
+    setDeletePassword('')
+    setDeleteError('')
   }
 
   // ── Right panel ─────────────────────────────────────────────────────────────
@@ -1705,7 +1876,7 @@ export default function TaskGroupsPage() {
       return (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-gray-400">管理员手动指定的词，任何组员都可以双击认领去做"新增"</span>
+            <span className="text-xs text-gray-500">管理员手动指定的词，组员可点击“认领”（双击行为保留为快捷方式）</span>
             {canManage && (
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button onClick={clearAllDistributed} disabled={distributeClearing || distributedWords.length === 0}
@@ -1737,7 +1908,7 @@ export default function TaskGroupsPage() {
                   return (
                     <tr key={w.id} onDoubleClick={() => !claimed && claimKeyword(w.keyword, '分发词', w.volume)}
                       className={`border-b border-gray-50 last:border-0 transition-colors ${claimed ? 'opacity-50' : 'cursor-pointer select-none hover:bg-gray-50'}`}
-                      title={claimed ? (inCooldown ? `${w.claimedBy} 认领过，还剩${w.cooldownDaysLeft}天冷却` : `已被 ${w.claimedBy} 认领`) : '双击认领'}>
+                      title={claimed ? (inCooldown ? `${w.claimedBy} 认领过，还剩${w.cooldownDaysLeft}天冷却` : `已被 ${w.claimedBy} 认领`) : '点击认领按钮，或双击此行快捷认领'}>
                       {canManage && (
                         <td className="px-1 py-2">
                           <button onClick={e => { e.stopPropagation(); deleteDistributed(w.id) }}
@@ -1757,9 +1928,12 @@ export default function TaskGroupsPage() {
                         )}
                       </td>
                       <td className="px-2 py-2 text-center text-xs">
-                        {inCooldown
-                          ? <span className="text-amber-500">冷却中 · {w.cooldownDaysLeft}天后可认领</span>
-                          : claimed ? <span className="text-gray-400">{w.claimedBy} 已认领</span> : <span className="text-green-600">可认领</span>}
+                        <div className="flex items-center justify-center gap-2">
+                          {inCooldown
+                            ? <span className="text-amber-600">冷却中 · {w.cooldownDaysLeft}天后可认领</span>
+                            : claimed ? <span className="text-gray-500">{w.claimedBy} 已认领</span> : <span className="text-green-700">可认领</span>}
+                          <ClaimAction keyword={w.keyword} claimed={claimed} onClaim={() => claimKeyword(w.keyword, '分发词', w.volume)} compact />
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1836,7 +2010,7 @@ export default function TaskGroupsPage() {
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">跌幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
-                <th className="w-14" />
+                <th className="w-28" />
               </tr></thead>
               <tbody>
                 {matched.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
@@ -1847,16 +2021,16 @@ export default function TaskGroupsPage() {
                   // 其它组员的行不去猜，双击照样能认领，服务端本来就会拦重复。
                   const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
                   return (
-                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId)}
+                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                      title={claimed ? '已认领' : `双击代${memberName ?? '该组员'}认领`}>
+                      title={claimed ? '已认领' : `点击认领按钮，或双击代${memberName ?? '该组员'}认领`}>
                       <td className="pl-2 py-2">
                         <button onClick={e => { e.stopPropagation(); setDismissConfirm({ keyword: r.keyword, targetUserId: memberId, memberName }) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
+                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -1883,9 +2057,12 @@ export default function TaskGroupsPage() {
                         {r.rank_position == null ? <span className="text-gray-400">脱排</span> : r.prev_rank != null ? `▼${r.rank_position - r.prev_rank}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                      <td className="px-2 py-2 text-right">
-                        <button onClick={() => openDetail(r.keyword, '跌排更新', r.url)}
-                          className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
+                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId)} compact />
+                          <button onClick={() => openDetail(r.keyword, '跌排更新', r.url)}
+                            className="text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1949,6 +2126,7 @@ export default function TaskGroupsPage() {
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">竞品排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">涨幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
+                <th className="w-16" />
               </tr></thead>
               <tbody>
                 {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
@@ -1963,16 +2141,16 @@ export default function TaskGroupsPage() {
                   const memberName = activeGroup?.members.find(m => m.user_id === memberId)?.username ?? '—'
                   const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
                   return (
-                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)}
+                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                      title={claimed ? '已认领' : (canManage ? `双击代${memberName}认领` : '双击认领')}>
+                      title={claimed ? '已认领' : (canManage ? `点击认领按钮，或双击代${memberName}认领` : '点击认领按钮，或双击此行快捷认领')}>
                       <td className="pl-2 py-2">
                         <button onClick={e => { e.stopPropagation(); setDismissConfirm({ keyword: r.keyword, targetUserId: memberId, memberName }) }}
                           className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-base leading-none" title="移除此词">×</button>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
+                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -1998,6 +2176,9 @@ export default function TaskGroupsPage() {
                         {r.rank_position != null && r.prev_rank != null ? `▲${r.prev_rank - r.rank_position}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
+                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)} compact />
+                      </td>
                     </tr>
                   )
                 })}
@@ -2053,24 +2234,26 @@ export default function TaskGroupsPage() {
                   <col className="w-20" />
                   <col className="w-20" />
                   <col className="w-20" />
+                  <col className="w-16" />
                 </colgroup>
                 <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="px-3 py-2 text-left font-medium">关键词</th>
                   <th className="px-2 py-2 text-center font-medium">搜索量</th>
                   <th className="px-2 py-2 text-center font-medium">近期涨排</th>
                   <th className="px-2 py-2 text-center font-medium">搜索变更</th>
+                  <th className="px-2 py-2 text-center font-medium">操作</th>
                 </tr></thead>
                 <tbody>
                   {searchResults.map((r, i) => {
                     const claimed = claimedSet.has(r.keyword)
                     const change = r.volume_change ?? 0
                     return (
-                      <tr key={`${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '搜索量查询', r.volume)}
+                      <tr key={`${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '搜索量查询', r.volume) }}
                         className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                        title={claimed ? '已认领' : '双击认领'}>
+                        title={claimed ? '已认领' : '点击认领按钮，或双击此行快捷认领'}>
                         <td className="px-3 py-2">
                           <span className="text-sm text-gray-800 select-text cursor-text"
-                            onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '搜索量查询', r.volume) }}
+                            onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '搜索量查询', r.volume) }}
                           >{r.keyword.length > 26 ? r.keyword.slice(0, 26) + '…' : r.keyword}</span>
                           {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
                         </td>
@@ -2086,6 +2269,9 @@ export default function TaskGroupsPage() {
                           {change > 0 ? <span className="text-green-600">+{change.toLocaleString()}</span>
                             : change < 0 ? <span className="text-red-500">{change.toLocaleString()}</span>
                             : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '搜索量查询', r.volume)} compact />
                         </td>
                       </tr>
                     )
@@ -2411,19 +2597,19 @@ export default function TaskGroupsPage() {
                   <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">上次</th>
                   <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">跌幅</th>
                   <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">搜索量</th>
-                  <th className="w-14" />
+                  <th className="w-28" />
                 </tr></thead>
                 <tbody>
                   {dateRows.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE).map((r, i) => {
                     const claimed = claimedSet.has(r.keyword)
                     const drop = (r.rank_position != null && r.prev_rank != null) ? r.rank_position - r.prev_rank : null
                     return (
-                      <tr key={`rd-${r.keyword}|${i}`} onDoubleClick={() => claimKeyword(r.keyword, '跌词更新', r.volume)}
+                      <tr key={`rd-${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume) }}
                         className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
-                        title={claimed ? '已认领' : '双击认领'}>
+                        title={claimed ? '已认领' : '点击认领按钮，或双击此行快捷认领'}>
                         <td className="px-3 py-2">
                           <span className="text-sm text-gray-800 select-text cursor-text" title={r.keyword}
-                            onDoubleClick={e => { e.stopPropagation(); claimKeyword(r.keyword, '跌词更新', r.volume) }}>
+                            onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume) }}>
                             {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                           </span>
                           {claimed && <span className="ml-1 text-[10px] text-green-500">✓</span>}
@@ -2446,9 +2632,12 @@ export default function TaskGroupsPage() {
                           {r.rank_position == null ? <span className="text-gray-400">脱排</span> : drop != null ? <span className="text-red-500">▼{drop}</span> : <span className="text-gray-300">新</span>}
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                        <td className="px-2 py-2 text-right">
-                          <button onClick={() => openDetail(r.keyword, '跌词更新', r.url)}
-                            className="text-xs border rounded px-1.5 py-0.5 text-gray-400 hover:text-gray-600 border-gray-200 transition-colors">详情</button>
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌词更新', r.volume)} compact />
+                            <button onClick={() => openDetail(r.keyword, '跌词更新', r.url)}
+                              className="text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -2475,7 +2664,6 @@ export default function TaskGroupsPage() {
     ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
   ]
-
   function SourceTag({ s }: { s: string }) {
     const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨', '分发词': '分发' }
     return <span className="text-[10px] text-gray-300 flex-shrink-0">{map[s] ?? s}</span>
@@ -2635,6 +2823,26 @@ export default function TaskGroupsPage() {
     )
   }
 
+  function retryFailedLoad() {
+    if (!loadError) return
+    if (loadError.scope === 'groups') void loadGroups()
+    else if (loadError.scope === 'claimed' && activeGroupId && effectiveViewingId) {
+      void loadClaimed(activeGroupId, effectiveViewingId, selectedDate)
+    } else if (loadError.scope === 'radar') void loadRadar()
+    else if (loadError.scope === 'distributed') void loadDistributed()
+    else if (loadError.scope === 'recommendations') {
+      setLoadError(null)
+      void loadSiteRankdown(true)
+      void loadCompetitorRankup(true)
+      void loadSubmissionHistory()
+      void loadDismissedRec()
+      if (canManage) {
+        void loadAllMembersSubmissionHistory()
+        void loadAllMembersDismissed()
+      }
+    }
+  }
+
   return (
     <div className="p-6">
       {claimErrorMsg && (
@@ -2642,44 +2850,108 @@ export default function TaskGroupsPage() {
           {claimErrorMsg}
         </div>
       )}
-      <div className="flex items-center justify-between mb-5">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">分组任务</h1>
-          <p className="text-gray-400 text-sm mt-0.5">按分组认领今日关键词</p>
+          <h1 className="text-2xl font-bold text-gray-900">{isWorkspaceRoute ? (activeGroup?.name || '任务工作台') : '分组管理'}</h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {isWorkspaceRoute ? '完成今日待办、认领和成果提交' : '编辑分组、配置成员与站点，并进入各分组工作台'}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <BaiduCookiePoolManager />
-          {canManage && (
-            <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          {((isWorkspaceRoute && groups.length > 0) || (!isWorkspaceRoute && canManage)) && <BaiduCookiePoolManager />}
+          {isWorkspaceRoute && groups.length > 0 && (
+            <select aria-label="切换分组工作台" value={activeGroupId ?? ''}
+              onChange={event => router.push(`/task-groups/${encodeURIComponent(event.target.value)}`)}
+              className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+              {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+          )}
+          {canManage && !isWorkspaceRoute && (
+            <div className="flex flex-wrap items-center gap-2">
               <button onClick={openCreateModal} className="btn-primary">
                 <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
                 新增分组
               </button>
-              {activeGroup && <button onClick={openEditModal} className="inline-flex items-center px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-600 transition-colors">编辑分组</button>}
-              {activeGroup && <button onClick={() => setDeleteId(activeGroup.id)} className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md border border-red-300 text-red-400 hover:bg-red-50 transition-colors">删除分组</button>}
             </div>
           )}
         </div>
       </div>
 
-      {groups.length === 0 ? (
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{loadError.message}。已有内容会保留，你可以重试。</span>
+          <button type="button" onClick={retryFailedLoad}
+            className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500">
+            重试
+          </button>
+        </div>
+      )}
+
+      {loading ? <Spinner /> : groups.length === 0 ? (
         <div className="card flex flex-col items-center justify-center py-20 text-gray-400">
           <p className="text-sm">{canManage ? '还没有分组，点击右上角新增' : '你尚未加入任何分组'}</p>
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="flex items-center gap-1.5 px-4 pt-3 pb-0 border-b border-gray-100 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
+          {!isWorkspaceRoute && canManage && (
+          <>
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/70 px-4 py-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">1 · 选择分组</p>
+              <p className="text-xs text-gray-400">先选择要处理的分组，再进入任务工作台</p>
+            </div>
+            <span className="text-xs text-gray-400">共 {groups.length} 个分组</span>
+          </div>
+          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
             {groups.map(g => (
-              <button key={g.id} onClick={() => { setActiveGroupId(g.id); setViewingMemberId(currentUserId || null); setTabPage({ distribute: 0, recommend: 0, search: 0, volumeRising: 0, cross: 0, rank: 0, streak: 0, newWords: 0, wordLib: 0, rankdown: 0 }) }}
-                className={`px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap border-b-2 transition-colors ${activeGroupId === g.id ? 'border-green-500 text-green-700 bg-green-50/60' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
-                {g.name}
-              </button>
+              <div key={g.id} role="link" tabIndex={0}
+                onClick={() => router.push(`/task-groups/${encodeURIComponent(g.id)}`)}
+                onKeyDown={event => {
+                  if (event.target !== event.currentTarget) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    router.push(`/task-groups/${encodeURIComponent(g.id)}`)
+                  }
+                }}
+                className="group cursor-pointer rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-green-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500">
+                <span className="flex items-start justify-between gap-3">
+                  <span>
+                    <span className="block text-base font-semibold text-gray-900 group-hover:text-green-700">{g.name}</span>
+                    <span className="mt-1 block text-xs text-gray-500">{g.members.length} 位成员 · {g.site_domains.length} 个站点</span>
+                  </span>
+                  <Link href={`/task-groups/${encodeURIComponent(g.id)}`}
+                    onClick={event => event.stopPropagation()}
+                    className="rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100 focus-visible:ring-2 focus-visible:ring-green-500">进入工作台</Link>
+                </span>
+                <span className="mt-3 flex flex-wrap gap-1.5">
+                  {g.members.slice(0, 4).map(member => <span key={member.user_id} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{member.username}</span>)}
+                  {g.members.length > 4 && <span className="px-1 py-0.5 text-xs text-gray-400">+{g.members.length - 4}</span>}
+                </span>
+                <span className="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3">
+                  <button type="button" onClick={event => { event.stopPropagation(); void openEditModal(g) }}
+                    className="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-500">编辑分组</button>
+                  {isSuper && (
+                    <button type="button" onClick={event => { event.stopPropagation(); openDeleteModal(g.id) }}
+                      className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-500">删除</button>
+                  )}
+                </span>
+              </div>
             ))}
           </div>
+          </>
+          )}
 
-          {activeGroup && (
+          {isWorkspaceRoute && !activeGroup && (
+            <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
+              <p className="text-sm font-medium text-gray-700">无法进入这个分组工作台</p>
+              <p className="mt-1 text-xs text-gray-400">分组不存在，或者你不是该分组成员。</p>
+              {canManage && <Link href="/task-groups" className="mt-4 btn-secondary">返回分组管理</Link>}
+            </div>
+          )}
+
+          {isWorkspaceRoute && workspaceOpen && activeGroup && (
             <div className="flex" style={{ height: 'calc(100vh - 220px)', minHeight: '500px' }}>
               {/* Left panel */}
               <div className="w-[280px] flex-shrink-0 border-r border-gray-100 flex flex-col">
@@ -2700,7 +2972,7 @@ export default function TaskGroupsPage() {
                     className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-500 cursor-pointer" />
                 </div>
                 <div ref={claimedListRef} className="flex-1 overflow-y-auto">
-                  {claimedLoading ? <Spinner /> : claimedKeywords.length === 0 ? (
+                  {claimedLoading ? <Spinner /> : displayedClaims.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-300 text-sm py-12">
                       <svg className="w-8 h-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -2717,9 +2989,7 @@ export default function TaskGroupsPage() {
                           <div key={k.id} className={`transition-colors ${k.status !== 'pending' ? 'opacity-55' : ''}`}>
                             <div
                               className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer select-none ${isInvalid && !isExpanded ? 'bg-red-50/60' : ''}`}
-                              onClick={() => setExpandedClaimIds(prev =>
-                                prev.has(k.id) ? new Set<string>() : new Set<string>([k.id])
-                              )}
+                              onClick={() => setExpandedClaimIds(prev => prev.has(k.id) ? new Set<string>() : new Set<string>([k.id]))}
                             >
                               {(isViewingOwn || canManage) && (k.status === 'pending' || k.status === 'submitted') ? (
                                 <button onClick={e => { e.stopPropagation(); dismissClaimed(k.id) }} className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors text-sm leading-none" title={k.status === 'submitted' ? '移除这条已提交的记录（分组认领错了/提交错了都可以用这个撤掉）' : '移除'}>×</button>
@@ -2859,12 +3129,13 @@ export default function TaskGroupsPage() {
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
                     <button key={tab} onClick={() => { setRightTab(tab); setSortCol(''); setSortDir('') }}
+                      aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}
                     </button>
                   ))}
                 </div>
-                <div className="flex-1 overflow-y-auto p-4">
+                <div className="flex-1 overflow-auto p-4">
                   {renderRightContent()}
                 </div>
               </div>
@@ -2971,13 +3242,37 @@ export default function TaskGroupsPage() {
       )}
 
       {deleteId && (
-        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-gray-900 mb-2">确认删除</h3>
-            <p className="text-sm text-gray-500 mb-5">删除后无法恢复，分组内的成员和设置都会清除。</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setDeleteId(null)} className="btn-ghost">取消</button>
-              <button onClick={() => handleDelete(deleteId)} className="btn-danger">确认删除</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="delete-group-title" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 id="delete-group-title" className="font-semibold text-gray-900">删除分组</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              即将永久删除“{groups.find(group => group.id === deleteId)?.name || '此分组'}”。分组成员和设置会一并移除，此操作无法恢复。
+            </p>
+            <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+              仅超管可以执行。请输入当前登录超管的用户名和密码再次确认。
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600">超管用户名</span>
+                <input type="text" autoComplete="username" value={deleteUsername}
+                  onChange={event => { setDeleteUsername(event.target.value); setDeleteError('') }}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600">密码</span>
+                <input type="password" autoComplete="current-password" value={deletePassword}
+                  onChange={event => { setDeletePassword(event.target.value); setDeleteError('') }}
+                  onKeyDown={event => { if (event.key === 'Enter' && deleteUsername.trim() && deletePassword) void handleDelete(deleteId) }}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400" />
+              </label>
+              {deleteError && <p role="alert" className="text-sm text-red-600">{deleteError}</p>}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={closeDeleteModal} disabled={deleting} className="btn-ghost disabled:opacity-50">取消</button>
+              <button onClick={() => void handleDelete(deleteId)} disabled={deleting || !deleteUsername.trim() || !deletePassword}
+                className="btn-danger disabled:cursor-not-allowed disabled:opacity-40">
+                {deleting ? '验证并删除中…' : '验证身份并永久删除'}
+              </button>
             </div>
           </div>
         </div>

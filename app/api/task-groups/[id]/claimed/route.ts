@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { invalidateGroupTrackingCache } from '@/lib/task-group-data'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -13,11 +16,11 @@ async function getCallerId(): Promise<string | null> {
   return user?.id ?? null
 }
 
-async function getCallerRole(callerId: string): Promise<string> {
+async function getCallerRole(callerId: string): Promise<UserRole> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data } = await service.from('user_profiles').select('role').eq('id', callerId).single()
-  return data?.role ?? 'normal'
+  return (data?.role ?? 'normal') as UserRole
 }
 
 export async function GET(
@@ -35,18 +38,22 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
   }
 
-  // Only admin/super can query other users' records
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = createServiceClient() as any
+  const role = await getCallerRole(callerId)
+  if (!await canAccessTaskGroup(service, callerId, role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Only an authorized admin/super can query other users' records.
   let userId = callerId
   if (requestedUserId && requestedUserId !== callerId) {
-    const role = await getCallerRole(callerId)
     if (role === 'normal') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     userId = requestedUserId
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = createServiceClient() as any
   const SELECT_COLS = 'id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, claimed_date, created_at'
-  const { data, error } = await service
+  let keywords = await fetchAllRows<Record<string, unknown>>((from, to) => service
     .from('member_claimed_keywords')
     .select(SELECT_COLS)
     .eq('group_id', groupId)
@@ -54,9 +61,8 @@ export async function GET(
     .eq('claimed_date', date)
     .neq('status', 'dismissed')
     .order('created_at', { ascending: true })
-
-  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  let keywords = data || []
+    .order('id', { ascending: true })
+    .range(from, to))
 
   // 待提交（pending）的认领不该因为翻到"今天"就从列表里消失——之前严格按
   // claimed_date=date 匹配，隔天再打开就看不到昨天还没提交的词了，而爬虫只
@@ -67,15 +73,17 @@ export async function GET(
   // 只在查看"今天"时才往前找——翻到某个历史日期就应该精确显示那一天，不然
   // 回看历史记录也会被塞进不属于那天的东西。
   if (date === getMY()) {
-    const { data: stray, error: strayErr } = await service
-      .from('member_claimed_keywords')
-      .select(SELECT_COLS)
-      .eq('group_id', groupId)
-      .eq('user_id', userId)
-      .eq('status', 'pending')
-      .lt('claimed_date', date)
-      .order('created_at', { ascending: true })
-    if (!strayErr && stray && stray.length > 0) keywords = [...stray, ...keywords]
+    const stray = await fetchAllRows<Record<string, unknown>>((from, to) => service
+        .from('member_claimed_keywords')
+        .select(SELECT_COLS)
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .eq('status', 'pending')
+        .lt('claimed_date', date)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to))
+    if (stray.length > 0) keywords = [...stray, ...keywords]
   }
 
   return NextResponse.json({ keywords })
@@ -106,6 +114,10 @@ export async function POST(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
+  const callerRole = await getCallerRole(callerId)
+  if (!await canAccessTaskGroup(service, callerId, callerRole, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   // 代组员认领——只有 admin/super 能指定别人的 userId（跟 GET 的
   // requestedUserId 是同一套权限模型）。2026-08-17 加入：之前不管前端"查看
@@ -114,8 +126,7 @@ export async function POST(
   // 需要"代组员认领"，顺带把这个既有的口径不一致也修掉。
   let targetUserId = callerId
   if (requestedUserId && requestedUserId !== callerId) {
-    const requesterRole = await getCallerRole(callerId)
-    if (requesterRole !== 'super' && requesterRole !== 'admin') {
+    if (callerRole !== 'super' && callerRole !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     targetUserId = requestedUserId
@@ -126,7 +137,6 @@ export async function POST(
   // 挡掉、前端又没处理403，表现就是"双击没反应"。超管/管理员本来就能看到
   // 全部分组、能编辑任何组员的认领记录（见下面 PATCH 的 canEditOthers），
   // 认领这个动作理应有同等权限，不需要先手动把自己加进成员列表）。
-  const callerRole = await getCallerRole(callerId)
   const { data: targetMembership } = await service
     .from('task_group_members')
     .select('user_id')
@@ -266,6 +276,9 @@ export async function PATCH(
 
   // Admin/super can edit any member's claim; normal users can only edit their own
   const callerRole = await getCallerRole(callerId)
+  if (!await canAccessTaskGroup(service, callerId, callerRole, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const canEditOthers = callerRole === 'super' || callerRole === 'admin'
 
   let query = service
@@ -300,6 +313,9 @@ export async function PUT(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const callerRole = await getCallerRole(callerId)
+  if (!await canAccessTaskGroup(service, callerId, callerRole, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const targetUserId = body.userId && body.userId !== callerId && ['admin', 'super'].includes(callerRole)
     ? body.userId
     : callerId

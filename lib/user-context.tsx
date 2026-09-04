@@ -8,7 +8,7 @@ export interface UserProfile {
   id: string
   email: string
   role: UserRole
-  // null = all sites accessible (super/admin); string[] = allowed site IDs (normal)
+  // null = all sites accessible (super); string[] = allowed site IDs (admin/normal)
   accessibleSiteIds: string[] | null
 }
 

@@ -25,10 +25,8 @@ function parseBlockToCookieString(raw: string): string {
 }
 
 // Self-contained button + modal for managing the shared Baidu 收录抓取 cookie 池
-// (app_settings.baidu_index_cookie). Any logged-in user can view and edit —
-// there's no admin-only gate on /api/settings for this key, so this is safe
-// to surface anywhere in the app (originally only on the admin-only 抓取日志
-// page; moved/duplicated here so all team members can help keep it fresh).
+// (app_settings.baidu_index_cookie). Group members and administrators can view
+// and edit it so the team can keep the rotating credentials fresh.
 export function BaiduCookiePoolManager() {
   const [cookieUpdatedAt, setCookieUpdatedAt] = useState<string | null>(null)
   const [cookiePool, setCookiePool] = useState<CookieEntry[]>([])
@@ -36,15 +34,18 @@ export function BaiduCookiePoolManager() {
   const [newCookieName, setNewCookieName] = useState('')
   const [newCookieInput, setNewCookieInput] = useState('')
   const [saving, setSaving] = useState(false)
+  const [loadingPool, setLoadingPool] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [saveMsg, setSaveMsg] = useState('')
 
   const fetchPool = useCallback(async () => {
-    const res = await fetch('/api/settings?key=baidu_index_cookie')
-    if (!res.ok) return
-    const d = await res.json()
-    setCookieUpdatedAt(d.updated_at ?? null)
-    if (!d.value) return
+    setLoadingPool(true); setLoadError('')
     try {
+      const res = await fetch('/api/settings?key=baidu_index_cookie')
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'Cookie 池加载失败')
+      setCookieUpdatedAt(d.updated_at ?? null)
+      if (!d.value) { setCookiePool([]); return }
       const pool = JSON.parse(d.value)
       if (Array.isArray(pool) && pool.length > 0) {
         if (typeof pool[0] === 'string') {
@@ -52,8 +53,10 @@ export function BaiduCookiePoolManager() {
         } else {
           setCookiePool(pool)
         }
-      }
-    } catch { setCookiePool([]) }
+      } else setCookiePool([])
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Cookie 池加载失败')
+    } finally { setLoadingPool(false) }
   }, [])
 
   useEffect(() => { fetchPool() }, [fetchPool])
@@ -67,16 +70,19 @@ export function BaiduCookiePoolManager() {
 
   async function saveCookie() {
     setSaving(true); setSaveMsg('')
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'baidu_index_cookie', value: JSON.stringify(cookiePool) }),
-    })
-    if (res.ok) {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'baidu_index_cookie', value: JSON.stringify(cookiePool) }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '保存失败')
       setCookieUpdatedAt(new Date().toISOString())
       setSaveMsg(`已保存 ${cookiePool.length} 个 Cookie`)
-    } else { setSaveMsg('保存失败') }
-    setSaving(false)
+    } catch (error) {
+      setSaveMsg(error instanceof Error ? error.message : '保存失败（网络异常）')
+    } finally { setSaving(false) }
   }
 
   return (
@@ -88,7 +94,7 @@ export function BaiduCookiePoolManager() {
             : '百度收录 Cookie 池未设置'}
         </span>
         <button
-          onClick={() => { setShowModal(true); setSaveMsg('') }}
+          onClick={() => { setShowModal(true); setSaveMsg(''); void fetchPool() }}
           className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-2 py-0.5 hover:border-blue-200 whitespace-nowrap"
         >
           管理 Cookie 池
@@ -111,16 +117,29 @@ export function BaiduCookiePoolManager() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              {loadingPool && <p className="text-sm text-gray-500">正在读取最新 Cookie 池…</p>}
+              {loadError && (
+                <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <span>{loadError}</span>
+                  <button type="button" onClick={() => void fetchPool()} className="rounded border border-red-300 bg-white px-2 py-1 text-xs">重试</button>
+                </div>
+              )}
               {cookiePool.length > 0 && (
                 <div className="space-y-2">
                   {cookiePool.map((entry, idx) => (
-                    <div key={idx} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                    <div key={idx} className="grid grid-cols-[42px_minmax(100px,140px)_1fr_28px] items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
                       <span className="text-[10px] text-gray-400 font-mono w-10 flex-shrink-0" title={entry.addedAt ? `添加于 ${entry.addedAt}` : '添加日期未知（早期记录）'}>
                         {entry.addedAt ? entry.addedAt.slice(5) : '—'}
                       </span>
-                      <span className="text-xs font-medium text-gray-700 w-28 flex-shrink-0 truncate">{entry.name}</span>
-                      <span className="text-xs text-gray-400 font-mono flex-1 truncate">{entry.value.slice(0, 60)}…</span>
+                      <input aria-label={`第 ${idx + 1} 个 Cookie 名称`} value={entry.name}
+                        onChange={event => setCookiePool(previous => previous.map((item, itemIndex) => itemIndex === idx ? { ...item, name: event.target.value } : item))}
+                        className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500" />
+                      <input aria-label={`更新 ${entry.name} 的 Cookie 内容`} type="password" value={entry.value}
+                        onChange={event => setCookiePool(previous => previous.map((item, itemIndex) => itemIndex === idx ? { ...item, value: event.target.value, addedAt: todayMY() } : item))}
+                        className="min-w-0 rounded border border-gray-200 bg-white px-2 py-1 font-mono text-xs text-gray-600 focus-visible:ring-2 focus-visible:ring-blue-500" />
                       <button
+                        type="button"
+                        aria-label={`删除 ${entry.name}`}
                         onClick={() => setCookiePool(prev => prev.filter((_, i) => i !== idx))}
                         className="text-gray-300 hover:text-red-400 flex-shrink-0 transition-colors"
                       >

@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 async function getCaller() {
   const { data: { user } } = await (await createClient()).auth.getUser()
   if (!user) return null
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  return { id: user.id, role: profile?.role ?? 'normal', service }
+  return { id: user.id, role: (profile?.role ?? 'normal') as UserRole, service }
 }
 
 async function isGroupMember(service: any, groupId: string, userId: string) {
@@ -22,6 +25,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { searchParams } = new URL(req.url)
   const all = searchParams.get('all') === '1'
   const targetUserId = searchParams.get('userId') || caller.id
+  if (!await canAccessTaskGroup(caller.service, caller.id, caller.role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const canManage = ['admin', 'super'].includes(caller.role)
   if (all && !canManage) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (targetUserId !== caller.id && !canManage) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -33,14 +39,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   const since = new Date(Date.now() - 7 * 86400000).toISOString()
-  let query = caller.service.from('member_rec_dismissals')
-    .select('user_id, keyword, dismissed_at')
-    .eq('group_id', groupId)
-    .gte('dismissed_at', since)
-  if (!all) query = query.eq('user_id', targetUserId)
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: 'Unable to load dismissed recommendations' }, { status: 500 })
-  return NextResponse.json({ rows: data ?? [] })
+  const rows = await fetchAllRows<{ user_id: string; keyword: string; dismissed_at: string }>((from, to) => {
+    let query = caller.service.from('member_rec_dismissals')
+      .select('user_id, keyword, dismissed_at')
+      .eq('group_id', groupId)
+      .gte('dismissed_at', since)
+      .order('user_id', { ascending: true })
+      .order('keyword', { ascending: true })
+      .range(from, to)
+    if (!all) query = query.eq('user_id', targetUserId)
+    return query
+  })
+  return NextResponse.json({ rows })
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -50,6 +60,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const body = await req.json().catch(() => ({})) as { userId?: string; keyword?: string; permanent?: boolean }
   const targetUserId = body.userId || caller.id
   const keyword = body.keyword?.trim() || ''
+  if (!await canAccessTaskGroup(caller.service, caller.id, caller.role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const canManage = ['admin', 'super'].includes(caller.role)
   if (targetUserId !== caller.id && !canManage) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (!keyword || keyword.length > 200) return NextResponse.json({ error: 'Invalid keyword' }, { status: 400 })

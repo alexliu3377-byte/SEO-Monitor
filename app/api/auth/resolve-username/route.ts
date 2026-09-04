@@ -28,6 +28,7 @@ function isRateLimited(key: string) {
 }
 
 async function verifyTurnstile(token: string | undefined, ip: string) {
+  if (process.env.NODE_ENV === 'development') return true
   const secret = process.env.TURNSTILE_SECRET_KEY
   if (!secret) return process.env.NODE_ENV !== 'production'
   if (!token) return false
@@ -71,11 +72,16 @@ export async function POST(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  const { data: profile } = await service
+  const { data: profile, error: profileError } = await service
     .from('user_profiles')
     .select('id')
     .ilike('username', normalizedUsername)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('Unable to query login profile:', profileError.message)
+    return NextResponse.json({ error: '无法连接账户服务，请稍后重试' }, { status: 503 })
+  }
 
   if (!profile?.id) {
     return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 })

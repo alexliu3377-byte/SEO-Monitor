@@ -21,9 +21,9 @@ function ExtLink({ href, children }: { href: string; children: React.ReactNode }
 }
 
 const NAV_WORKFLOW: { id: string; label: string }[] = [
-  { id: 'wf-task-groups', label: '分组任务' },
+  { id: 'wf-task-groups', label: '任务工作台' },
   { id: 'wf-cookie-pool', label: 'Cookie 池维护' },
-  { id: 'wf-group-report', label: '分组报告' },
+  { id: 'wf-group-report', label: '成效报告' },
 ]
 const NAV_REFERENCE: { id: string; label: string }[] = [
   { id: 'ref-home', label: '首页快报' },
@@ -104,8 +104,8 @@ export default function GuidePage() {
             {/* 分组任务 */}
             <Section id="wf-task-groups" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
               <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
-                <h3 className="text-base font-bold text-gray-900">分组任务——认领词、提交工作</h3>
-                <ExtLink href="/task-groups">打开分组任务</ExtLink>
+                <h3 className="text-base font-bold text-gray-900">任务工作台——查看待办、认领并提交成果</h3>
+                <ExtLink href="/task-groups">打开任务工作台</ExtLink>
               </div>
               <div className="p-6 space-y-5 text-sm text-gray-700">
                 <p>右侧的每个 tab 都是一种"词的来源"，系统每天会自动挖出这些词，你只要挑感兴趣的认领去做：</p>
@@ -175,8 +175,8 @@ export default function GuidePage() {
             {/* 分组报告 */}
             <Section id="wf-group-report" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
               <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
-                <h3 className="text-base font-bold text-gray-900">分组报告——看自己做得怎么样</h3>
-                <ExtLink href="/group-report">打开分组报告</ExtLink>
+                <h3 className="text-base font-bold text-gray-900">成效报告——查看成果与历史表现</h3>
+                <ExtLink href="/group-report">打开成效报告</ExtLink>
               </div>
               <div className="p-6 space-y-4 text-sm text-gray-700">
                 <div className="grid gap-3">

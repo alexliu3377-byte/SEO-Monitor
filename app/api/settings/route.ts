@@ -4,17 +4,22 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 const ALLOWED_KEYS = ['baidu_index_cookie'] as const
 type SettingKey = typeof ALLOWED_KEYS[number]
 
-async function requireAdmin() {
+async function requireCookieManager() {
   const { data: { user } } = await (await createClient()).auth.getUser()
   if (!user) return { status: 401 as const, service: null }
   const service = createServiceClient() as any
-  const { data, error } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (error || !['super', 'admin'].includes(data?.role)) return { status: 403 as const, service: null }
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    service.from('user_profiles').select('role').eq('id', user.id).maybeSingle(),
+    service.from('task_group_members').select('user_id').eq('user_id', user.id).limit(1).maybeSingle(),
+  ])
+  if (!['super', 'admin'].includes(profile?.role) && !membership) {
+    return { status: 403 as const, service: null }
+  }
   return { status: 200 as const, service }
 }
 
 export async function GET(req: Request) {
-  const auth = await requireAdmin()
+  const auth = await requireCookieManager()
   if (!auth.service) return NextResponse.json({ error: auth.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: auth.status })
 
   const key = new URL(req.url).searchParams.get('key') as SettingKey | null
@@ -29,7 +34,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireAdmin()
+  const auth = await requireCookieManager()
   if (!auth.service) return NextResponse.json({ error: auth.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: auth.status })
 
   // baidu_index_cookie 池由全体登录用户共同维护（不限管理员），故无角色限制

@@ -3,6 +3,8 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
 import { invalidateGroupTrackingCache, normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+import { canAdminUseGroupSites, filterTaskGroupsForCaller, getAssignedSiteDomains } from '@/lib/task-group-access'
 
 async function getCaller() {
   const supabase = await createClient()
@@ -14,7 +16,7 @@ async function getCaller() {
   return { id: user.id, email: user.email ?? '', role: (data?.role ?? 'normal') as UserRole }
 }
 
-interface RawGroup { id: string; name: string; type: string; created_at: string; competitor_domains: string[] }
+interface RawGroup { id: string; name: string; type: string; created_at: string; competitor_domains: string[]; site_domains: string[] }
 interface RawMember { group_id: string; user_id: string; username: string | null; member_type: string | null }
 
 export async function GET() {
@@ -24,13 +26,15 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
 
-  const [{ data: groups, error }, { data: members, error: membersError }] = await Promise.all([
-    service.from('task_groups').select('*').order('created_at'),
-    service.from('task_group_members').select('group_id, user_id, username, member_type'),
+  const [groups, members] = await Promise.all([
+    fetchAllRows<RawGroup>((from, to) => service.from('task_groups').select('*')
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to)),
+    fetchAllRows<RawMember>((from, to) => service.from('task_group_members')
+      .select('group_id, user_id, username, member_type')
+      .order('group_id', { ascending: true }).order('user_id', { ascending: true }).range(from, to)),
   ])
-  if (error || membersError) return NextResponse.json({ error: 'Unable to load task groups' }, { status: 500 })
 
-  const rawMembers = (members || []) as RawMember[]
+  const rawMembers = members
   const displayNames = await resolveUserDisplayNames(service, rawMembers.map(m => m.user_id), rawMembers)
   const membersByGroup = new Map<string, { user_id: string; username: string; member_type: string }[]>()
   for (const m of rawMembers) {
@@ -38,14 +42,13 @@ export async function GET() {
     membersByGroup.get(m.group_id)!.push({ user_id: m.user_id, username: displayNames.get(m.user_id) || '', member_type: m.member_type || 'app' })
   }
 
-  const allGroups = ((groups || []) as RawGroup[]).map(g => ({
+  const allGroups = groups.map(g => ({
     ...g,
     members: membersByGroup.get(g.id) || [],
   }))
 
-  const result = caller.role === 'normal'
-    ? allGroups.filter(g => g.members.some(m => m.user_id === caller.id))
-    : allGroups
+  const assignedDomains = caller.role === 'admin' ? await getAssignedSiteDomains(service, caller.id) : new Set<string>()
+  const result = filterTaskGroupsForCaller(allGroups, rawMembers, caller.id, caller.role, assignedDomains)
 
   return NextResponse.json({ groups: result })
 }
@@ -79,10 +82,14 @@ export async function POST(req: Request) {
   const normalized = await normalizeTaskGroupMembers(service, members)
   if (normalized.error) return NextResponse.json({ error: normalized.error }, { status: 400 })
   const safeName = ((nameInput || '').trim() || normalized.members.map(member => member.username).join(' · ')).slice(0, 100)
+  const normalizedSiteDomains = normalizeDomains(site_domains)
+  if (!await canAdminUseGroupSites(service, caller.id, caller.role, normalizedSiteDomains)) {
+    return NextResponse.json({ error: '只能为你负责的站点创建分组' }, { status: 403 })
+  }
 
   const { data: group, error } = await service
     .from('task_groups')
-    .insert({ name: safeName, type, rank_domains: normalizeDomains(rank_domains), new_domains: normalizeDomains(new_domains), associated_domains: normalizeDomains(associated_domains), competitor_domains: normalizeDomains(competitor_domains), site_domains: normalizeDomains(site_domains) })
+    .insert({ name: safeName, type, rank_domains: normalizeDomains(rank_domains), new_domains: normalizeDomains(new_domains), associated_domains: normalizeDomains(associated_domains), competitor_domains: normalizeDomains(competitor_domains), site_domains: normalizedSiteDomains })
     .select()
     .single()
   if (error) return NextResponse.json({ error: 'Unable to create task group' }, { status: 500 })

@@ -1,11 +1,14 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/user-context'
 import { explainOutcomeScore, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
+const SHOW_SUBMISSION_DETAILS = false
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -26,6 +29,11 @@ interface ReportData {
   period: string; startDate: string; endDate: string
   groupTotal: { total: { count: number; volume: number }; bySource: BySourceItem[] } | null
   members: MemberReport[]
+}
+interface OverviewGroup {
+  id: string; name: string
+  groupTotal: { total: { count: number; volume: number }; bySource: BySourceItem[] } | null
+  members: Omit<MemberReport, 'byDate'>[]
 }
 
 interface DetailKw {
@@ -59,7 +67,7 @@ type OutcomeSortBy = 'submit_date' | 'record_date' | 'search_volume' | 'rank_pos
 const SOURCE_LABEL: Record<string, string> = { '竞品涨排名': '竞品涨排', '连续上涨词': '连续上涨', '共新增词': '共新增词', '搜索量查询': '搜索查询', '交叉词': '交叉词', '更新词库': '更新词库', '手动添加': '手动添加', '跌词更新': '跌词更新', '跌排更新': '跌排更新', '涨排更新': '涨排更新', '搜索上涨': '搜索上涨', '分发词': '分发词' }
 
 type Period = 'yesterday' | 'week' | 'month' | 'custom'
-type ReportTab = 'submissions' | 'outcomes' | 'trackingSummary'
+type ReportTab = 'outcomes' | 'trackingSummary'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +90,12 @@ function fmtVol(v: number) {
   return v.toLocaleString()
 }
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '' }
+
+async function readResponse<T>(response: Response, fallback: string): Promise<T> {
+  const body = await response.json().catch(() => ({})) as T & { error?: string }
+  if (!response.ok) throw new Error(body.error || fallback)
+  return body
+}
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -141,13 +155,17 @@ function ReportCard({ title, memberType, total, bySource, isTotal }: {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function GroupReportPage() {
+export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
+  groupId?: string
+  initialTab?: 'outcomes' | 'trackingSummary'
+}) {
   const { role, id: currentUserId } = useUser()
+  const router = useRouter()
   const canSeeAll = role === 'super' || role === 'admin'
 
   const [groups, setGroups] = useState<Group[]>([])
-  const [activeTabId, setActiveTabId] = useState<string>('')
-  const [reportTab, setReportTab] = useState<ReportTab>('submissions')
+  const [activeTabId, setActiveTabId] = useState<string>(groupId ?? '')
+  const [reportTab, setReportTab] = useState<ReportTab>(initialTab)
   const [period, setPeriod] = useState<Period>('yesterday')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -156,6 +174,10 @@ export default function GroupReportPage() {
   const [filterUserId, setFilterUserId] = useState('all')
   const [subPage, setSubPage] = useState(0)
   const [groupsLoading, setGroupsLoading] = useState(true)
+  const [overviewGroups, setOverviewGroups] = useState<OverviewGroup[]>([])
+  const [overviewLoading, setOverviewLoading] = useState(!groupId)
+  const [loadError, setLoadError] = useState<{ scope: string; message: string } | null>(null)
+  const [retryNonce, setRetryNonce] = useState(0)
 
   // Detail modal state
   const [detailModal, setDetailModal] = useState<{ date: string; userId: string; username: string } | null>(null)
@@ -228,20 +250,53 @@ export default function GroupReportPage() {
 
   const today = useMemo(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), [])
 
+  useEffect(() => { setReportTab(initialTab) }, [groupId, initialTab])
+
   // Load groups
   useEffect(() => {
-    fetch('/api/task-groups').then(r => r.json()).then(d => {
+    if (!groupId) {
+      setGroups([])
+      setGroupsLoading(false)
+      return
+    }
+    setGroupsLoading(true)
+    fetch('/api/task-groups').then(r => readResponse<{ groups?: Group[] }>(r, '分组加载失败')).then(d => {
       const g: Group[] = (d.groups || []).map((grp: Group) => ({
         ...grp, site_domains: grp.site_domains || [], competitor_domains: grp.competitor_domains || [],
       }))
       setGroups(g)
-      if (g.length > 0) setActiveTabId(g[0].id)
-    }).finally(() => setGroupsLoading(false))
-  }, [])
+      if (groupId) {
+        setActiveTabId(g.some(group => group.id === groupId) ? groupId : '')
+      }
+      setLoadError(current => current?.scope === 'groups' ? null : current)
+    }).catch(error => setLoadError({ scope: 'groups', message: error instanceof Error ? error.message : '分组加载失败' }))
+      .finally(() => setGroupsLoading(false))
+  }, [groupId, retryNonce])
+
+  // The report landing page loads every visible group's submission overview in
+  // one API request. Detailed outcome/tracking data remains isolated per route.
+  useEffect(() => {
+    if (groupId) return
+    if (period === 'custom' && (!customStart || !customEnd || customStart > customEnd)) return
+    setOverviewLoading(true)
+    const params = new URLSearchParams({ period })
+    if (period === 'custom') {
+      params.set('startDate', customStart)
+      params.set('endDate', customEnd)
+    }
+    fetch(`/api/task-groups/report-overview?${params}`)
+      .then(response => readResponse<{ groups?: OverviewGroup[] }>(response, '提交概况加载失败'))
+      .then(data => {
+        setOverviewGroups(data.groups || [])
+        setLoadError(current => current?.scope === 'overview' ? null : current)
+      })
+      .catch(error => setLoadError({ scope: 'overview', message: error instanceof Error ? error.message : '提交概况加载失败' }))
+      .finally(() => setOverviewLoading(false))
+  }, [groupId, period, customStart, customEnd, retryNonce])
 
   // Load member report
   useEffect(() => {
-    if (!activeTabId) return
+    if (!SHOW_SUBMISSION_DETAILS || !activeTabId) return
     if (period === 'custom') {
       if (!customStart || !customEnd || customStart > customEnd) return
     }
@@ -252,8 +307,12 @@ export default function GroupReportPage() {
     const url = period === 'custom'
       ? `/api/task-groups/${activeTabId}/report?period=custom&startDate=${customStart}&endDate=${customEnd}`
       : `/api/task-groups/${activeTabId}/report?period=${period}`
-    fetch(url).then(r => r.json()).then((d: ReportData) => setReport(d)).finally(() => setLoading(false))
-  }, [activeTabId, period, customStart, customEnd])
+    fetch(url).then(r => readResponse<ReportData>(r, '提交报告加载失败')).then(d => {
+      setReport(d)
+      setLoadError(current => current?.scope === 'report' ? null : current)
+    }).catch(error => setLoadError({ scope: 'report', message: error instanceof Error ? error.message : '提交报告加载失败' }))
+      .finally(() => setLoading(false))
+  }, [activeTabId, period, customStart, customEnd, retryNonce])
 
   // Reset outcome filters when switching groups
   useEffect(() => {
@@ -286,17 +345,19 @@ export default function GroupReportPage() {
     p.set('page',     String(oPage))
     p.set('pageSize', String(oPageSize))
     fetch(`/api/task-groups/${activeTabId}/outcomes?${p}`)
-      .then(r => r.json())
+      .then(r => readResponse<{ rows?: OutcomeRow[]; summary?: OutcomeSummary; groupSummary?: OutcomeSummary; totalRows?: number; truncated?: boolean }>(r, '成效追踪加载失败'))
       .then(d => {
         setOutcomes(d.rows || [])
         setOutcomeSummary(d.summary || null)
         setOutcomeGroupSummary(d.groupSummary || null)
         setOutcomeTotalRows(d.totalRows ?? 0)
         setOutcomesTruncated(!!d.truncated)
+        setLoadError(current => current?.scope === 'outcomes' ? null : current)
       })
+      .catch(error => setLoadError({ scope: 'outcomes', message: error instanceof Error ? error.message : '成效追踪加载失败' }))
       .finally(() => setOutcomesLoading(false))
   }
-  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize])
+  useEffect(loadOutcomes, [activeTabId, reportTab, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize, retryNonce])
 
   // Load tracking summary
   function scopeParams(month: string, scope: string): URLSearchParams {
@@ -316,6 +377,9 @@ export default function GroupReportPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '刷新失败')
       setTrackingData(data)
+      setLoadError(current => current?.scope === 'tracking' ? null : current)
+    } catch (error) {
+      setLoadError({ scope: 'tracking', message: error instanceof Error ? error.message : '追踪汇总刷新失败' })
     } finally {
       setTrackingLoading(false)
     }
@@ -324,14 +388,16 @@ export default function GroupReportPage() {
     if (reportTab !== 'trackingSummary' || !activeTabId) return
     setTrackingLoading(true)
     fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`)
-      .then(r => r.json())
+      .then(r => readResponse<TrackingSummaryResponse>(r, '追踪汇总加载失败'))
       .then(d => {
         setTrackingData(d)
         if (!d.canSeeAll && trackingScope !== 'own') setTrackingScope('own')
+        setLoadError(current => current?.scope === 'tracking' ? null : current)
       })
+      .catch(error => setLoadError({ scope: 'tracking', message: error instanceof Error ? error.message : '追踪汇总加载失败' }))
       .finally(() => setTrackingLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportTab, activeTabId, trackingMonth, trackingScope])
+  }, [reportTab, activeTabId, trackingMonth, trackingScope, retryNonce])
 
   // Load source-detail drill-down (获取收录/排名区间"查看")，50条/页
   useEffect(() => {
@@ -343,22 +409,24 @@ export default function GroupReportPage() {
     if (sourceDetailModal.bucket) p.set('bucket', sourceDetailModal.bucket)
     p.set('page', String(sourceDetailPage))
     fetch(`/api/task-groups/${activeTabId}/tracking-summary/detail?${p}`)
-      .then(r => r.json())
+      .then(r => readResponse<{ rows?: SourceDetailRow[]; total?: number }>(r, '追踪详情加载失败'))
       .then(d => { setSourceDetailRows(d.rows || []); setSourceDetailTotal(d.total || 0) })
+      .catch(error => setLoadError({ scope: 'sourceDetail', message: error instanceof Error ? error.message : '追踪详情加载失败' }))
       .finally(() => setSourceDetailLoading(false))
-  }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope, sourceDetailPage])
+  }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope, sourceDetailPage, retryNonce])
 
   // Load detail keywords on demand
   useEffect(() => {
-    if (!detailModal || !activeTabId) return
+    if (!SHOW_SUBMISSION_DETAILS || !detailModal || !activeTabId) return
     setDetailLoading(true)
     setDetailKws([])
     const url = `/api/task-groups/${activeTabId}/report/keywords?memberId=${detailModal.userId}&date=${detailModal.date}&page=${detailPage}&pageSize=${DETAIL_PAGE_SIZE}`
-    fetch(url).then(r => r.json()).then(d => {
+    fetch(url).then(r => readResponse<{ keywords?: DetailKw[]; total?: number }>(r, '提交详情加载失败')).then(d => {
       setDetailKws(d.keywords || [])
       setDetailTotal(d.total || 0)
-    }).finally(() => setDetailLoading(false))
-  }, [detailModal, detailPage, activeTabId])
+    }).catch(error => setLoadError({ scope: 'detail', message: error instanceof Error ? error.message : '提交详情加载失败' }))
+      .finally(() => setDetailLoading(false))
+  }, [detailModal, detailPage, activeTabId, retryNonce])
 
   // Build flat submission rows from report data
   const submissionRows = useMemo(() => {
@@ -382,33 +450,116 @@ export default function GroupReportPage() {
   const detailTotalPages = Math.max(1, Math.ceil(detailTotal / DETAIL_PAGE_SIZE))
 
   const hasData = report && (report.groupTotal?.total.count ?? report.members.reduce((s, m) => s + m.total.count, 0)) > 0
+  const activeGroup = groups.find(group => group.id === activeTabId) ?? null
+  const hasVisibleGroups = groupId ? groups.length > 0 : overviewGroups.length > 0
+  const showSubmissionDetails = SHOW_SUBMISSION_DETAILS
 
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-100 px-6 py-4">
-        <h1 className="text-lg font-semibold text-gray-900">分组报告</h1>
-        <p className="text-sm text-gray-400 mt-0.5">查看成员提交记录与成效追踪</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">成效报告</p>
+            <h1 className="text-lg font-semibold text-gray-900">{groupId ? (activeGroup?.name || '选择分组') : '全部分组提交概况'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{groupId ? '成效追踪与追踪总汇' : '集中查看所有可见分组及成员的提交情况'}</p>
+          </div>
+          {groupId && groups.length > 0 && (
+            <select aria-label="切换成效报告分组" value={activeTabId}
+              onChange={event => router.push(`/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
+              className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:outline-none focus:ring-green-500">
+              {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
-      {groupsLoading ? <Spinner /> : groups.length === 0 ? (
+      {loadError && (
+        <div role="alert" className="mx-6 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{loadError.message}。请检查网络后重试。</span>
+          <button type="button" onClick={() => setRetryNonce(value => value + 1)}
+            className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500">
+            重试
+          </button>
+        </div>
+      )}
+
+      {(groupId && groupsLoading) || (!groupId && overviewLoading) ? <Spinner /> : !hasVisibleGroups ? (
         <div className="flex items-center justify-center h-64 text-gray-400 text-sm">暂无分组</div>
-      ) : (
+      ) : !groupId ? (
         <div className="px-6 py-5 space-y-5">
-          {/* Group tabs */}
-          <div className="flex gap-1 border-b border-gray-200">
-            {groups.map(g => (
-              <button key={g.id} onClick={() => setActiveTabId(g.id)}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTabId === g.id ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-                {g.name}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">提交概况</h2>
+              <p className="text-xs text-gray-400">点击分组名称进入该组的成效追踪与追踪总汇</p>
+            </div>
+            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+              {(['yesterday', 'week', 'month', 'custom'] as Period[]).map(value => (
+                <button key={value} type="button" onClick={() => setPeriod(value)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${period === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  {PERIOD_LABELS[value]}
+                </button>
+              ))}
+            </div>
+            {period === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input aria-label="全部分组提交概况开始日期" type="date" value={customStart} max={customEnd || today}
+                  onChange={event => setCustomStart(event.target.value)}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500" />
+                <span className="text-sm text-gray-400">至</span>
+                <input aria-label="全部分组提交概况结束日期" type="date" value={customEnd} min={customStart} max={today}
+                  onChange={event => setCustomEnd(event.target.value)}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+            )}
           </div>
 
-          {/* Sub-tabs */}
+          {overviewGroups.map(group => {
+            const totalCount = group.groupTotal?.total.count ?? group.members.reduce((sum, member) => sum + member.total.count, 0)
+            return (
+              <section key={group.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                  <div>
+                    <Link href={`/group-report/${encodeURIComponent(group.id)}?view=outcomes`}
+                      className="inline-flex items-center gap-1.5 text-base font-semibold text-gray-900 hover:text-green-700 focus-visible:rounded focus-visible:ring-2 focus-visible:ring-green-500">
+                      {group.name}<span aria-hidden="true">→</span>
+                    </Link>
+                    <p className="mt-0.5 text-xs text-gray-400">提交概况</p>
+                  </div>
+                  <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500">{PERIOD_LABELS[period]}</span>
+                </div>
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {canSeeAll && group.groupTotal && (
+                    <ReportCard title="全部组员合计" total={group.groupTotal.total} bySource={group.groupTotal.bySource} isTotal />
+                  )}
+                  {group.members.map(member => (
+                    <ReportCard key={member.userId} title={member.username} memberType={member.memberType} total={member.total} bySource={member.bySource} />
+                  ))}
+                </div>
+                {totalCount === 0 && (
+                  <p className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-center text-xs text-gray-400">
+                    {PERIOD_LABELS[period]}暂无提交记录
+                  </p>
+                )}
+              </section>
+            )
+          })}
+        </div>
+      ) : !activeGroup ? (
+        <div className="mx-6 mt-5 flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-20 text-center">
+          <p className="text-sm font-medium text-gray-700">无法查看这个分组的成效报告</p>
+          <p className="mt-1 text-xs text-gray-400">分组不存在，或者你没有该分组权限。</p>
+          <Link href="/group-report" className="mt-4 btn-secondary">选择其他分组</Link>
+        </div>
+      ) : (
+        <div className="px-6 py-5 space-y-5">
+          {/* Only the two result views remain as tabs. */}
           <div className="flex items-center gap-0 border-b border-gray-100">
-            {([['submissions', '提交记录'], ['outcomes', '成效追踪'], ['trackingSummary', '追踪汇总']] as [ReportTab, string][]).map(([tab, label]) => (
-              <button key={tab} onClick={() => setReportTab(tab)}
+            {([['outcomes', '成效追踪'], ['trackingSummary', '追踪总汇']] as [ReportTab, string][]).map(([tab, label]) => (
+              <button key={tab} type="button" onClick={() => {
+                setReportTab(tab)
+                router.replace(`/group-report/${encodeURIComponent(activeTabId)}?view=${tab === 'trackingSummary' ? 'summary' : 'outcomes'}`)
+              }}
                 className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${reportTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                 {label}
               </button>
@@ -471,11 +622,11 @@ export default function GroupReportPage() {
                 })()}
                 <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    {canSeeAll && report?.members && report.members.length > 1 && (
+                    {canSeeAll && activeGroup.members.length > 1 && (
                       <select aria-label="选择选项" value={oFilterMember} onChange={e => { setOFilterMember(e.target.value); setOPage(0) }}
                         className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
                         <option value="">全部成员</option>
-                        {report.members.map(m => <option key={m.userId} value={m.userId}>{m.username}</option>)}
+                        {activeGroup.members.map(member => <option key={member.user_id} value={member.user_id}>{member.username}</option>)}
                       </select>
                     )}
                     <select aria-label="选择选项" value={oFilterOp} onChange={e => { setOFilterOp(e.target.value); setOPage(0) }}
@@ -894,7 +1045,7 @@ export default function GroupReportPage() {
           })()}
 
           {/* ── 提交记录 ── */}
-          {reportTab === 'submissions' && (
+          {report && showSubmissionDetails && (
             <>
               {/* Period selector */}
               <div className="flex flex-wrap items-center gap-2">

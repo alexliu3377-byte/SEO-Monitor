@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assertSafeRemoteUrl } from '../lib/safe-remote-url'
 import { normalizeDomains, normalizeTaskGroupMembers } from '../lib/task-group-data'
+import { fetchAllRows } from '../lib/supabase-paginate'
+import { filterTaskGroupsForCaller, groupMatchesAssignedSites } from '../lib/task-group-access'
 import {
   KEYWORD_EXPORT_OWNER_ID,
   canVerifyExportPurpose,
@@ -50,6 +52,25 @@ test('task-group members use canonical profile names', async () => {
   assert.equal(result.members[0].member_type, 'both')
 })
 
+test('task-group site matching normalizes URLs and requires an assigned site', () => {
+  assert.equal(groupMatchesAssignedSites(['https://www.example.com/path'], ['example.com']), true)
+  assert.equal(groupMatchesAssignedSites(['other.example.com'], ['example.com']), false)
+  assert.equal(groupMatchesAssignedSites([], ['example.com']), false)
+})
+
+test('task-group visibility follows super, admin-site and member scopes', () => {
+  const groups = [
+    { id: 'group-a', site_domains: ['a.example.com'] },
+    { id: 'group-b', site_domains: ['b.example.com'] },
+  ]
+  const members = [{ group_id: 'group-b', user_id: 'member-1' }]
+
+  assert.deepEqual(filterTaskGroupsForCaller(groups, members, 'super-1', 'super').map(group => group.id), ['group-a', 'group-b'])
+  assert.deepEqual(filterTaskGroupsForCaller(groups, members, 'admin-1', 'admin', ['a.example.com']).map(group => group.id), ['group-a'])
+  assert.deepEqual(filterTaskGroupsForCaller(groups, members, 'admin-1', 'admin').map(group => group.id), [])
+  assert.deepEqual(filterTaskGroupsForCaller(groups, members, 'member-1', 'normal').map(group => group.id), ['group-b'])
+})
+
 test('keyword exports allow only the configured owner id', () => {
   assert.equal(isKeywordExportOwner(KEYWORD_EXPORT_OWNER_ID), true)
   assert.equal(isKeywordExportOwner('11111111-1111-4111-8111-111111111111'), false)
@@ -58,4 +79,17 @@ test('keyword exports allow only the configured owner id', () => {
   assert.equal(canVerifyExportPurpose('11111111-1111-4111-8111-111111111111', 'super', 'keyword-volume'), false)
   assert.equal(canVerifyExportPurpose('11111111-1111-4111-8111-111111111111', 'super', 'rank-history'), true)
   assert.equal(canVerifyExportPurpose(KEYWORD_EXPORT_OWNER_ID, 'normal', 'rank-history'), false)
+})
+
+test('Supabase pagination reads beyond the per-request row cap', async () => {
+  const source = Array.from({ length: 6505 }, (_, id) => ({ id }))
+  const requestedRanges: [number, number][] = []
+  const rows = await fetchAllRows<{ id: number }>(async (from, to) => {
+    requestedRanges.push([from, to])
+    return { data: source.slice(from, to + 1), error: null }
+  }, { pageSize: 3000 })
+
+  assert.equal(rows.length, 6505)
+  assert.deepEqual(rows.map(row => row.id), source.map(row => row.id))
+  assert.deepEqual(requestedRanges, [[0, 2999], [3000, 5999], [6000, 8999]])
 })

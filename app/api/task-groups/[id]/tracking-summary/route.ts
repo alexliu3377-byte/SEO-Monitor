@@ -6,6 +6,8 @@ import {
   currentMonth, monthRange, computeSourceEffectiveness, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
 } from '@/lib/tracking-summary'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 export const maxDuration = 60
 
@@ -93,7 +95,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const service = createServiceClient() as any
 
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  const role: string = profile?.role ?? 'normal'
+  const role = (profile?.role ?? 'normal') as UserRole
   const canSeeAll = role === 'super' || role === 'admin'
 
   const { data: membersRaw } = await service
@@ -101,7 +103,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const memberList = (membersRaw || []) as { user_id: string; username: string | null }[]
   const isMember = memberList.some(m => m.user_id === user.id)
 
-  if (!canSeeAll && !isMember) {
+  if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

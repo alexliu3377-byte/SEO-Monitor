@@ -31,8 +31,10 @@ export async function GET(
   if (callerRole === 'admin' && target.role !== 'normal') {
     return NextResponse.json({ error: 'Administrators can only manage normal accounts' }, { status: 403 })
   }
+  let sitesQuery = service.from('sites').select('id, domain, name, focus_level').order('focus_level').order('name')
+  if (target.role === 'normal') sitesQuery = sitesQuery.in('focus_level', [1, 2])
   const [{ data: restrictedSites }, { data: granted }] = await Promise.all([
-    service.from('sites').select('id, domain, name, focus_level').in('focus_level', [1, 2]).order('focus_level').order('name'),
+    sitesQuery,
     service.from('user_site_access').select('site_id').eq('user_id', id),
   ])
 
@@ -61,20 +63,22 @@ export async function PUT(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const [{ data: target, error: targetError }, { data: validSites, error: sitesError }, { data: existing, error: existingError }] = await Promise.all([
-    service.from('user_profiles').select('role').eq('id', id).single(),
-    uniqueSiteIds.length > 0
-      ? service.from('sites').select('id').in('id', uniqueSiteIds).in('focus_level', [1, 2])
-      : Promise.resolve({ data: [], error: null }),
-    service.from('user_site_access').select('site_id').eq('user_id', id),
-  ])
+  const { data: target, error: targetError } = await service.from('user_profiles').select('role').eq('id', id).single()
   if (targetError || !target) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
   if (callerRole === 'admin' && target.role !== 'normal') {
     return NextResponse.json({ error: 'Administrators can only manage normal accounts' }, { status: 403 })
   }
+  let validSitesQuery = uniqueSiteIds.length > 0
+    ? service.from('sites').select('id').in('id', uniqueSiteIds)
+    : null
+  if (validSitesQuery && target.role === 'normal') validSitesQuery = validSitesQuery.in('focus_level', [1, 2])
+  const [{ data: validSites, error: sitesError }, { data: existing, error: existingError }] = await Promise.all([
+    validSitesQuery ?? Promise.resolve({ data: [], error: null }),
+    service.from('user_site_access').select('site_id').eq('user_id', id),
+  ])
   if (sitesError || existingError) return NextResponse.json({ error: 'Unable to verify site access' }, { status: 500 })
   if ((validSites ?? []).length !== uniqueSiteIds.length) {
-    return NextResponse.json({ error: 'One or more sites are invalid or unrestricted' }, { status: 400 })
+    return NextResponse.json({ error: 'One or more sites are invalid or cannot be assigned' }, { status: 400 })
   }
 
   const oldIds = new Set<string>(((existing ?? []) as { site_id: string }[]).map(row => row.site_id))

@@ -488,17 +488,19 @@ function SiteAccessModal({ user, onClose }: { user: UserRecord; onClose: () => v
   const focusLabel: Record<number, string> = { 1: '重点', 2: '侧重' }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="站点权限" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
+    <div role="dialog" aria-modal="true" aria-label={user.role === 'admin' ? '负责站点' : '站点权限'} className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-base font-semibold text-gray-900">站点权限</h3>
+          <h3 className="text-base font-semibold text-gray-900">{user.role === 'admin' ? '管理员负责站点' : '站点权限'}</h3>
           <button type="button" onClick={onClose} aria-label="关闭站点权限窗口" className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
-        <p className="text-xs text-gray-400 mb-4">{user.email} · 勾选后该用户可看到对应站点</p>
+        <p className="text-xs text-gray-400 mb-4">
+          {user.email} · {user.role === 'admin' ? '可同时选择多个站点；管理员可查看这些站点所属分组的全部组员资料' : '勾选后该用户可看到对应站点'}
+        </p>
 
         {loading ? (
           <div className="h-32 flex items-center justify-center text-gray-400 text-sm">加载中...</div>
@@ -723,12 +725,12 @@ function ManagerSettings({ callerRole }: { callerRole: UserRole }) {
                       >
                         IP白名单
                       </button>
-                      {user.role === 'normal' && (
+                      {user.role !== 'super' && (callerRole === 'super' || user.role === 'normal') && (
                         <button
                           onClick={() => setAccessUser(user)}
                           className="text-xs text-purple-500 hover:text-purple-700 border border-purple-100 rounded px-1.5 py-0.5 hover:border-purple-200 transition-colors"
                         >
-                          站点权限
+                          {user.role === 'admin' ? '负责站点' : '站点权限'}
                         </button>
                       )}
                       {!(callerRole === 'admin' && user.role === 'super') && (

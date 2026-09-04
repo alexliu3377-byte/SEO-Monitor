@@ -7,6 +7,10 @@ import { useRouter } from 'next/navigation'
 
 const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
 const CAPTCHA_COLORS = ['#ffffff', '#bbf7d0', '#6ee7b7', '#a5f3fc', '#c4b5fd', '#fde68a']
+const IS_LOCAL_DEVELOPMENT = process.env.NODE_ENV === 'development'
+const TURNSTILE_SITE_KEY = IS_LOCAL_DEVELOPMENT
+  ? undefined
+  : process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 function drawCaptcha(canvas: HTMLCanvasElement): string {
   const code = Array.from({ length: 4 }, () =>
@@ -47,6 +51,7 @@ declare global {
     turnstile?: {
       render: (el: HTMLElement, opts: Record<string, unknown>) => string
       reset: (id: string) => void
+      remove: (id: string) => void
     }
   }
 }
@@ -78,24 +83,40 @@ export default function LoginPage() {
   useEffect(() => { refreshCaptcha() }, [refreshCaptcha])
 
   useEffect(() => {
-    const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    const siteKey = TURNSTILE_SITE_KEY
     if (!siteKey) return
-    const script = document.createElement('script')
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
-    script.async = true
-    script.onload = () => {
-      if (turnstileRef.current && window.turnstile) {
-        turnstileWidgetId.current = window.turnstile.render(turnstileRef.current, {
-          sitekey: siteKey,
-          theme: 'light',
-          callback: (token: string) => setTurnstileToken(token),
-          'expired-callback': () => setTurnstileToken(null),
-          'error-callback':   () => setTurnstileToken(null),
-        })
+    let cancelled = false
+    const renderWidget = () => {
+      if (cancelled || !turnstileRef.current || !window.turnstile || turnstileWidgetId.current) return
+      turnstileWidgetId.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: siteKey,
+        theme: 'light',
+        callback: (token: string) => setTurnstileToken(token),
+        'expired-callback': () => setTurnstileToken(null),
+        'error-callback':   () => setTurnstileToken(null),
+      })
+    }
+
+    let script = document.querySelector<HTMLScriptElement>('script[data-turnstile-script]')
+    if (window.turnstile) renderWidget()
+    else if (script) script.addEventListener('load', renderWidget)
+    else {
+      script = document.createElement('script')
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      script.async = true
+      script.dataset.turnstileScript = 'true'
+      script.addEventListener('load', renderWidget)
+      document.head.appendChild(script)
+    }
+
+    return () => {
+      cancelled = true
+      script?.removeEventListener('load', renderWidget)
+      if (turnstileWidgetId.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetId.current)
+        turnstileWidgetId.current = null
       }
     }
-    document.head.appendChild(script)
-    return () => { document.head.removeChild(script) }
   }, [])
 
   async function handleLogin(e: React.FormEvent) {
@@ -108,7 +129,7 @@ export default function LoginPage() {
       return
     }
 
-    const hasTurnstile = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    const hasTurnstile = !!TURNSTILE_SITE_KEY
     if (hasTurnstile && !turnstileToken) { setError('请完成人机验证'); return }
     setLoading(true)
 
@@ -284,8 +305,14 @@ export default function LoginPage() {
               </div>
 
               {/* Turnstile */}
-              {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
-                <div ref={turnstileRef} aria-label="Cloudflare 人机验证" className="pt-0.5" />
+              {TURNSTILE_SITE_KEY && (
+                <div>
+                  <div ref={turnstileRef} aria-label="Cloudflare 人机验证" className="pt-0.5" />
+                </div>
+              )}
+
+              {IS_LOCAL_DEVELOPMENT && (
+                <p className="text-xs text-white/40">本地开发环境已跳过 Cloudflare 人机验证</p>
               )}
 
               {/* Error */}

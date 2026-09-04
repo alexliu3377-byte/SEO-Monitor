@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { loadGroupTrackingPayload } from '@/lib/group-tracking-cache'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 export const maxDuration = 60
 
@@ -17,14 +19,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const service = createServiceClient() as any
 
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  const role: string = profile?.role ?? 'normal'
+  const role = (profile?.role ?? 'normal') as UserRole
   const canSeeAll = role === 'super' || role === 'admin'
-
-  if (!canSeeAll) {
-    const { data: member } = await service
-      .from('task_group_members').select('user_id')
-      .eq('group_id', groupId).eq('user_id', user.id).maybeSingle()
-    if (!member) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   // 2026-08-26 去掉按日期筛选（先是提交日期、后改记录日期，都被用户反馈

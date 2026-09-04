@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import { fetchAllRows } from '@/lib/supabase-paginate'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -44,7 +47,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const service = createServiceClient() as any
 
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  const role: string = profile?.role ?? 'normal'
+  const role = (profile?.role ?? 'normal') as UserRole
   const canSeeAll = role === 'super' || role === 'admin'
 
   // Get group members (username stored in task_group_members directly)
@@ -59,32 +62,29 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     memberType: m.member_type || 'app',
   }))
 
-  // Normal users must be a member of the group
-  if (!canSeeAll) {
-    const isMember = members.some(m => m.userId === user.id)
-    if (!isMember) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { startDate, endDate } = (customStart && customEnd && customStart <= customEnd)
     ? { startDate: customStart, endDate: customEnd }
     : getDateRange(period)
 
-  let query = service
-    .from('member_claimed_keywords')
-    .select('user_id, keyword, source, search_volume, claimed_date, operation_type, final_keyword, page_url')
-    .eq('group_id', groupId)
-    .eq('status', 'submitted')
-    .gte('claimed_date', startDate)
-    .lte('claimed_date', endDate)
-    .order('claimed_date', { ascending: false })
-    .order('search_volume', { ascending: false })
-
-  if (!canSeeAll) query = query.eq('user_id', user.id)
-
-  const { data: rows, error } = await query
-  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-
-  const rawRows = (rows || []) as RawRow[]
+  const rawRows = await fetchAllRows<RawRow>((from, to) => {
+    let query = service
+      .from('member_claimed_keywords')
+      .select('id, user_id, keyword, source, search_volume, claimed_date, operation_type, final_keyword, page_url')
+      .eq('group_id', groupId)
+      .eq('status', 'submitted')
+      .gte('claimed_date', startDate)
+      .lte('claimed_date', endDate)
+      .order('claimed_date', { ascending: false })
+      .order('search_volume', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to)
+    if (!canSeeAll) query = query.eq('user_id', user.id)
+    return query
+  })
   const allUserIds = Array.from(new Set([
     ...members.map(m => m.userId),
     ...rawRows.map(r => r.user_id),

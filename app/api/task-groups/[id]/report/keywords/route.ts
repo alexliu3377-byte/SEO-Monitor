@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import type { UserRole } from '@/lib/user-context'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
 
 interface RawKw {
   id: string; keyword: string; source: string; search_volume: number | null
@@ -23,9 +25,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  const role: string = profile?.role ?? 'normal'
+  const role = (profile?.role ?? 'normal') as UserRole
   const canSeeAll = role === 'super' || role === 'admin'
 
+  if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   if (!canSeeAll && memberId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const from = page * pageSize

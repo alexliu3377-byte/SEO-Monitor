@@ -19,9 +19,11 @@ export async function getUserProfile(): Promise<UserProfile | null> {
 
   let accessibleSiteIds: string[] | null = null
 
-  if (role === 'normal') {
+  if (role !== 'super') {
     const [{ data: normalSites }, { data: granted }] = await Promise.all([
-      service.from('sites').select('id').eq('focus_level', 3),
+      role === 'normal'
+        ? service.from('sites').select('id').eq('focus_level', 3)
+        : Promise.resolve({ data: [] }),
       service.from('user_site_access').select('site_id').eq('user_id', user.id),
     ])
     accessibleSiteIds = [
