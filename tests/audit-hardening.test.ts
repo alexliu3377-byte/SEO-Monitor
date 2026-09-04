@@ -11,6 +11,15 @@ import {
 } from '../lib/kw-export-owner'
 import { buildCachedMemberSummary, type EnrichedTrackRow } from '../lib/group-tracking-cache'
 import { canOffboardUser } from '../lib/user-offboarding'
+import {
+  canManageDevelopmentLog,
+  canReadDevelopmentLog,
+  canSubmitDevelopmentRequest,
+  cleanStringList,
+  isDevelopmentRequestStatus,
+  isReleaseStatus,
+} from '../lib/development-log'
+import { PROJECT_OWNER_ID } from '../lib/project-owner'
 
 const blockedUrls = [
   'file:///etc/passwd',
@@ -89,6 +98,24 @@ test('keyword exports allow only the configured owner id', () => {
   assert.equal(canVerifyExportPurpose('11111111-1111-4111-8111-111111111111', 'super', 'keyword-volume'), false)
   assert.equal(canVerifyExportPurpose('11111111-1111-4111-8111-111111111111', 'super', 'rank-history'), true)
   assert.equal(canVerifyExportPurpose(KEYWORD_EXPORT_OWNER_ID, 'normal', 'rank-history'), false)
+})
+
+test('development log permissions separate readers, submitters and owner management', () => {
+  assert.equal(canReadDevelopmentLog('normal'), false)
+  assert.equal(canReadDevelopmentLog('admin'), true)
+  assert.equal(canReadDevelopmentLog('super'), true)
+  assert.equal(canSubmitDevelopmentRequest('admin'), false)
+  assert.equal(canSubmitDevelopmentRequest('super'), true)
+  assert.equal(canManageDevelopmentLog(PROJECT_OWNER_ID), true)
+  assert.equal(canManageDevelopmentLog('11111111-1111-4111-8111-111111111111'), false)
+})
+
+test('development log accepts only known statuses and normalizes list input', () => {
+  assert.equal(isReleaseStatus('completed'), true)
+  assert.equal(isReleaseStatus('blocked'), false)
+  assert.equal(isDevelopmentRequestStatus('blocked'), true)
+  assert.equal(isDevelopmentRequestStatus('unknown'), false)
+  assert.deepEqual(cleanStringList([' first ', '', 7, 'second']), ['first', 'second'])
 })
 
 test('Supabase pagination reads beyond the per-request row cap', async () => {

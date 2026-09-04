@@ -3,7 +3,9 @@
 // role==='super'，现在收紧到硬编码这一个 user_profiles.id。前端按钮显示、
 // 身份验证接口、导出接口三处都要引用同一个常量，不要分别硬编码同一个UUID。
 // 没有服务端专属依赖，client/server 组件都能安全导入。
-export const KEYWORD_EXPORT_OWNER_ID = '294f63a9-7c06-455f-9896-0fbc6344cee5'
+import { PROJECT_OWNER_ID } from './project-owner'
+
+export const KEYWORD_EXPORT_OWNER_ID = PROJECT_OWNER_ID
 export type ExportVerificationPurpose = 'keyword-volume' | 'rank-history'
 
 export function isKeywordExportOwner(userId: string | null | undefined): boolean {
