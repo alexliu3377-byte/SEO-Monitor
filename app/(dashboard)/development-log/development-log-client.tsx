@@ -11,7 +11,6 @@ type DevelopmentRelease = {
   highlights: string[]
   implementation_notes: string[]
   limitations: string[]
-  deployment_range: string | null
   source_note: string | null
 }
 type ReleaseForm = {
@@ -22,14 +21,13 @@ type ReleaseForm = {
   highlights: string
   implementationNotes: string
   limitations: string
-  deploymentRange: string
   sourceNote: string
 }
 
 const PAGE_SIZE = 10
 const EMPTY_RELEASE: ReleaseForm = {
   version: '', title: '', releaseDate: '', summary: '',
-  highlights: '', implementationNotes: '', limitations: '', deploymentRange: '', sourceNote: '',
+  highlights: '', implementationNotes: '', limitations: '', sourceNote: '',
 }
 function lines(value: string) {
   return value.split('\n').map(item => item.trim()).filter(Boolean)
@@ -130,7 +128,7 @@ export default function DevelopmentLogClient() {
       version: release.version, title: release.title, releaseDate: release.release_date,
       summary: release.summary, highlights: release.highlights.join('\n'),
       implementationNotes: release.implementation_notes.join('\n'), limitations: release.limitations.join('\n'),
-      deploymentRange: release.deployment_range ?? '', sourceNote: release.source_note ?? '',
+      sourceNote: release.source_note ?? '',
     })
     setFormOpen(true)
   }
@@ -224,7 +222,6 @@ function ReleaseTimelineItem({ release, canManage, onEdit }: { release: Developm
         <div className="mt-5 border-t border-white/10 pt-4">
           <p className="text-xs text-slate-400">上线日期</p>
           <p className="mt-1 text-sm font-medium text-slate-100">{dateLabel(release.release_date)}</p>
-          {release.deployment_range && <p className="mt-2 text-xs leading-5 text-slate-400">开发周期<br />{release.deployment_range}</p>}
         </div>
       </header>
 
@@ -313,7 +310,7 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
             <Field label="版本内容（每行一项）"><textarea rows={6} value={form.highlights} onChange={e => update('highlights', e.target.value)} className="field" /></Field>
             <Field label="实现与交接重点（每行一项）"><textarea rows={6} value={form.implementationNotes} onChange={e => update('implementationNotes', e.target.value)} className="field" /></Field>
             <Field label="限制与维护提醒（每行一项）"><textarea rows={5} value={form.limitations} onChange={e => update('limitations', e.target.value)} className="field" /></Field>
-            <div className="space-y-4"><Field label="开发时间范围"><input value={form.deploymentRange} onChange={e => update('deploymentRange', e.target.value)} className="field" /></Field><Field label="内部备注（仅你可见）"><textarea rows={3} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：为什么会有这个想法、当时遇到了什么问题" className="field" /></Field></div>
+            <Field label="内部备注（仅你可见）"><textarea rows={5} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：为什么会有这个想法、当时遇到了什么问题" className="field" /></Field>
           </div>
         </div>
         <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
