@@ -295,27 +295,44 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel() }}>
       <form onSubmit={onSubmit} role="dialog" aria-modal="true" aria-labelledby="release-editor-title" className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
-          <div><h2 id="release-editor-title" className="text-lg font-bold text-slate-950">{editing ? '编辑版本记录' : '新增版本记录'}</h2><p className="mt-1 text-sm text-slate-500">保存后会作为正式版本显示，列表字段每行填写一项。</p></div>
+        <header className="flex shrink-0 items-start gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+          <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 id="release-editor-title" className="text-lg font-bold text-slate-950">{editing ? '编辑版本记录' : '新增版本记录'}</h2><span className="rounded-md bg-slate-950 px-2 py-1 font-mono text-xs font-bold text-emerald-300">{form.version || '新版本'}</span></div><p className="mt-1 text-sm text-slate-500">整理这次正式版本的内容；保存记录不会触发代码部署。</p></div>
           <button type="button" onClick={onCancel} disabled={saving} aria-label="关闭编辑窗口" className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-40">
             <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 5 10 10M15 5 5 15" /></svg>
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="版本号"><input required value={form.version} onChange={e => update('version', e.target.value)} placeholder="v2.4.0" className="field" /></Field>
-            <Field label="版本日期"><input required type="date" value={form.releaseDate} onChange={e => update('releaseDate', e.target.value)} className="field" /></Field>
-            <div className="sm:col-span-2"><Field label="版本主题"><input required maxLength={120} value={form.title} onChange={e => update('title', e.target.value)} className="field" /></Field></div>
-            <div className="sm:col-span-2"><Field label="版本说明"><textarea required rows={3} value={form.summary} onChange={e => update('summary', e.target.value)} className="field" /></Field></div>
-            <Field label="版本内容（每行一项）"><textarea rows={6} value={form.highlights} onChange={e => update('highlights', e.target.value)} className="field" /></Field>
-            <Field label="实现与交接重点（每行一项）"><textarea rows={6} value={form.implementationNotes} onChange={e => update('implementationNotes', e.target.value)} className="field" /></Field>
-            <Field label="限制与维护提醒（每行一项）"><textarea rows={5} value={form.limitations} onChange={e => update('limitations', e.target.value)} className="field" /></Field>
-            <Field label="内部备注（仅你可见）"><textarea rows={5} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：为什么会有这个想法、当时遇到了什么问题" className="field" /></Field>
-          </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/60 px-5 py-5 sm:px-6">
+          <EditorSection number="01" title="基本资料" description="让阅读者先知道这是哪个版本，以及主要解决了什么。">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="版本号" hint="使用 v主版本.功能版本.修订版本"><input required value={form.version} onChange={e => update('version', e.target.value)} placeholder="例如：v2.4.0" className="field" /></Field>
+              <Field label="上线日期" hint="选择这个版本正式对外使用的日期"><input required type="date" value={form.releaseDate} onChange={e => update('releaseDate', e.target.value)} className="field" /></Field>
+              <div className="sm:col-span-2"><Field label="版本主题" hint="一句话概括本次版本，例如：分组协作与内容研究平台"><input required maxLength={120} value={form.title} onChange={e => update('title', e.target.value)} placeholder="输入本次版本的主题" className="field" /></Field></div>
+              <div className="sm:col-span-2"><Field label="版本说明" hint="说明这个版本整体解决了什么问题，不需要列出每个小修改"><textarea required maxLength={2000} rows={3} value={form.summary} onChange={e => update('summary', e.target.value)} placeholder="简要说明本次版本带来的主要变化" className="field" /></Field></div>
+            </div>
+          </EditorSection>
+
+          <EditorSection number="02" title="版本内容" description="这里会直接展示给其他超管；每行填写一项，页面会自动编号。">
+            <Field label="本版本完成了什么"><textarea rows={6} value={form.highlights} onChange={e => update('highlights', e.target.value)} placeholder={'例如：\n新增分组任务认领\n新增成效追踪报告\n优化大型报告加载速度'} className="field" /></Field>
+          </EditorSection>
+
+          <EditorSection number="03" title="交接说明" description="帮助以后维护系统的人理解实现方式，以及仍需留意的问题。">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="实现方式与交接重点" hint="每行一项"><textarea rows={6} value={form.implementationNotes} onChange={e => update('implementationNotes', e.target.value)} placeholder="记录主要实现方式或接手时必须知道的事项" className="field" /></Field>
+              <Field label="限制与维护提醒" hint="每行一项"><textarea rows={6} value={form.limitations} onChange={e => update('limitations', e.target.value)} placeholder="记录第三方限制、已知风险或后续维护事项" className="field" /></Field>
+            </div>
+          </EditorSection>
+
+          <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 sm:p-5">
+            <div className="flex items-start gap-3"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 9V6a4 4 0 0 1 8 0v3m-9 0h10v8H5V9Z" /></svg></span><div><h3 className="text-sm font-bold text-violet-950">内部备注 · 仅你可见</h3><p className="mt-1 text-xs leading-5 text-violet-800/70">记录“为什么会有这个想法”和当时的实际背景。其他超管无法从页面或接口读取。</p></div></div>
+            <div className="mt-3"><Field label="想法起因"><textarea maxLength={2000} rows={5} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：当时遇到了什么问题、谁提出了什么需求、为什么决定采用这个方向……" className="field" /></Field></div>
+          </section>
         </div>
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+        <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p className="text-xs text-slate-500">保存后会立即出现在开发日志中，但不会部署或修改网站功能。</p>
+          <div className="flex justify-end gap-2">
           <button type="button" disabled={saving} onClick={onCancel} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40">取消</button>
-          <button disabled={saving} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">{saving ? '保存中…' : '保存版本'}</button>
+          <button disabled={saving} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">{saving ? '保存中…' : editing ? '保存修改' : '添加到开发日志'}</button>
+          </div>
         </footer>
         <style jsx>{`.field{margin-top:.375rem;width:100%;border-radius:.5rem;border:1px solid rgb(203 213 225);padding:.625rem .75rem;font-weight:400;color:rgb(15 23 42);outline:none}.field:focus{border-color:rgb(16 185 129);box-shadow:0 0 0 2px rgb(209 250 229)}`}</style>
       </form>
@@ -323,6 +340,15 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-sm font-medium text-slate-700">{label}{children}</label>
+function EditorSection({ number, title, description, children }: { number: string; title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex items-start gap-3"><span className="font-mono text-xs font-bold text-emerald-700">{number}</span><div><h3 className="text-sm font-bold text-slate-900">{title}</h3><p className="mt-1 text-xs leading-5 text-slate-500">{description}</p></div></div>
+      {children}
+    </section>
+  )
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return <label className="block text-sm font-medium text-slate-700"><span>{label}</span>{hint && <span className="ml-2 text-xs font-normal text-slate-400">{hint}</span>}{children}</label>
 }
