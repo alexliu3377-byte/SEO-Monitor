@@ -1,6 +1,7 @@
 'use client'
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 type DevelopmentRelease = {
   id: string
@@ -292,8 +293,10 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
     }
   }, [onCancel, saving])
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel() }}>
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel() }}>
       <form onSubmit={onSubmit} role="dialog" aria-modal="true" aria-labelledby="release-editor-title" className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <header className="flex shrink-0 items-start gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
           <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 id="release-editor-title" className="text-lg font-bold text-slate-950">{editing ? '编辑版本记录' : '新增版本记录'}</h2><span className="rounded-md bg-slate-950 px-2 py-1 font-mono text-xs font-bold text-emerald-300">{form.version || '新版本'}</span></div><p className="mt-1 text-sm text-slate-500">整理这次正式版本的内容；保存记录不会触发代码部署。</p></div>
@@ -336,7 +339,8 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
         </footer>
         <style jsx>{`.field{margin-top:.375rem;width:100%;border-radius:.5rem;border:1px solid rgb(203 213 225);padding:.625rem .75rem;font-weight:400;color:rgb(15 23 42);outline:none}.field:focus{border-color:rgb(16 185 129);box-shadow:0 0 0 2px rgb(209 250 229)}`}</style>
       </form>
-    </div>
+    </div>,
+    document.body
   )
 }
 
