@@ -8,6 +8,7 @@ import {
   isFeedbackPage,
   isFeedbackRole,
   isFeedbackType,
+  normalizeSubmittedSite,
   type FeedbackRole,
 } from '@/lib/feedback-access'
 
@@ -88,9 +89,13 @@ export async function POST(req: Request) {
   const details = cleanText(body?.details, 4000)
   const feedbackType = body?.feedbackType
   const relatedPage = body?.relatedPage
+  const submittedSite = feedbackType === 'site_submission' ? normalizeSubmittedSite(body?.submittedSite) : null
   if (title.length < 4) return NextResponse.json({ error: '标题至少需要 4 个字' }, { status: 400 })
   if (details.length < 20) return NextResponse.json({ error: '请至少用 20 个字说明使用场景、问题和希望结果' }, { status: 400 })
   if (!isFeedbackType(feedbackType)) return NextResponse.json({ error: '请选择反馈类型' }, { status: 400 })
+  if (feedbackType === 'site_submission' && !submittedSite) {
+    return NextResponse.json({ error: '请输入有效的公开站点域名或网址' }, { status: 400 })
+  }
   if (relatedPage !== '' && relatedPage !== null && relatedPage !== undefined && !isFeedbackPage(relatedPage)) {
     return NextResponse.json({ error: '相关页面选项无效' }, { status: 400 })
   }
@@ -104,6 +109,15 @@ export async function POST(req: Request) {
     .limit(1)
     .maybeSingle()
   if (duplicate) return NextResponse.json({ error: '你已有相同标题的未完成反馈，请等待处理或补充原反馈' }, { status: 409 })
+
+  if (submittedSite) {
+    const [{ data: trackedSite }, { data: pendingSite }] = await Promise.all([
+      service.from('sites').select('id').ilike('domain', submittedSite).limit(1).maybeSingle(),
+      service.from('development_requests').select('id').eq('feedback_type', 'site_submission').eq('submitted_site', submittedSite).in('status', [...ACTIVE_FEEDBACK_STATUSES]).limit(1).maybeSingle(),
+    ])
+    if (trackedSite) return NextResponse.json({ error: '这个站点已经在网站管理中，无需重复提交' }, { status: 409 })
+    if (pendingSite) return NextResponse.json({ error: '这个站点已经有人提交并等待审核' }, { status: 409 })
+  }
 
   const limits = feedbackSubmissionLimits(caller.role)
   if (limits.daily !== null || limits.open !== null) {
@@ -141,6 +155,7 @@ export async function POST(req: Request) {
       submitter_role: caller.role,
       feedback_type: feedbackType,
       related_page: isFeedbackPage(relatedPage) ? relatedPage : null,
+      submitted_site: submittedSite,
     })
     .select('*')
     .single()

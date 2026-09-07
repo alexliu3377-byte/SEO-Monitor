@@ -1,7 +1,7 @@
 export type FeedbackRole = 'normal' | 'admin' | 'super'
-export type FeedbackScope = 'mine' | 'routine' | 'super'
+export type FeedbackScope = 'board' | 'mine' | 'super'
 
-export const FEEDBACK_TYPES = ['bug', 'usability', 'data', 'performance', 'feature', 'optimization', 'other'] as const
+export const FEEDBACK_TYPES = ['bug', 'usability', 'data', 'performance', 'feature', 'optimization', 'site_submission', 'other'] as const
 export type FeedbackType = typeof FEEDBACK_TYPES[number]
 
 export const FEEDBACK_PAGES = [
@@ -32,10 +32,25 @@ export function isFeedbackMessageType(value: unknown): value is FeedbackMessageT
   return typeof value === 'string' && (FEEDBACK_MESSAGE_TYPES as readonly string[]).includes(value)
 }
 
+export function normalizeSubmittedSite(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (!raw || raw.length > 500) return null
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, '').replace(/\.$/, '')
+    if (!hostname.includes('.') || hostname === 'localhost' || /^\d+(\.\d+){3}$/.test(hostname)) return null
+    if (!/^[a-z0-9.-]+$/.test(hostname) || hostname.split('.').some(label => !label || label.startsWith('-') || label.endsWith('-'))) return null
+    return hostname
+  } catch {
+    return null
+  }
+}
+
 export function feedbackScopeFor(role: FeedbackRole, requested: string | null): FeedbackScope {
-  if (role === 'normal') return 'mine'
-  if (role === 'admin') return 'routine'
-  return requested === 'super' ? 'super' : 'routine'
+  if (requested === 'mine') return 'mine'
+  if (role === 'super' && requested === 'super') return 'super'
+  return 'board'
 }
 
 export function canViewFeedback(
@@ -45,9 +60,24 @@ export function canViewFeedback(
   submitterRole: FeedbackRole,
   scope: FeedbackScope
 ): boolean {
-  if (viewerRole === 'normal') return submitterId === viewerId
-  if (viewerRole === 'admin') return submitterRole !== 'super'
-  return scope === 'super' ? submitterRole === 'super' : submitterRole !== 'super'
+  if (scope === 'mine') return submitterId === viewerId
+  if (scope === 'super') return viewerRole === 'super' && submitterRole === 'super'
+  return submitterRole !== 'super'
+}
+
+export function canReadFeedbackConversation(viewerRole: FeedbackRole, submitterRole: FeedbackRole): boolean {
+  return submitterRole === 'super' ? viewerRole === 'super' : true
+}
+
+export function canReplyFeedbackConversation(
+  viewerId: string,
+  viewerRole: FeedbackRole,
+  submitterId: string | null,
+  submitterRole: FeedbackRole,
+  isProjectOwner: boolean
+): boolean {
+  if (submitterRole === 'super') return viewerRole === 'super'
+  return isProjectOwner || submitterId === viewerId
 }
 
 export function feedbackSubmissionLimits(role: FeedbackRole): { daily: number | null; open: number | null } {

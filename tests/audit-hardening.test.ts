@@ -21,12 +21,15 @@ import {
 } from '../lib/development-log'
 import { PROJECT_OWNER_ID } from '../lib/project-owner'
 import {
+  canReadFeedbackConversation,
+  canReplyFeedbackConversation,
   canViewFeedback,
   feedbackScopeFor,
   feedbackSubmissionLimits,
   isFeedbackMessageType,
   isFeedbackPage,
   isFeedbackType,
+  normalizeSubmittedSite,
 } from '../lib/feedback-access'
 
 const blockedUrls = [
@@ -120,20 +123,31 @@ test('development log permissions separate readers, submitters and owner managem
 })
 
 test('feedback visibility separates personal, routine and super priority scopes', () => {
-  assert.equal(feedbackScopeFor('normal', 'super'), 'mine')
-  assert.equal(feedbackScopeFor('admin', 'super'), 'routine')
+  assert.equal(feedbackScopeFor('normal', 'super'), 'board')
+  assert.equal(feedbackScopeFor('admin', 'super'), 'board')
   assert.equal(feedbackScopeFor('super', 'super'), 'super')
   assert.equal(canViewFeedback('member-1', 'normal', 'member-1', 'normal', 'mine'), true)
   assert.equal(canViewFeedback('member-1', 'normal', 'member-2', 'normal', 'mine'), false)
-  assert.equal(canViewFeedback('admin-1', 'admin', 'member-1', 'normal', 'routine'), true)
-  assert.equal(canViewFeedback('admin-1', 'admin', 'super-1', 'super', 'routine'), false)
+  assert.equal(canViewFeedback('member-1', 'normal', 'member-2', 'normal', 'board'), true)
+  assert.equal(canViewFeedback('admin-1', 'admin', 'member-1', 'normal', 'board'), true)
+  assert.equal(canViewFeedback('admin-1', 'admin', 'super-1', 'super', 'board'), false)
   assert.equal(canViewFeedback('super-1', 'super', 'super-2', 'super', 'super'), true)
   assert.equal(canViewFeedback('super-1', 'super', 'member-1', 'normal', 'super'), false)
+  assert.equal(canReadFeedbackConversation('normal', 'normal'), true)
+  assert.equal(canReadFeedbackConversation('normal', 'super'), false)
+  assert.equal(canReadFeedbackConversation('super', 'super'), true)
+  assert.equal(canReplyFeedbackConversation('member-1', 'normal', 'member-1', 'normal', false), true)
+  assert.equal(canReplyFeedbackConversation('member-2', 'normal', 'member-1', 'normal', false), false)
+  assert.equal(canReplyFeedbackConversation('owner', 'super', 'member-1', 'normal', true), true)
+  assert.equal(canReplyFeedbackConversation('super-2', 'super', 'super-1', 'super', false), true)
   assert.deepEqual(feedbackSubmissionLimits('normal'), { daily: 2, open: 3 })
   assert.deepEqual(feedbackSubmissionLimits('admin'), { daily: 5, open: 10 })
   assert.deepEqual(feedbackSubmissionLimits('super'), { daily: null, open: null })
   assert.equal(isFeedbackType('usability'), true)
+  assert.equal(isFeedbackType('site_submission'), true)
   assert.equal(isFeedbackType('spam'), false)
+  assert.equal(normalizeSubmittedSite('https://www.Example.com/path?q=1'), 'example.com')
+  assert.equal(normalizeSubmittedSite('localhost:3000'), null)
   assert.equal(isFeedbackPage('task-groups'), true)
   assert.equal(isFeedbackPage('unknown-page'), false)
   assert.equal(isFeedbackMessageType('research'), true)
