@@ -581,6 +581,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [siteRankdownData, setSiteRankdownData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }[]>([])
   const [siteRankdownLoading, setSiteRankdownLoading] = useState(false)
   const [siteRankdownGroupId, setSiteRankdownGroupId] = useState<string | null>(null)
+  const siteRankdownRequestRef = useRef(0)
   // "涨排更新"tab 2026-08-17 改成看竞品的涨排（不是我们自己站的）——用户
   // 原话"我是要找这个词我们没有做到收录或排名的东西来做更新，就是根据近期
   // 竞品有拿到这个词的涨排的来做比较""看竞品涨排是看他们的涨而已"。跟原来
@@ -799,49 +800,46 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
 
   async function loadSiteRankdown(force = false) {
-    if (!activeGroup || (!force && siteRankdownGroupId === activeGroup.id) || siteRankdownLoading) return
+    if (!activeGroup || (!force && siteRankdownGroupId === activeGroup.id)) return
     const ownDomains = activeGroup.site_domains
+    const loadingGroupId = activeGroup.id
+    const groupChanged = siteRankdownGroupId !== loadingGroupId
+    const requestId = ++siteRankdownRequestRef.current
     // 之前这里domains为空就直接return，没清空siteRankdownData——切到一个没配
     // 自己站点的分组时，屏幕上会一直留着上一个分组的"跌词更新"数据没消失，
     // 看起来像两个分组数据串了（2026-08-06 用户反馈排查出的根因）。
-    if (ownDomains.length === 0) { setSiteRankdownData([]); setSiteRankdownGroupId(activeGroup.id); return }
+    if (ownDomains.length === 0) {
+      setSiteRankdownData([])
+      setRankdownDate('')
+      setSiteRankdownGroupId(loadingGroupId)
+      setSiteRankdownLoading(false)
+      return
+    }
     setSiteRankdownLoading(true)
     try {
-      const supabase = getBrowserClient()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: siteData } = await (supabase.from('sites') as any)
-        .select('id').in('domain', ownDomains)
-      const siteIds = ((siteData || []) as { id: string }[]).map(s => s.id)
-      if (siteIds.length > 0) {
-        const since = getMYDate(-30)
-        // 2026-08-20 改读 keyword_signal_rollup（增量维护的汇总表，见
-        // lib/hot-radar.ts 同名注释）——不再现场扫 site_keyword_ranks 30天窗口，
-        // 用列别名对齐原来的字段名，下面的 dedupeByKeyword/展示逻辑不用改。
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawRows = await fetchAllRows<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null }>((from, to) =>
-          (supabase.from('keyword_signal_rollup') as any)
-            .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
-            .in('site_id', siteIds)
-            .eq('type', 'rankdown')
-            .gte('last_seen', since)
-            .order('last_seen', { ascending: false })
-            .order('max_volume', { ascending: false })
-            .order('site_id', { ascending: true })
-            .order('keyword', { ascending: true })
-            .range(from, to)
-        )
-        const rows = dedupeByKeyword(rawRows)
-        setSiteRankdownData(rows)
-        // Default date = most recent stat_date in data
-        if (rows.length > 0) setRankdownDate(prev => prev || rows[0].stat_date)
-      } else {
-        setSiteRankdownData([])
-      }
-      setSiteRankdownGroupId(activeGroup.id)
+      const response = await fetch(`/api/task-groups/${loadingGroupId}/rankdown-signals`)
+      if (!response.ok) throw new Error(await apiError(response, '跌词更新加载失败'))
+      const payload = await response.json() as { rows?: typeof siteRankdownData }
+      if (requestId !== siteRankdownRequestRef.current) return
+      const rows = dedupeByKeyword(payload.rows ?? [])
+      const availableDates = Array.from(new Set(
+        rows.filter(row => row.volume > 0).map(row => row.stat_date),
+      )).sort().reverse()
+
+      setSiteRankdownData(rows)
+      setRankdownDate(previous => (
+        groupChanged || !availableDates.includes(previous) ? availableDates[0] ?? '' : previous
+      ))
+      setSiteRankdownGroupId(loadingGroupId)
       setRdPage(0)
     } catch (error) {
-      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '跌排推荐加载失败' })
-    } finally { setSiteRankdownLoading(false) }
+      if (requestId !== siteRankdownRequestRef.current) return
+      setSiteRankdownData([])
+      setRankdownDate('')
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '跌词更新加载失败' })
+    } finally {
+      if (requestId === siteRankdownRequestRef.current) setSiteRankdownLoading(false)
+    }
   }
 
   // 竞品涨排×我方零覆盖的交集——步骤：
@@ -2563,7 +2561,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (rightTab === 'rankdown') {
       if (siteRankdownLoading) return <Spinner />
       // Available dates in data
-      const availableDates = Array.from(new Set(siteRankdownData.map(r => r.stat_date))).sort().reverse()
+      const availableDates = Array.from(new Set(
+        siteRankdownData.filter(row => row.volume > 0).map(row => row.stat_date),
+      )).sort().reverse()
       const selectedDate = rankdownDate || availableDates[0] || ''
       // 按URL合并（同一个URL命中多个词只显示搜索量最高那个），2026-08-20
       const dateRows = dedupeByUrl(
@@ -2583,8 +2583,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <span className="text-[10px] text-gray-300">m端下跌词 {dateRows.length} 条</span>
             )}
           </div>
-          {siteRankdownData.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 text-sm">近30天无m端下跌词</div>
+          {availableDates.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 text-sm">近30天没有可显示的m端下跌词</div>
           ) : dateRows.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">该日期暂无下跌词</div>
           ) : (
