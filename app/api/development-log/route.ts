@@ -74,12 +74,8 @@ export async function GET(req: Request) {
     .range(from, to)
   if (error) return databaseError(error)
   const canManage = canManageDevelopmentLog(caller.id)
-  const releases = (data ?? []).map((release: Record<string, unknown>) => ({
-    ...release,
-    source_note: canManage ? release.source_note : null,
-  }))
   return NextResponse.json({
-    releases, total: count ?? 0, page, pageSize,
+    releases: data ?? [], total: count ?? 0, page, pageSize,
     permissions: { canManage },
   })
 }

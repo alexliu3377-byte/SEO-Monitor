@@ -250,11 +250,11 @@ function ReleaseTimelineItem({ release, canManage, onEdit }: { release: Developm
 
           <ReleaseDetails implementation={release.implementation_notes ?? []} limitations={release.limitations ?? []} />
 
-          {canManage && release.source_note && (
+          {release.source_note && (
             <section className="mt-4 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3">
               <div className="flex items-center gap-2 text-xs font-bold text-violet-800">
                 <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 9V6a4 4 0 0 1 8 0v3m-9 0h10v8H5V9Z" /></svg>
-                内部备注 · 仅你可见
+                内部备注 · 仅超管可见
               </div>
               <p className="mt-2 text-sm leading-6 text-violet-950/75">{release.source_note}</p>
             </section>
@@ -323,7 +323,7 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
           </EditorSection>
 
           <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 sm:p-5">
-            <div className="flex items-start gap-3"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 9V6a4 4 0 0 1 8 0v3m-9 0h10v8H5V9Z" /></svg></span><div><h3 className="text-sm font-bold text-violet-950">内部备注 · 仅你可见</h3><p className="mt-1 text-xs leading-5 text-violet-800/70">记录“为什么会有这个想法”和当时的实际背景。其他超管无法从页面或接口读取。</p></div></div>
+            <div className="flex items-start gap-3"><span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 9V6a4 4 0 0 1 8 0v3m-9 0h10v8H5V9Z" /></svg></span><div><h3 className="text-sm font-bold text-violet-950">内部备注 · 仅超管可见</h3><p className="mt-1 text-xs leading-5 text-violet-800/70">记录“为什么会有这个想法”和当时的实际背景。所有超管可以阅读，仍只有你可以编辑。</p></div></div>
             <div className="mt-3"><Field label="想法起因"><textarea maxLength={2000} rows={5} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：当时遇到了什么问题、谁提出了什么需求、为什么决定采用这个方向……" className="field" /></Field></div>
           </section>
         </div>

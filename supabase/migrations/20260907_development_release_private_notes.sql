@@ -1,6 +1,6 @@
 -- Replace the original provenance text with a private, first-person reminder
--- of why each product release was started. The API exposes source_note only
--- to the configured project owner. Manually edited releases are preserved.
+-- of why each product release was started. The development log itself is
+-- restricted to super admins; only the configured project owner can edit it.
 begin;
 
 with private_notes(version, note) as (
