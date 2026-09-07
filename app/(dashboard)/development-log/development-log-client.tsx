@@ -51,15 +51,44 @@ function dateLabel(value: string) {
   }).format(date)
 }
 
-function InfoList({ title, items, warning = false }: { title: string; items: string[]; warning?: boolean }) {
+function HighlightList({ items }: { items: string[] }) {
   if (!items.length) return null
   return (
-    <section className={warning ? 'rounded-xl bg-amber-50/70 p-4' : ''}>
-      <h3 className={`text-sm font-semibold ${warning ? 'text-amber-900' : 'text-slate-900'}`}>{title}</h3>
-      <ul className={`mt-2 space-y-2 text-sm leading-6 ${warning ? 'text-amber-900/80' : 'text-slate-600'}`}>
-        {items.map((item, index) => <li key={`${index}-${item}`} className="flex gap-2"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-50" /><span>{item}</span></li>)}
+    <ul className="grid gap-2.5 sm:grid-cols-2">
+      {items.map((item, index) => (
+        <li key={`${index}-${item}`} className="flex gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5 text-sm leading-5 text-slate-700">
+          <span aria-hidden="true" className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m4 10 4 4 8-8" /></svg>
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function DetailPanel({ title, items, warning = false }: { title: string; items: string[]; warning?: boolean }) {
+  if (!items.length) return null
+  return (
+    <details className={`group overflow-hidden rounded-xl border ${warning ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'}`}>
+      <summary className={`flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset [&::-webkit-details-marker]:hidden ${warning ? 'text-amber-900' : 'text-slate-800'}`}>
+        <span className="flex items-center gap-2">
+          <span aria-hidden="true" className={`flex h-7 w-7 items-center justify-center rounded-lg ${warning ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+            {warning ? (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 9v4m0 4h.01M10.3 3.8 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.8a2 2 0 0 0-3.4 0Z" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3 4 7v5c0 4.4 3.4 7.8 8 9 4.6-1.2 8-4.6 8-9V7l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>
+            )}
+          </span>
+          {title}
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${warning ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{items.length} 项</span>
+        </span>
+        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 text-current transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 7.5 5 5 5-5" /></svg>
+      </summary>
+      <ul className={`space-y-2 border-t px-4 py-3 text-sm leading-6 ${warning ? 'border-amber-200 text-amber-900/80' : 'border-slate-100 text-slate-600'}`}>
+        {items.map((item, index) => <li key={`${index}-${item}`} className="flex gap-2"><span aria-hidden="true" className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-current opacity-50" /><span>{item}</span></li>)}
       </ul>
-    </section>
+    </details>
   )
 }
 
@@ -67,6 +96,7 @@ export default function DevelopmentLogClient() {
   const [releases, setReleases] = useState<DevelopmentRelease[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [currentVersion, setCurrentVersion] = useState('')
   const [canManage, setCanManage] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -86,6 +116,7 @@ export default function DevelopmentLogClient() {
       setReleases(body.releases ?? [])
       setTotal(body.total ?? 0)
       setCanManage(Boolean(body.permissions?.canManage))
+      if (targetPage === 1) setCurrentVersion(body.releases?.[0]?.version ?? '')
     } catch (err) {
       setError(err instanceof Error ? err.message : '开发日志加载失败')
     } finally {
@@ -141,54 +172,166 @@ export default function DevelopmentLogClient() {
   }
 
   return (
-    <div className="min-h-full bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-4 py-5 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">项目交接与版本维护</p><h1 className="mt-1 text-2xl font-bold text-slate-950">开发日志</h1><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">仅超管可查看，用于说明系统演进、实现方式和长期维护限制。</p></div>
-          {canManage && !loading && <button type="button" onClick={startNew} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">新增版本</button>}
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
-        {message && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</div>}
-        <section className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-5">
-          <h2 className="font-semibold text-emerald-950">版本记录规则</h2>
-          <p className="mt-2 text-sm leading-6 text-emerald-900/80">开发日志按系统发展阶段和实际使用变化整理，帮助管理层与后续维护人员快速了解每一轮更新解决了什么问题。</p>
-          <p className="mt-2 rounded-lg bg-white/80 px-3 py-2 text-sm font-medium text-emerald-900">部署不等于版本：同一目标下的多次调整与上线测试合并记录；单独修 Bug、改文案、调样式或补测试不单独升版本。</p>
-          <div className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
-            <VersionRule version="v1.0.0 / v2.0.0" text="主版本：系统用途或工作方式明显改变" />
-            <VersionRule version="v2.1.0" text="次版本：新增一组重要功能或能力" />
-            <VersionRule version="v2.3.1" text="修订版本：完成一整轮权限、性能或稳定性更新" />
+    <div className="min-h-full bg-[#f6f8fb]">
+      <main className="mx-auto max-w-7xl space-y-6 px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+        <section className="relative overflow-hidden rounded-[28px] bg-slate-950 px-6 py-7 text-white shadow-[0_20px_60px_-32px_rgba(15,23,42,0.7)] sm:px-8 sm:py-9">
+          <div aria-hidden="true" className="absolute -right-16 -top-24 h-64 w-64 rounded-full bg-emerald-400/20 blur-3xl" />
+          <div aria-hidden="true" className="absolute -bottom-24 left-1/3 h-52 w-52 rounded-full bg-cyan-400/10 blur-3xl" />
+          <div className="relative flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                <span className="h-px w-7 bg-emerald-400" />
+                奇心内容发布系统
+              </div>
+              <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">开发日志</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">记录每个阶段解决的问题、实现方式与维护边界，让管理层快速掌握产品进展，也让后续维护人员能够顺利接手。</p>
+              <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">仅超管可查看</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">按产品阶段记录</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">支持长期交接</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-stretch gap-3 lg:justify-end">
+              <div className="min-w-28 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 backdrop-blur-sm">
+                <p className="text-xs text-slate-400">版本记录</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{loading ? '—' : total}</p>
+              </div>
+              <div className="min-w-36 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 backdrop-blur-sm">
+                <p className="text-xs text-emerald-200">当前版本</p>
+                <p className="mt-1 font-mono text-xl font-semibold text-emerald-300">{currentVersion || '—'}</p>
+              </div>
+              {canManage && !loading && (
+                <button type="button" onClick={startNew} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950">
+                  <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 4v12M4 10h12" /></svg>
+                  新增版本
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
+        {message && <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</div>}
         {formOpen && canManage && <ReleaseEditor form={form} setForm={setForm} saving={saving} editing={Boolean(editingId)} onSubmit={save} onCancel={() => setFormOpen(false)} />}
-        {loading && <div className="space-y-4" aria-label="正在加载"><div className="h-36 animate-pulse rounded-xl bg-slate-200" /><div className="h-56 animate-pulse rounded-xl bg-slate-200" /></div>}
-        {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p>{error}</p><button type="button" onClick={() => void load(page)} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 font-medium">重试</button></div>}
 
-        {!loading && !error && releases.map(release => (
-          <article key={release.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 p-5 sm:p-6">
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-slate-950 px-2.5 py-1 font-mono text-sm font-semibold text-white">{release.version}</span><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${STATUS[release.status].className}`}>{STATUS[release.status].label}</span><span className="text-xs text-slate-500">{dateLabel(release.release_date)}</span>{release.deployment_range && <span className="text-xs text-slate-400">开发范围：{release.deployment_range}</span>}</div>
-              <div className="mt-3 flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold text-slate-950">{release.title}</h2><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{release.summary}</p></div>{canManage && <button type="button" onClick={() => startEdit(release)} className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">编辑</button>}</div>
+        <div className="grid items-start gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
+          <aside className="space-y-4 lg:sticky lg:top-6">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-3">
+                <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" /></svg>
+                </span>
+                <div><h2 className="font-semibold text-slate-900">版本时间线</h2><p className="text-xs text-slate-500">从新到旧排列</p></div>
+              </div>
+              <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">每条记录代表一轮完整的产品变化，不等同于一次代码推送或上线测试。</div>
+            </section>
+
+            <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
+                版本号说明
+                <svg viewBox="0 0 20 20" className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 7.5 5 5 5-5" /></svg>
+              </summary>
+              <div className="space-y-2 border-t border-slate-100 p-3">
+                <VersionRule version="v1.0.0" text="系统用途或工作方式明显改变" />
+                <VersionRule version="v2.1.0" text="新增一组重要功能或能力" />
+                <VersionRule version="v2.3.1" text="完成一轮权限、性能或稳定性更新" />
+              </div>
+            </details>
+          </aside>
+
+          <section aria-labelledby="release-timeline-title" className="min-w-0">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Release timeline</p><h2 id="release-timeline-title" className="mt-1 text-xl font-bold text-slate-950">版本更新记录</h2></div>
+              {!loading && total > 0 && <span className="text-xs text-slate-500">共 {total} 个版本</span>}
             </div>
-            <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2"><InfoList title="本版本完成内容" items={release.highlights ?? []} /><InfoList title="实现方式（交接重点）" items={release.implementation_notes ?? []} /><div className="lg:col-span-2"><InfoList title="已知限制与维护提醒" items={release.limitations ?? []} warning /></div></div>
-          </article>
-        ))}
-        {!loading && !error && <Pagination page={page} total={total} onChange={setPage} />}
+
+            {loading && <div className="space-y-4" aria-label="正在加载"><div className="h-44 animate-pulse rounded-2xl bg-slate-200" /><div className="h-64 animate-pulse rounded-2xl bg-slate-200" /></div>}
+            {!loading && error && <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p>{error}</p><button type="button" onClick={() => void load(page)} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 font-medium">重试</button></div>}
+
+            {!loading && !error && releases.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"><p className="font-medium text-slate-700">暂无版本记录</p><p className="mt-1 text-sm text-slate-500">完成一轮有意义的产品更新后再建立版本。</p></div>
+            )}
+
+            {!loading && !error && (
+              <div className="space-y-5">
+                {releases.map((release, index) => (
+                  <ReleaseTimelineItem key={release.id} release={release} latest={page === 1 && index === 0} canManage={canManage} onEdit={startEdit} />
+                ))}
+                <Pagination page={page} total={total} onChange={setPage} />
+              </div>
+            )}
+          </section>
+        </div>
       </main>
     </div>
   )
 }
 
+function ReleaseTimelineItem({ release, latest, canManage, onEdit }: { release: DevelopmentRelease; latest: boolean; canManage: boolean; onEdit: (release: DevelopmentRelease) => void }) {
+  return (
+    <article className="grid gap-3 md:grid-cols-[110px_minmax(0,1fr)] md:gap-6">
+      <div className="relative hidden pt-5 text-right md:block">
+        <p className="text-xs font-semibold text-slate-700">{dateLabel(release.release_date)}</p>
+        {release.deployment_range && <p className="mt-1 text-[11px] leading-4 text-slate-400">{release.deployment_range}</p>}
+        <span aria-hidden="true" className={`absolute -right-[29px] top-6 z-10 h-3 w-3 rounded-full border-[3px] bg-white ${latest ? 'border-emerald-500 ring-4 ring-emerald-100' : 'border-slate-300'}`} />
+        <span aria-hidden="true" className="absolute -right-6 top-0 h-[calc(100%+1.25rem)] w-px bg-slate-200" />
+      </div>
+
+      <div className={`overflow-hidden rounded-2xl border bg-white transition-shadow ${latest ? 'border-emerald-200 shadow-[0_16px_40px_-28px_rgba(5,150,105,0.7)]' : 'border-slate-200 shadow-sm hover:shadow-md'}`}>
+        {latest && <div className="h-1 bg-gradient-to-r from-emerald-500 via-green-400 to-cyan-400" />}
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-lg px-2.5 py-1 font-mono text-sm font-bold ${latest ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'}`}>{release.version}</span>
+                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${STATUS[release.status].className}`}>{STATUS[release.status].label}</span>
+                {latest && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">最新版本</span>}
+                <span className="text-xs text-slate-500 md:hidden">{dateLabel(release.release_date)}</span>
+              </div>
+              <h3 className="mt-3 text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">{release.title}</h3>
+            </div>
+            {canManage && (
+              <button type="button" onClick={() => onEdit(release)} aria-label={`编辑 ${release.version}`} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+                <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m13.5 3.5 3 3L7 16l-4 1 1-4 9.5-9.5Z" /></svg>
+                编辑
+              </button>
+            )}
+          </div>
+
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">{release.summary}</p>
+
+          {release.highlights?.length > 0 && (
+            <section className="mt-5">
+              <div className="mb-3 flex items-center gap-2"><h4 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">本版本完成内容</h4><span className="h-px flex-1 bg-slate-100" /></div>
+              <HighlightList items={release.highlights} />
+            </section>
+          )}
+
+          <div className="mt-4 grid gap-2 lg:grid-cols-2">
+            <DetailPanel title="实现方式与交接重点" items={release.implementation_notes ?? []} />
+            <DetailPanel title="限制与维护提醒" items={release.limitations ?? []} warning />
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function VersionRule({ version, text }: { version: string; text: string }) {
-  return <div className="rounded-lg bg-white/80 p-3"><span className="font-mono font-semibold text-emerald-800">{version}</span><p className="mt-1 text-slate-600">{text}</p></div>
+  return <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><span className="font-mono text-xs font-bold text-emerald-700">{version}</span><p className="mt-1 text-xs leading-5 text-slate-600">{text}</p></div>
 }
 
 function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   if (total <= PAGE_SIZE) return null
-  return <nav aria-label="版本记录分页" className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3"><p className="text-sm text-slate-500">第 {page} / {pages} 页 · 共 {total} 条</p><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">上一页</button><button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">下一页</button></div></nav>
+  return (
+    <nav aria-label="版本记录分页" className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-slate-500">第 <span className="font-semibold text-slate-800">{page}</span> / {pages} 页 · 共 {total} 条</p>
+      <div className="flex gap-2">
+        <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none">上一页</button>
+        <button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none">下一页</button>
+      </div>
+    </nav>
+  )
 }
 
 function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: { form: ReleaseForm; setForm: (form: ReleaseForm) => void; saving: boolean; editing: boolean; onSubmit: (event: FormEvent) => void; onCancel: () => void }) {
