@@ -220,17 +220,17 @@ function KwRow({ keyword, claimed, onClaim, onView, dateCell, children }: KwRowP
         </div>
       </td>
       {children}
-      <td className="px-2 py-2 text-right whitespace-nowrap">
+      <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
         <div className="flex items-center justify-end gap-1.5">
           <button
             type="button"
             disabled={claimed}
             aria-label={claimed ? `${keyword} 已认领` : `认领 ${keyword}`}
             onClick={e => { e.stopPropagation(); onClaim() }}
-            className="text-xs rounded px-2 py-1 border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500"
+            className="shrink-0 text-xs rounded px-2 py-1 border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500"
           >{claimed ? '已认领' : '认领'}</button>
           <button type="button" aria-label={`查看 ${keyword} 详情`} onClick={e => { e.stopPropagation(); onView() }}
-            className="text-xs text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 hover:border-blue-400 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">查看</button>
+            className="shrink-0 text-xs text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-2 py-1 hover:border-blue-400 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">查看</button>
         </div>
       </td>
     </tr>
@@ -249,7 +249,7 @@ function ClaimAction({ keyword, claimed, onClaim, compact = false }: {
       disabled={claimed}
       aria-label={claimed ? `${keyword} 已认领` : `认领 ${keyword}`}
       onClick={event => { event.stopPropagation(); onClaim() }}
-      className={`${compact ? 'px-1.5 py-0.5' : 'px-2 py-1'} text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500`}
+      className={`${compact ? 'px-1.5 py-0.5' : 'px-2 py-1'} shrink-0 whitespace-nowrap text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:border-gray-200 disabled:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed transition-colors focus-visible:ring-2 focus-visible:ring-green-500`}
     >{claimed ? '已认领' : '认领'}</button>
   )
 }
@@ -1893,7 +1893,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           {distributedWords.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">暂无分发词{canManage ? '，点右上角添加' : ''}</div>
           ) : (
-            <table aria-label="数据表格" className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
               <colgroup>{canManage && <col className="w-6" />}<col /><col className="w-24" /><col className="w-32" /></colgroup>
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 {canManage && <th className="w-6" />}
@@ -2001,7 +2001,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         }
         return (
           <>
-            <table aria-label="数据表格" className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full min-w-[760px] table-fixed">
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
@@ -2010,7 +2010,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">跌幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
-                <th className="w-28" />
+                <th className="w-32"><span className="sr-only">操作</span></th>
               </tr></thead>
               <tbody>
                 {matched.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
@@ -2057,11 +2057,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {r.rank_position == null ? <span className="text-gray-400">脱排</span> : r.prev_rank != null ? `▼${r.rank_position - r.prev_rank}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                      <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
                           <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId)} compact />
                           <button onClick={() => openDetail(r.keyword, '跌排更新', r.url)}
-                            className="text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
+                            className="shrink-0 whitespace-nowrap text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
                         </div>
                       </td>
                     </tr>
@@ -2116,7 +2116,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         }
         return (
           <>
-            <table aria-label="数据表格" className="w-full table-fixed">
+            <table aria-label="数据表格" className="w-full min-w-[760px] table-fixed">
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 <th className="w-7" />
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
@@ -2126,7 +2126,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">竞品排名</th>
                 <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">涨幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
-                <th className="w-16" />
+                <th className="w-20"><span className="sr-only">操作</span></th>
               </tr></thead>
               <tbody>
                 {rankupCandidates.slice(pg_rec * PAGE_SIZE, (pg_rec + 1) * PAGE_SIZE).map((r, i) => {
@@ -2176,7 +2176,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {r.rank_position != null && r.prev_rank != null ? `▲${r.prev_rank - r.rank_position}` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                      <td className="w-20 px-2 py-2 text-right whitespace-nowrap">
                         <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)} compact />
                       </td>
                     </tr>
@@ -2307,14 +2307,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = sorted_vr.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">涨幅{sortIcons('change')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-16">排名波动</th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.length === 0 ? (
@@ -2356,13 +2356,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = sorted_cross.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-24">命中维度</th>
               <th className="px-2 py-2 text-center font-medium w-24"><span className="inline-flex items-center justify-center gap-0.5">搜索量{sortIcons('volume')}</span></th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.map((w, i) => (
@@ -2400,13 +2400,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = sorted_rank.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">涨排次数{sortIcons('rankDays')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.map((w, i) => (
@@ -2439,13 +2439,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = sorted_streak.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">上涨天数{sortIcons('streak')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.map((w, i) => (
@@ -2478,13 +2478,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = sorted_new.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">新增次数{sortIcons('count')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-16"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">站点数{sortIcons('siteCount')}</span></th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.map((w, i) => (
@@ -2518,7 +2518,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const slice = filtered_wl.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full table-fixed">
+          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-3 py-2 text-left font-medium">
@@ -2539,7 +2539,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               </th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">长尾词数{sortIcons('count')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-16"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">站点数{sortIcons('siteCount')}</span></th>
-              <th className="w-14" />
+              <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.map((w, i) => (
@@ -2589,7 +2589,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="text-center py-10 text-gray-400 text-sm">该日期暂无下跌词</div>
           ) : (
             <>
-              <table aria-label="数据表格" className="w-full table-fixed">
+              <table aria-label="数据表格" className="w-full min-w-[820px] table-fixed">
                 <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="px-3 py-2 text-left font-medium">关键词</th>
                   <th className="px-2 py-2 text-left font-medium">页面URL</th>
@@ -2597,7 +2597,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">上次</th>
                   <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">跌幅</th>
                   <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">搜索量</th>
-                  <th className="w-28" />
+                  <th className="w-32"><span className="sr-only">操作</span></th>
                 </tr></thead>
                 <tbody>
                   {dateRows.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE).map((r, i) => {
@@ -2632,11 +2632,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                           {r.rank_position == null ? <span className="text-gray-400">脱排</span> : drop != null ? <span className="text-red-500">▼{drop}</span> : <span className="text-gray-300">新</span>}
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
-                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌词更新', r.volume)} compact />
                             <button onClick={() => openDetail(r.keyword, '跌词更新', r.url)}
-                              className="text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
+                              className="shrink-0 whitespace-nowrap text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
                           </div>
                         </td>
                       </tr>
