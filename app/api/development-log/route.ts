@@ -73,9 +73,14 @@ export async function GET(req: Request) {
     .order('version', { ascending: false })
     .range(from, to)
   if (error) return databaseError(error)
+  const canManage = canManageDevelopmentLog(caller.id)
+  const releases = (data ?? []).map((release: Record<string, unknown>) => ({
+    ...release,
+    source_note: canManage ? release.source_note : null,
+  }))
   return NextResponse.json({
-    releases: data ?? [], total: count ?? 0, page, pageSize,
-    permissions: { canManage: canManageDevelopmentLog(caller.id) },
+    releases, total: count ?? 0, page, pageSize,
+    permissions: { canManage },
   })
 }
 
@@ -114,7 +119,7 @@ export async function POST(req: Request) {
         implementation_notes: cleanStringList(body.implementationNotes),
         limitations: cleanStringList(body.limitations),
         deployment_range: cleanText(body.deploymentRange, 100) || null,
-        source_note: cleanText(body.sourceNote, 300) || null,
+        source_note: cleanText(body.sourceNote, 2000) || null,
         created_by: caller.id,
       })
       .select('*')

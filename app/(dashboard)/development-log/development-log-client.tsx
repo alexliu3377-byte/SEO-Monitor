@@ -173,7 +173,7 @@ export default function DevelopmentLogClient() {
 
   return (
     <div className="min-h-full bg-[#f6f8fb]">
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
         <section className="relative overflow-hidden rounded-[28px] bg-slate-950 px-6 py-7 text-white shadow-[0_20px_60px_-32px_rgba(15,23,42,0.7)] sm:px-8 sm:py-9">
           <div aria-hidden="true" className="absolute -right-16 -top-24 h-64 w-64 rounded-full bg-emerald-400/20 blur-3xl" />
           <div aria-hidden="true" className="absolute -bottom-24 left-1/3 h-52 w-52 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -213,34 +213,9 @@ export default function DevelopmentLogClient() {
         {message && <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</div>}
         {formOpen && canManage && <ReleaseEditor form={form} setForm={setForm} saving={saving} editing={Boolean(editingId)} onSubmit={save} onCancel={() => setFormOpen(false)} />}
 
-        <div className="grid items-start gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
-          <aside className="space-y-4 lg:sticky lg:top-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-3">
-                <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 3v3m12-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" /></svg>
-                </span>
-                <div><h2 className="font-semibold text-slate-900">版本时间线</h2><p className="text-xs text-slate-500">从新到旧排列</p></div>
-              </div>
-              <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">每条记录代表一轮完整的产品变化，不等同于一次代码推送或上线测试。</div>
-            </section>
-
-            <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
-                版本号说明
-                <svg viewBox="0 0 20 20" className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 7.5 5 5 5-5" /></svg>
-              </summary>
-              <div className="space-y-2 border-t border-slate-100 p-3">
-                <VersionRule version="v1.0.0" text="系统用途或工作方式明显改变" />
-                <VersionRule version="v2.1.0" text="新增一组重要功能或能力" />
-                <VersionRule version="v2.3.1" text="完成一轮权限、性能或稳定性更新" />
-              </div>
-            </details>
-          </aside>
-
-          <section aria-labelledby="release-timeline-title" className="min-w-0">
+        <section aria-labelledby="release-timeline-title" className="mx-auto min-w-0 max-w-5xl">
             <div className="mb-4 flex items-center justify-between gap-4">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Release timeline</p><h2 id="release-timeline-title" className="mt-1 text-xl font-bold text-slate-950">版本更新记录</h2></div>
+              <div><h2 id="release-timeline-title" className="text-xl font-bold text-slate-950">版本更新记录</h2><p className="mt-1 text-sm text-slate-500">按完成时间从新到旧排列，只记录有意义的产品阶段。</p></div>
               {!loading && total > 0 && <span className="text-xs text-slate-500">共 {total} 个版本</span>}
             </div>
 
@@ -259,8 +234,7 @@ export default function DevelopmentLogClient() {
                 <Pagination page={page} total={total} onChange={setPage} />
               </div>
             )}
-          </section>
-        </div>
+        </section>
       </main>
     </div>
   )
@@ -310,14 +284,20 @@ function ReleaseTimelineItem({ release, latest, canManage, onEdit }: { release: 
             <DetailPanel title="实现方式与交接重点" items={release.implementation_notes ?? []} />
             <DetailPanel title="限制与维护提醒" items={release.limitations ?? []} warning />
           </div>
+
+          {canManage && release.source_note && (
+            <section className="mt-4 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-violet-800">
+                <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 9V6a4 4 0 0 1 8 0v3m-9 0h10v8H5V9Z" /></svg>
+                内部备注 · 仅你可见
+              </div>
+              <p className="mt-2 text-sm leading-6 text-violet-950/75">{release.source_note}</p>
+            </section>
+          )}
         </div>
       </div>
     </article>
   )
-}
-
-function VersionRule({ version, text }: { version: string; text: string }) {
-  return <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><span className="font-mono text-xs font-bold text-emerald-700">{version}</span><p className="mt-1 text-xs leading-5 text-slate-600">{text}</p></div>
 }
 
 function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
@@ -348,7 +328,7 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
         <Field label="完成内容（每行一项）"><textarea rows={6} value={form.highlights} onChange={e => update('highlights', e.target.value)} className="field" /></Field>
         <Field label="实现与交接重点（每行一项）"><textarea rows={6} value={form.implementationNotes} onChange={e => update('implementationNotes', e.target.value)} className="field" /></Field>
         <Field label="限制与维护提醒（每行一项）"><textarea rows={5} value={form.limitations} onChange={e => update('limitations', e.target.value)} className="field" /></Field>
-        <div className="space-y-4"><Field label="开发时间范围"><input value={form.deploymentRange} onChange={e => update('deploymentRange', e.target.value)} className="field" /></Field><Field label="记录依据"><input value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} className="field" /></Field></div>
+        <div className="space-y-4"><Field label="开发时间范围"><input value={form.deploymentRange} onChange={e => update('deploymentRange', e.target.value)} className="field" /></Field><Field label="内部备注（仅你可见）"><textarea rows={3} value={form.sourceNote} onChange={e => update('sourceNote', e.target.value)} placeholder="例如：为什么会有这个想法、当时遇到了什么问题" className="field" /></Field></div>
       </div>
       <div className="mt-5 flex gap-2"><button disabled={saving} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60">{saving ? '保存中…' : '保存版本'}</button><button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm">取消</button></div>
       <style jsx>{`.field{margin-top:.375rem;width:100%;border-radius:.5rem;border:1px solid rgb(203 213 225);padding:.625rem .75rem;font-weight:400;color:rgb(15 23 42);outline:none}.field:focus{border-color:rgb(16 185 129);box-shadow:0 0 0 2px rgb(209 250 229)}`}</style>

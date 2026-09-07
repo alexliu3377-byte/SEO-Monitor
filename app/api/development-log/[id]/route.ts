@@ -55,7 +55,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         implementation_notes: cleanStringList(body.implementationNotes),
         limitations: cleanStringList(body.limitations),
         deployment_range: cleanText(body.deploymentRange, 100) || null,
-        source_note: cleanText(body.sourceNote, 300) || null,
+        source_note: cleanText(body.sourceNote, 2000) || null,
         created_by: auth.userId,
       })
       .eq('id', id)
