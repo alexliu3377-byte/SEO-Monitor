@@ -78,7 +78,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .upsert({ request_id: id, user_id: caller.id, last_read_at: latestMessageAt }, { onConflict: 'request_id,user_id' })
   }
   return NextResponse.json({
-    messages: [...(data ?? [])].reverse(),
+    messages: [...(data ?? [])].reverse().map(message => ({
+      ...message,
+      is_project_owner: typeof message.author_id === 'string' && canManageDevelopmentLog(message.author_id),
+    })),
     total: count ?? 0,
     page,
     pageSize,
