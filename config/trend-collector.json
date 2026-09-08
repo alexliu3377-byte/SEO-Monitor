@@ -1,0 +1,23 @@
+{
+  "node": {
+    "id": "evern-pc-01",
+    "name": "个人电脑试行节点",
+    "version": "trend-agent-v0.1.0"
+  },
+  "maxResultsPerQuery": 12,
+  "delayBetweenQueriesMs": 8000,
+  "platforms": {
+    "xiaohongshu": {
+      "enabled": true,
+      "queries": ["新游戏", "新手游", "宝藏游戏", "新APP", "宝藏APP", "效率工具", "新软件", "实用工具"]
+    },
+    "douyin": {
+      "enabled": true,
+      "queries": ["新游戏", "新手游", "宝藏游戏", "新APP", "宝藏APP", "效率工具", "新软件", "实用工具"]
+    },
+    "xiaoheihe": {
+      "enabled": false,
+      "queries": []
+    }
+  }
+}

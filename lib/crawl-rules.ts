@@ -241,6 +241,21 @@ export const CRAWL_RULES: RuleSection[] = [
     ],
   },
   {
+    key: 'trend-discovery',
+    title: '趋势发现（内部试行）',
+    badge: '本机 Playwright · 第一阶段手动运行',
+    items: [
+      { label: '触发方式', text: '第一阶段在项目负责人的 Windows 电脑手动执行 npm run trend:collect；先每天运行1次观察一周，确认账号与页面结构稳定后，最多提高到每天4次。后续才迁移到专用电脑和多节点，不由 Vercel 执行浏览器采集' },
+      { label: '平台范围', text: 'v3.0.0 第一阶段先接小红书和抖音网页搜索首屏，小黑盒配置保留但默认关闭，等前两者稳定后再单独适配；每个平台使用隔离的本地 Chrome profile，由使用者人工登录' },
+      { label: '采集范围', text: '只保存公开结果卡片中的标题、简短文字、标签、发布时间（页面有才保存）、互动数字和官方内容链接；链接写入前删除 query/hash，避免保存搜索参数或会话型参数。不下载图片/视频，不抓评论与个人主页，不把 Cookie、密码或浏览器资料上传到系统' },
+      { label: '限流与失败', text: '平台与查询词顺序执行；每个查询最多12条结果，查询之间至少等待8秒。出现登录、验证码、安全验证或访问频繁时立即停止该平台并记录 blocked，不自动绕过验证、不做高频重试、不使用代理池' },
+      { label: '去重规则', text: '原始内容按 platform + external_id 唯一；同一轮快照按 signal_id + run_id 唯一；候选词按标准化文字唯一；词与来源按 signal_id + term_id 唯一。重复采集只更新最后出现时间、最新指标及查询词集合' },
+      { label: '评分口径', text: 'refresh_trend_discovery_terms() 只用首次/最后出现时间、近24小时与前24小时来源数、跨平台数、总来源数和持续天数计算0-100趋势分及可信度，并分为刚出现/升温中/热门/持续出现/降温。百度搜索量、爱站排名不参与发现分数，后续只作为SEO验证层' },
+      { label: '写入表', text: 'trend_collector_nodes（节点健康）、trend_collection_runs（每轮结果）、trend_signals（公开内容摘要）、trend_signal_snapshots（互动数字快照）、trend_terms（候选词与人工审核状态）、trend_signal_terms（词与来源关系）；全部开启RLS并仅由服务端 service role 访问' },
+      { label: '保留与清理', text: '每次采集入库后自动调用 cleanup_trend_discovery_data()：指标快照和运行记录保留30天，原始内容信号保留最近90天；已经标记“加入跟踪”的候选词长期保留，其他失去全部来源的候选词自动删除' },
+    ],
+  },
+  {
     key: 'search',
     title: '站点情报查询',
     badge: '触发方式：页面查询 · 不写入抓取日志',
@@ -282,6 +297,10 @@ export const RETENTION = {
   research_report_sites: '永久保留（随 research_reports 级联删除）',
   site_diagnostics: '永久保留',
   keyword_signal_rollup: '行本身永久保留，但 recent_dates 数组只滚动保留最近30天日期，30天没再出现的词last_seen就不再更新（不会被物理删除，只是查询会自然把它排除在"最近N天"范围外）',
+  trend_collection_runs: '30天（每次采集后自动清理）',
+  trend_signal_snapshots: '30天（每次采集后自动清理）',
+  trend_signals: '最近90天仍出现的公开内容信号',
+  trend_terms: '已加入跟踪的词长期保留；其他没有来源的词自动删除',
   activity_log: '7天（按 logged_at）',
   activity_site_log: '7天（随 activity_log 级联删除）',
 }

@@ -55,6 +55,11 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
       },
       {
+        href: '/trend-discovery',
+        label: '趋势发现',
+        icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m6.364-.364-2.122 2.122M21 12h-3M5.636 5.636l2.122 2.122M3 12h3m6-3a3 3 0 0 0-1.708 5.467A2 2 0 0 1 11 16.17V17h2v-.83a2 2 0 0 1 .708-1.703A3 3 0 0 0 12 9Zm-1 11h2" /></svg>,
+      },
+      {
         href: '/site-intel',
         label: '站点情报',
         icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,

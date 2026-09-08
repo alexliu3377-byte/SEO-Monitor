@@ -31,6 +31,13 @@ import {
   isFeedbackType,
   normalizeSubmittedSite,
 } from '../lib/feedback-access'
+import {
+  computeTrendScore,
+  extractCandidateTerms,
+  isAllowedTrendSourceUrl,
+  normalizeTrendSourceUrl,
+  normalizeTrendTerm,
+} from '../lib/trend-discovery'
 
 const blockedUrls = [
   'file:///etc/passwd',
@@ -162,6 +169,40 @@ test('development log accepts only known statuses and normalizes list input', ()
   assert.equal(isDevelopmentRequestStatus('trial'), true)
   assert.equal(isDevelopmentRequestStatus('unknown'), false)
   assert.deepEqual(cleanStringList([' first ', '', 7, 'second']), ['first', 'second'])
+})
+
+test('trend discovery accepts only minimal links from the selected source platform', () => {
+  assert.equal(isAllowedTrendSourceUrl('xiaohongshu', 'https://www.xiaohongshu.com/explore/abc'), true)
+  assert.equal(isAllowedTrendSourceUrl('douyin', 'https://www.douyin.com/video/123'), true)
+  assert.equal(isAllowedTrendSourceUrl('douyin', 'http://www.douyin.com/video/123'), false)
+  assert.equal(isAllowedTrendSourceUrl('douyin', 'https://douyin.com.example.com/video/123'), false)
+  assert.equal(isAllowedTrendSourceUrl('xiaohongshu', 'file:///etc/passwd'), false)
+  assert.equal(
+    normalizeTrendSourceUrl('xiaohongshu', 'https://www.xiaohongshu.com/explore/abc?xsec_token=private#reply'),
+    'https://www.xiaohongshu.com/explore/abc',
+  )
+})
+
+test('trend discovery extracts explicit social terms without treating broad seeds as candidates', () => {
+  assert.deepEqual(
+    extractCandidateTerms('试玩《星火计划》之后发现这个效率工具很好用 #灵犀助手', ['灵犀助手']),
+    ['灵犀助手', '星火计划']
+  )
+  assert.equal(normalizeTrendTerm('#灵犀助手'), '灵犀助手')
+  assert.equal(normalizeTrendTerm('游戏'), null)
+})
+
+test('trend score rewards fresh cross-platform growth without SEO volume', () => {
+  const now = new Date('2026-09-08T12:00:00.000Z')
+  assert.deepEqual(computeTrendScore({
+    firstSeenAt: new Date('2026-09-08T10:00:00.000Z'),
+    lastSeenAt: now,
+    platformCount: 2,
+    signalCount: 5,
+    recentSignalCount: 4,
+    previousSignalCount: 1,
+    now,
+  }), { score: 77, confidence: 70, stage: 'hot', growthPercent: 300 })
 })
 
 test('Supabase pagination reads beyond the per-request row cap', async () => {

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "trend:setup": "tsx scripts/trend-collector.ts --setup",
+    "trend:collect": "tsx scripts/trend-collector.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

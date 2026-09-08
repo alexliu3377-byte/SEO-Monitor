@@ -6,6 +6,7 @@ export type FeedbackType = typeof FEEDBACK_TYPES[number]
 
 export const FEEDBACK_PAGES = [
   'home', 'charts', 'task-groups', 'group-report', 'research', 'hot-keywords',
+  'trend-discovery',
   'site-intel', 'weight-monitor', 'index-monitor', 'competitor-daily', 'index-pages',
   'sites', 'crawl-log', 'development-log', 'settings', 'feedback',
 ] as const

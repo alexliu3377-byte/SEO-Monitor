@@ -14,6 +14,7 @@
 .env
 .env.local
 .env.*.local
+.trend-browser/
 
 # vercel
 .vercel
