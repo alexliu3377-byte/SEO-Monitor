@@ -143,6 +143,9 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
   const [problemDetails, setProblemDetails] = useState('')
   const [saving, setSaving] = useState(false)
   const [progressError, setProgressError] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const [discussionId, setDiscussionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<FeedbackMessage[]>([])
@@ -184,6 +187,7 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
   function changeScope(next: FeedbackScope) {
     setDiscussionId(null)
     setEditingId(null)
+    setDeletingId(null)
     setPage(1)
     setScope(next)
   }
@@ -304,8 +308,29 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
     }
   }
 
+  async function removeFeedback() {
+    if (!deletingId) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const response = await fetch(`/api/feedback/${deletingId}`, { method: 'DELETE' })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body.error || '反馈删除失败')
+      setDeletingId(null)
+      setNotice('不相关反馈及其留言已经删除。')
+      const nextPage = items.length === 1 && page > 1 ? page - 1 : page
+      if (nextPage !== page) setPage(nextPage)
+      else await load(scope, nextPage, statusFilter, typeFilter)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : '反馈删除失败')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const discussionItem = items.find(item => item.id === discussionId) ?? null
   const editingItem = items.find(item => item.id === editingId) ?? null
+  const deletingItem = items.find(item => item.id === deletingId) ?? null
   const audienceText = viewerRole === 'super'
     ? '你的提交会进入“超管重点”，只对超管开放。'
     : '普通反馈会公开展示处理进度，只有你和项目负责人可以继续回复。'
@@ -359,7 +384,7 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
                         <td className="whitespace-nowrap px-4 py-4"><span className="block text-sm font-medium text-slate-800">{item.created_by_name}</span><span className={`mt-1.5 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${role.className}`}>{role.label}</span></td>
                         <td className="whitespace-nowrap px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${itemStatus.className}`}>{itemStatus.label}</span></td>
                         <td className="px-4 py-4 text-center"><button type="button" onClick={() => void openDiscussion(item.id)} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${item.has_unread ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}><span>{scope === 'super' ? '沟通' : '留言'}</span><span className="rounded-full bg-white/80 px-1.5 py-0.5 text-xs tabular-nums">{item.message_count ?? 0}</span></button></td>
-                        <td className="whitespace-nowrap px-4 py-4 text-right">{canManage ? <button type="button" onClick={() => startEdit(item)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">更新进度</button> : <span className="text-xs text-slate-400">—</span>}</td>
+                        <td className="whitespace-nowrap px-4 py-4 text-right">{canManage ? <div className="inline-flex items-center gap-2"><button type="button" onClick={() => startEdit(item)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">更新进度</button><button type="button" onClick={() => { setDeleteError(''); setDeletingId(item.id) }} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">删除</button></div> : <span className="text-xs text-slate-400">—</span>}</td>
                       </tr>
                     )
                   })}
@@ -412,6 +437,16 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
             <label className="block text-sm font-medium text-slate-700">问题详情<textarea rows={4} value={problemDetails} onChange={event => setProblemDetails(event.target.value)} placeholder="遇到外部限制或暂时无法实现时说明原因" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal" /></label>
             <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" disabled={saving} onClick={() => setEditingId(null)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-40">取消</button><button disabled={saving} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">{saving ? '保存中…' : '保存进度'}</button></div>
           </form>
+        </Modal>
+      )}
+
+      {deletingItem && canManage && (
+        <Modal title="删除这条反馈？" description={deletingItem.title} onClose={() => { if (!deleting) setDeletingId(null) }} width="max-w-lg">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900"><p className="font-semibold">此操作无法撤销</p><p className="mt-1">反馈内容、负责人回复以及全部留言都会永久删除。只建议清理完全无关、测试或恶意提交的内容。</p></div>
+            {deleteError && <div className="rounded-lg border border-red-200 bg-white p-3 text-sm text-red-700">{deleteError}</div>}
+            <div className="flex justify-end gap-2"><button type="button" disabled={deleting} onClick={() => setDeletingId(null)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-40">取消</button><button type="button" disabled={deleting} onClick={() => void removeFeedback()} className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60">{deleting ? '正在删除…' : '确认永久删除'}</button></div>
+          </div>
         </Modal>
       )}
     </div>
