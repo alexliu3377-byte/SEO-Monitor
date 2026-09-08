@@ -4,7 +4,6 @@ import { canManageDevelopmentLog, cleanText } from '@/lib/development-log'
 import {
   canReadFeedbackConversation,
   canReplyFeedbackConversation,
-  isFeedbackMessageType,
   isFeedbackRole,
   type FeedbackRole,
 } from '@/lib/feedback-access'
@@ -115,8 +114,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const body = await req.json().catch(() => null) as Record<string, unknown> | null
   const requestedType = body?.messageType
-  const messageType = feedback.submitter_role === 'super' && isFeedbackMessageType(requestedType)
-    ? requestedType
+  const messageType = feedback.submitter_role === 'super' && requestedType === 'research'
+    ? 'research'
     : 'discussion'
   const content = cleanText(body?.content, 10000)
   if (content.length < 2) return NextResponse.json({ error: '请输入留言内容' }, { status: 400 })

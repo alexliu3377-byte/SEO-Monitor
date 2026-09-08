@@ -109,7 +109,7 @@ begin
   (
     '21000000-0000-4000-8000-000000000004'::uuid,
     '11000000-0000-4000-8000-000000000004'::uuid,
-    v_owner_id, v_owner_name, 'super', 'decision',
+    v_owner_id, v_owner_name, 'super', 'discussion',
     '日志现已区分网络、验证、解析和真实空结果，这条反馈可以作为完成案例保留。',
     now() - interval '1 day'
   ),
@@ -123,7 +123,7 @@ begin
   (
     '21000000-0000-4000-8000-000000000006'::uuid,
     '11000000-0000-4000-8000-000000000005'::uuid,
-    v_super_id, v_super_name, 'super', 'experiment',
+    v_super_id, v_super_name, 'super', 'discussion',
     '建议先用少量公开页面验证内容质量和更新频率，不接入账号，也不做高频采集。',
     now() - interval '45 minutes'
   )

@@ -68,13 +68,6 @@ const PAGE: Record<FeedbackPage, string> = {
   'index-monitor': '收录监控', 'competitor-daily': '竞品日收', 'index-pages': '收录页面', sites: '网站管理',
   'crawl-log': '抓取日志', 'development-log': '开发日志', settings: '账户设置', feedback: '反馈优化',
 }
-const MESSAGE_TYPE: Record<FeedbackMessageType, { label: string; className: string }> = {
-  discussion: { label: '普通讨论', className: 'bg-slate-100 text-slate-700' },
-  research: { label: '调研资料', className: 'bg-indigo-50 text-indigo-700' },
-  experiment: { label: '试行结果', className: 'bg-cyan-50 text-cyan-700' },
-  decision: { label: '决策结论', className: 'bg-emerald-50 text-emerald-700' },
-}
-
 function dateTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -154,8 +147,12 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
   const [messageTotal, setMessageTotal] = useState(0)
   const [messageLoading, setMessageLoading] = useState(false)
   const [messageError, setMessageError] = useState('')
-  const [messageType, setMessageType] = useState<FeedbackMessageType>('discussion')
+  const [sendError, setSendError] = useState('')
   const [messageContent, setMessageContent] = useState('')
+  const [researchContent, setResearchContent] = useState('')
+  const [researchError, setResearchError] = useState('')
+  const [researchComposerOpen, setResearchComposerOpen] = useState(false)
+  const [researchViewer, setResearchViewer] = useState<FeedbackMessage | null>(null)
   const [sendingMessage, setSendingMessage] = useState(false)
   const [canReply, setCanReply] = useState(false)
   const [priorityDiscussion, setPriorityDiscussion] = useState(false)
@@ -217,6 +214,10 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
     setDiscussionId(requestId)
     setMessagePage(1)
     setMessageContent('')
+    setSendError('')
+    setResearchContent('')
+    setResearchComposerOpen(false)
+    setResearchViewer(null)
     setCanReply(false)
     await loadMessages(requestId, 1)
   }
@@ -224,25 +225,34 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
   function closeDiscussion() {
     setDiscussionId(null)
     setMessages([])
+    setSendError('')
+    setResearchComposerOpen(false)
+    setResearchViewer(null)
     void load(scope, page, statusFilter, typeFilter)
   }
 
-  async function sendMessage(event: FormEvent) {
+  async function sendMessage(event: FormEvent, selectedType: 'discussion' | 'research', content: string) {
     event.preventDefault()
     if (!discussionId) return
     setSendingMessage(true)
-    setMessageError('')
+    if (selectedType === 'research') setResearchError('')
+    else setSendError('')
     try {
       const response = await fetch(`/api/feedback/${discussionId}/messages`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageType, content: messageContent }),
+        body: JSON.stringify({ messageType: selectedType, content }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error || '沟通内容发送失败')
-      setMessageContent('')
+      if (selectedType === 'research') {
+        setResearchContent('')
+        setResearchComposerOpen(false)
+      } else setMessageContent('')
       await loadMessages(discussionId, 1)
     } catch (err) {
-      setMessageError(err instanceof Error ? err.message : '沟通内容发送失败')
+      const errorText = err instanceof Error ? err.message : '沟通内容发送失败'
+      if (selectedType === 'research') setResearchError(errorText)
+      else setSendError(errorText)
     } finally {
       setSendingMessage(false)
     }
@@ -418,13 +428,110 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
       {discussionItem && (
         <Modal title={priorityDiscussion ? '超管沟通详情' : '反馈留言详情'} onClose={closeDiscussion} width="max-w-4xl">
           <div className="space-y-4">
-            <h3 className="font-semibold text-slate-900">{priorityDiscussion ? '沟通记录' : '留言记录'}</h3>
             {messageLoading && <div className="h-32 animate-pulse rounded-xl bg-slate-200" />}
             {!messageLoading && messageError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{messageError}</div>}
-            {!messageLoading && !messageError && <div className="min-h-36 rounded-xl bg-slate-200/60 p-4 sm:p-5"><div className="space-y-4"><div className="flex justify-end"><article className="max-w-[86%] rounded-2xl rounded-tr-md bg-emerald-100 px-4 py-3 shadow-sm sm:max-w-[76%]"><h2 className="text-base font-bold leading-6 text-slate-950">{discussionItem.title}</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.details}</p><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>{TYPE[discussionItem.feedback_type].label}</span>{discussionItem.related_page && <span>{PAGE[discussionItem.related_page] ?? discussionItem.related_page}</span>}{discussionItem.submitted_site && <a href={`https://${discussionItem.submitted_site}`} target="_blank" rel="noreferrer" className="font-mono text-emerald-800 hover:underline">{discussionItem.submitted_site} ↗</a>}</div><p className="mt-1.5 text-right text-[11px] text-slate-400">{dateTime(discussionItem.created_at)}</p></article></div>{discussionItem.owner_response && <div className="flex justify-start"><article className="max-w-[82%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm sm:max-w-[72%]"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.owner_response}</p></article></div>}{discussionItem.problem_details && <div className="flex justify-start"><article className="max-w-[82%] rounded-2xl rounded-tl-md border border-red-200 bg-white px-4 py-3 shadow-sm sm:max-w-[72%]"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.problem_details}</p></article></div>}{messages.map(item => { const ownerMessage = item.is_project_owner; const messageMeta = MESSAGE_TYPE[item.message_type]; return <div key={item.id} className={`flex ${ownerMessage ? 'justify-start' : 'justify-end'}`}><article className={`max-w-[82%] rounded-2xl px-4 py-3 shadow-sm sm:max-w-[72%] ${ownerMessage ? 'rounded-tl-md border border-slate-200 bg-white' : 'rounded-tr-md bg-emerald-100'}`}>{priorityDiscussion && <p className="mb-1 text-xs text-slate-500">{messageMeta.label}</p>}<p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{item.content}</p><p className="mt-1.5 text-right text-[11px] text-slate-400">{dateTime(item.created_at)}</p></article></div>})}</div></div>}
+            {!messageLoading && !messageError && (
+              <div className="min-h-36 rounded-xl bg-slate-200/60 p-4 sm:p-5">
+                <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <article className="max-w-[86%] rounded-2xl rounded-tr-md bg-emerald-100 px-4 py-3 shadow-sm sm:max-w-[76%]">
+                      <h2 className="text-base font-bold leading-6 text-slate-950">{discussionItem.title}</h2>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.details}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                        <span>{TYPE[discussionItem.feedback_type].label}</span>
+                        {discussionItem.related_page && <span>{PAGE[discussionItem.related_page] ?? discussionItem.related_page}</span>}
+                        {discussionItem.submitted_site && <a href={`https://${discussionItem.submitted_site}`} target="_blank" rel="noreferrer" className="font-mono text-emerald-800 hover:underline">{discussionItem.submitted_site} ↗</a>}
+                      </div>
+                      <p className="mt-1.5 text-right text-[11px] text-slate-400">{dateTime(discussionItem.created_at)}</p>
+                    </article>
+                  </div>
+                  {discussionItem.owner_response && (
+                    <div className="flex justify-start">
+                      <article className="max-w-[82%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm sm:max-w-[72%]">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.owner_response}</p>
+                      </article>
+                    </div>
+                  )}
+                  {discussionItem.problem_details && (
+                    <div className="flex justify-start">
+                      <article className="max-w-[82%] rounded-2xl rounded-tl-md border border-red-200 bg-white px-4 py-3 shadow-sm sm:max-w-[72%]">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{discussionItem.problem_details}</p>
+                      </article>
+                    </div>
+                  )}
+                  {messages.map(item => {
+                    const ownerMessage = item.is_project_owner
+                    if (item.message_type === 'research') {
+                      return (
+                        <div key={item.id} className={`flex ${ownerMessage ? 'justify-start' : 'justify-end'}`}>
+                          <button
+                            type="button"
+                            onClick={() => setResearchViewer(item)}
+                            className={`group flex w-full max-w-[310px] items-center gap-3 rounded-2xl px-4 py-3 text-left shadow-sm transition sm:max-w-[340px] ${ownerMessage ? 'rounded-tl-md border border-slate-200 bg-white hover:border-emerald-300' : 'rounded-tr-md bg-emerald-100 hover:bg-emerald-200/70'}`}
+                          >
+                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
+                              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5M10 12h5M10 16h5" /></svg>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold text-slate-800">调研资料</span>
+                              <span className="mt-0.5 block text-xs text-slate-400">{dateTime(item.created_at)}</span>
+                            </span>
+                            <span className="text-xs font-medium text-emerald-700 group-hover:text-emerald-800">查看</span>
+                          </button>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={item.id} className={`flex ${ownerMessage ? 'justify-start' : 'justify-end'}`}>
+                        <article className={`max-w-[82%] rounded-2xl px-4 py-3 shadow-sm sm:max-w-[72%] ${ownerMessage ? 'rounded-tl-md border border-slate-200 bg-white' : 'rounded-tr-md bg-emerald-100'}`}>
+                          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">{item.content}</p>
+                          <p className="mt-1.5 text-right text-[11px] text-slate-400">{dateTime(item.created_at)}</p>
+                        </article>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {!messageLoading && !messageError && messageTotal > 20 && <div className="flex items-center justify-between text-xs text-slate-500"><span>第 {messagePage} / {Math.ceil(messageTotal / 20)} 页，共 {messageTotal} 条</span><div className="flex gap-2"><button type="button" disabled={messagePage >= Math.ceil(messageTotal / 20)} onClick={() => void loadMessages(discussionItem.id, messagePage + 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更早记录</button><button type="button" disabled={messagePage <= 1} onClick={() => void loadMessages(discussionItem.id, messagePage - 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更新记录</button></div></div>}
-            {canReply ? <form onSubmit={sendMessage} className="rounded-xl border border-slate-200 bg-white p-4"><div className={`grid gap-3 ${priorityDiscussion ? 'sm:grid-cols-[160px_1fr]' : ''}`}>{priorityDiscussion && <label className="text-sm font-medium text-slate-700">记录类型<select value={messageType} onChange={event => setMessageType(event.target.value as FeedbackMessageType)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal">{Object.entries(MESSAGE_TYPE).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>}<label className="text-sm font-medium text-slate-700">{priorityDiscussion ? '沟通内容' : '回复留言'}<textarea required minLength={2} maxLength={10000} rows={3} value={messageContent} onChange={event => setMessageContent(event.target.value)} placeholder={priorityDiscussion ? '补充调研资料、试行结果或决策结论……' : '补充问题情况或回复处理进展……'} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal" /></label></div><div className="mt-3 flex items-center justify-between gap-3"><p className="text-xs text-slate-400">请勿粘贴账号密码、Cookie 或密钥</p><button disabled={sendingMessage} className="whitespace-nowrap rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{sendingMessage ? '发送中…' : '发送'}</button></div></form> : !messageLoading && !messageError && <p className="border-t border-slate-200 pt-4 text-xs text-slate-500">你可以阅读这段沟通，但只有反馈人和项目负责人可以继续回复。</p>}
+            {canReply ? (
+              <form onSubmit={event => void sendMessage(event, 'discussion', messageContent)} className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+                {sendError && <div className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{sendError}</div>}
+                <div className="flex items-end gap-2">
+                  <textarea required minLength={2} maxLength={10000} rows={2} value={messageContent} onChange={event => setMessageContent(event.target.value)} placeholder="输入回复……" className="min-h-[72px] flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 outline-none focus:border-emerald-500" />
+                  <button disabled={sendingMessage} className="h-10 shrink-0 whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{sendingMessage ? '发送中…' : '发送'}</button>
+                </div>
+                {priorityDiscussion && (
+                  <button type="button" onClick={() => { setResearchError(''); setResearchContent(''); setResearchComposerOpen(true) }} className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-emerald-700">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5M10 12h5M10 16h5" /></svg>
+                    添加调研资料
+                  </button>
+                )}
+              </form>
+            ) : !messageLoading && !messageError && <p className="border-t border-slate-200 pt-4 text-xs text-slate-500">你可以阅读这段沟通，但只有反馈人和项目负责人可以继续回复。</p>}
           </div>
+        </Modal>
+      )}
+
+      {researchViewer && (
+        <Modal title="调研资料" onClose={() => setResearchViewer(null)} width="max-w-2xl">
+          <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-800">{researchViewer.content}</p>
+            <p className="mt-4 text-right text-xs text-slate-400">{dateTime(researchViewer.created_at)}</p>
+          </article>
+        </Modal>
+      )}
+
+      {researchComposerOpen && discussionItem && priorityDiscussion && (
+        <Modal title="添加调研资料" onClose={() => { if (!sendingMessage) setResearchComposerOpen(false) }} width="max-w-2xl">
+          <form onSubmit={event => void sendMessage(event, 'research', researchContent)} className="space-y-4">
+            {researchError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{researchError}</div>}
+            <textarea autoFocus required minLength={2} maxLength={10000} rows={10} value={researchContent} onChange={event => setResearchContent(event.target.value)} placeholder="整理调研内容……" className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-7 outline-none focus:border-emerald-500" />
+            <div className="flex justify-end gap-2">
+              <button type="button" disabled={sendingMessage} onClick={() => setResearchComposerOpen(false)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-40">取消</button>
+              <button disabled={sendingMessage} className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">{sendingMessage ? '保存中…' : '保存资料'}</button>
+            </div>
+          </form>
         </Modal>
       )}
 
