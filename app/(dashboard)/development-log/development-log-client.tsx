@@ -60,8 +60,8 @@ function ReleaseDetails({ implementation, limitations }: { implementation: strin
   return (
     <details className="group mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
       <summary className="relative grid cursor-pointer list-none gap-2 px-4 py-3 pr-11 text-sm font-semibold text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset [&::-webkit-details-marker]:hidden sm:grid-cols-2">
-        <span>实现方式与交接重点 <span className="font-normal text-slate-400">({implementation.length})</span></span>
-        <span>限制与维护提醒 <span className="font-normal text-slate-400">({limitations.length})</span></span>
+        <span className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2"><span>实现方式与交接重点</span><span className="min-w-6 text-right font-mono text-xs font-normal tabular-nums text-slate-400">{implementation.length}</span></span>
+        <span className="flex items-center justify-between gap-3 rounded-lg bg-amber-50/70 px-3 py-2"><span>限制与维护提醒</span><span className="min-w-6 text-right font-mono text-xs font-normal tabular-nums text-amber-600/70">{limitations.length}</span></span>
         <svg viewBox="0 0 20 20" className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 7.5 5 5 5-5" /></svg>
       </summary>
       <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2">

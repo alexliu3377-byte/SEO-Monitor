@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { cleanText, canManageDevelopmentLog } from '@/lib/development-log'
+import { cleanText, canManageDevelopmentLog, isDevelopmentRequestStatus } from '@/lib/development-log'
 import {
   ACTIVE_FEEDBACK_STATUSES,
   feedbackScopeFor,
@@ -52,28 +52,36 @@ export async function GET(req: Request) {
   const page = positiveInteger(params.get('page'), 1, 100_000)
   const pageSize = positiveInteger(params.get('pageSize'), 10, 50)
   const from = (page - 1) * pageSize
+  const status = params.get('status') ?? ''
+  const feedbackType = params.get('type') ?? ''
 
-  let query = service
-    .from('development_requests')
-    .select('*', { count: 'exact' })
+  if (status && !isDevelopmentRequestStatus(status)) {
+    return NextResponse.json({ error: '反馈状态筛选无效' }, { status: 400 })
+  }
+  if (feedbackType && !isFeedbackType(feedbackType)) {
+    return NextResponse.json({ error: '反馈类型筛选无效' }, { status: 400 })
+  }
 
-  if (scope === 'mine') query = query.eq('created_by', caller.id)
-  else if (scope === 'super') query = query.eq('submitter_role', 'super')
-  else query = query.in('submitter_role', ['normal', 'admin'])
-
-  const { data, error, count } = await query
-    .order('created_at', { ascending: false })
-    .range(from, from + pageSize - 1)
+  const { data, error } = await service.rpc('get_feedback_requests_page', {
+    p_scope: scope,
+    p_viewer_id: caller.id,
+    p_status: status,
+    p_feedback_type: feedbackType,
+    p_offset: from,
+    p_limit: pageSize,
+  })
 
   if (error) {
-    const missingMigration = error.code === '42703'
+    const missingMigration = error.code === '42703' || error.code === '42883' || error.code === '42P01'
     return NextResponse.json({
-      error: missingMigration ? '反馈角色数据库迁移尚未运行' : '反馈读取失败，请稍后重试',
+      error: missingMigration ? '反馈列表数据库迁移尚未运行' : '反馈读取失败，请稍后重试',
     }, { status: missingMigration ? 503 : 500 })
   }
 
+  const result = (data ?? {}) as { requests?: unknown[]; total?: number }
+
   return NextResponse.json({
-    requests: data ?? [], total: count ?? 0, page, pageSize, scope,
+    requests: result.requests ?? [], total: result.total ?? 0, page, pageSize, scope,
     viewerRole: caller.role,
     canManage: canManageDevelopmentLog(caller.id),
     limits: feedbackSubmissionLimits(caller.role),

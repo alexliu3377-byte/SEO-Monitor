@@ -71,6 +71,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const missingMigration = error.code === '42P01' || error.code === '42703'
     return NextResponse.json({ error: missingMigration ? '反馈留言板数据库迁移尚未运行' : '留言读取失败' }, { status: missingMigration ? 503 : 500 })
   }
+  if (page === 1 && data?.length) {
+    const latestMessageAt = data[0].created_at
+    await service
+      .from('development_request_message_reads')
+      .upsert({ request_id: id, user_id: caller.id, last_read_at: latestMessageAt }, { onConflict: 'request_id,user_id' })
+  }
   return NextResponse.json({
     messages: [...(data ?? [])].reverse(),
     total: count ?? 0,
