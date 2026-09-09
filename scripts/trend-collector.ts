@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomInt, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
@@ -69,6 +69,17 @@ function loadConfig(): CollectorConfig {
   config.maxResultsPerQuery = Math.min(30, Math.max(1, config.maxResultsPerQuery || 12))
   config.delayBetweenQueriesMs = Math.min(60_000, Math.max(5_000, config.delayBetweenQueriesMs || 8_000))
   return config
+}
+
+function shuffledForRun<T>(values: readonly T[]): T[] {
+  const shuffled = [...values]
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomInt(index + 1)
+    const current = shuffled[index]
+    shuffled[index] = shuffled[swapIndex]
+    shuffled[swapIndex] = current
+  }
+  return shuffled
 }
 
 async function loadRemoteQueries(config: CollectorConfig): Promise<void> {
@@ -389,7 +400,9 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
   try {
     context = await launchPlatformBrowser(platform)
     const page = context.pages()[0] ?? await context.newPage()
-    for (const query of config.platforms[platform].queries) {
+    const queries = shuffledForRun(config.platforms[platform].queries)
+    console.log(`[${PLATFORM_NAME[platform]}] 本轮随机顺序：${queries.join(' → ')}`)
+    for (const query of queries) {
       console.log(`[${PLATFORM_NAME[platform]}] 正在检查：${query}`)
       const rows = await collectQuery(page, platform, query, config.maxResultsPerQuery)
       for (const row of rows) {
@@ -439,7 +452,7 @@ async function main() {
     return
   }
   await loadRemoteQueries(config)
-  const platforms = parsePlatformArgument(config)
+  const platforms = shuffledForRun(parsePlatformArgument(config))
   for (const platform of platforms) await collectPlatform(config, platform)
 }
 
