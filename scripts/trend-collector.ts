@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
-import { chromium, type BrowserContext, type Page } from 'playwright'
+import { chromium, type BrowserContext, type Page, type Response as PlaywrightResponse } from 'playwright'
 import {
   cleanTrendText,
   extractCandidateTerms,
@@ -42,7 +42,6 @@ const HOME_URLS: Record<TrendPlatform, string> = {
 
 const RESULT_LINK_SELECTORS: Partial<Record<TrendPlatform, string>> = {
   xiaohongshu: 'a[href*="/explore/"], a[href*="/discovery/item/"]',
-  douyin: 'a[href*="/video/"]',
 }
 
 class CollectorBlockedError extends Error {}
@@ -130,6 +129,13 @@ function parseMetrics(text: string): TrendMetrics {
   return metrics
 }
 
+function safeMetric(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) && parsed >= 0
+    ? Math.min(Math.round(parsed), 2_000_000_000)
+    : undefined
+}
+
 function extractTags(text: string): string[] {
   return [...text.matchAll(/#([\p{L}\p{N}_·-]{2,40})/gu)]
     .map(match => cleanTrendText(match[1], 40))
@@ -168,7 +174,89 @@ async function cardText(link: ReturnType<Page['locator']>): Promise<string> {
   }).catch(() => '')
 }
 
+function parseDouyinSearchPayload(
+  payload: unknown,
+  query: string,
+  maxResults: number,
+  collectedAt: string,
+): CollectedSignal[] {
+  const results = new Map<string, CollectedSignal>()
+
+  function visit(value: unknown, depth = 0) {
+    if (depth > 8 || results.size >= maxResults || !value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child, depth + 1)
+      return
+    }
+
+    const row = value as Record<string, unknown>
+    const awemeId = typeof row.aweme_id === 'string' && /^\d{10,30}$/.test(row.aweme_id)
+      ? row.aweme_id
+      : null
+    if (awemeId) {
+      const title = cleanTrendText(row.desc, 500)
+      const tags = extractTags(title)
+      const candidateTerms = extractCandidateTerms(title, tags)
+      if (title.length >= 2 && candidateTerms.length > 0) {
+        const statistics = row.statistics && typeof row.statistics === 'object' && !Array.isArray(row.statistics)
+          ? row.statistics as Record<string, unknown>
+          : {}
+        const metrics: TrendMetrics = {}
+        const likes = safeMetric(statistics.digg_count)
+        const comments = safeMetric(statistics.comment_count)
+        const shares = safeMetric(statistics.share_count)
+        const collects = safeMetric(statistics.collect_count)
+        const views = safeMetric(statistics.play_count)
+        if (likes !== undefined) metrics.likes = likes
+        if (comments !== undefined) metrics.comments = comments
+        if (shares !== undefined) metrics.shares = shares
+        if (collects !== undefined) metrics.collects = collects
+        if (views !== undefined && views > 0) metrics.views = views
+
+        const createTime = safeMetric(row.create_time)
+        const publishedAt = createTime && createTime > 1_000_000_000
+          ? new Date(createTime * 1000).toISOString()
+          : null
+        results.set(awemeId, {
+          externalId: awemeId,
+          sourceUrl: `https://www.douyin.com/video/${awemeId}`,
+          title,
+          excerpt: null,
+          tags,
+          candidateTerms,
+          queryTerm: query,
+          publishedAt,
+          collectedAt,
+          metrics,
+        })
+      }
+      return
+    }
+
+    for (const child of Object.values(row)) visit(child, depth + 1)
+  }
+
+  visit(payload)
+  return [...results.values()]
+}
+
+async function collectDouyinQuery(page: Page, query: string, maxResults: number): Promise<CollectedSignal[]> {
+  const apiResponse = page.waitForResponse(
+    response => response.url().includes('/aweme/v1/web/general/search/single/') && response.status() === 200,
+    { timeout: 20_000 },
+  ).catch(() => null as PlaywrightResponse | null)
+
+  await page.goto(searchUrl('douyin', query), { waitUntil: 'domcontentloaded', timeout: 45_000 })
+  await page.waitForTimeout(5_000)
+  await detectBlockedPage(page)
+  const response = await apiResponse
+  if (!response) return []
+  const payload = await response.json().catch(() => null)
+  return parseDouyinSearchPayload(payload, query, maxResults, new Date().toISOString())
+}
+
 async function collectQuery(page: Page, platform: TrendPlatform, query: string, maxResults: number): Promise<CollectedSignal[]> {
+  if (platform === 'douyin') return collectDouyinQuery(page, query, maxResults)
   const selector = RESULT_LINK_SELECTORS[platform]
   if (!selector) return []
   await page.goto(searchUrl(platform, query), { waitUntil: 'domcontentloaded', timeout: 45_000 })

@@ -35,6 +35,8 @@ const TERM_STOP_WORDS = new Set([
   'app', 'android', 'ios', 'iphone', 'ipad', 'windows', 'mac',
   '游戏', '手游', '软件', '应用', '工具', '版本', '更新', '下载', '推荐',
   '体验', '教程', '攻略', '今天', '最新', '一个', '这个', '什么', '怎么',
+  'app推荐', '宝藏app', '软件分享', '手游推荐', '手机技巧', '玩机技巧',
+  '必备软件推荐', '工具箱', '学生党', '真实生活分享计划',
 ])
 
 export function isTrendPlatform(value: unknown): value is TrendPlatform {
