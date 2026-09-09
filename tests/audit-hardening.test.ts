@@ -35,6 +35,7 @@ import {
   computeTrendScore,
   extractCandidateTerms,
   isAllowedTrendSourceUrl,
+  normalizeTrendQueries,
   normalizeTrendSourceUrl,
   normalizeTrendTerm,
 } from '../lib/trend-discovery'
@@ -190,6 +191,16 @@ test('trend discovery extracts explicit social terms without treating broad seed
   )
   assert.equal(normalizeTrendTerm('#灵犀助手'), '灵犀助手')
   assert.equal(normalizeTrendTerm('游戏'), null)
+})
+
+test('trend collection queries are trimmed, deduplicated and platform limited', () => {
+  assert.deepEqual(
+    normalizeTrendQueries('xiaohongshu', [' 新手游 ', '效率   工具', '新手游']),
+    ['新手游', '效率 工具']
+  )
+  assert.equal(normalizeTrendQueries('douyin', []), null)
+  assert.equal(normalizeTrendQueries('douyin', ['一']), null)
+  assert.equal(normalizeTrendQueries('douyin', ['词一', '词二', '词三', '词四', '词五']), null)
 })
 
 test('trend score rewards fresh cross-platform growth without SEO volume', () => {

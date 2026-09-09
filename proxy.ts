@@ -33,6 +33,7 @@ export async function proxy(request: NextRequest) {
     '/api/hot-radar/refresh',
     '/api/tracking-cache/refresh',
     '/api/trend-discovery/ingest',
+    '/api/trend-discovery/collector-config',
   ].some(path => pathname === path || pathname.startsWith(`${path}/`))
   const isPublicApi = pathname.startsWith('/api/auth/') || allowsServiceAuth
 

@@ -8,6 +8,10 @@
 
 `supabase/migrations/20260908_trend_discovery_foundation.sql`
 
+随后运行采集词设置迁移：
+
+`supabase/migrations/20260909_trend_collection_queries.sql`
+
 ## 2. 配置网站接收密钥
 
 生成一个至少 32 位的随机字符串，并在 Vercel 项目环境变量中新增：
@@ -25,7 +29,9 @@
 
 `.env.trend.local` 和 `.trend-browser` 都已被 Git 忽略。
 
-主题和频率相关设置位于 `config/trend-collector.json`。第一阶段小红书每轮检查 8 个主题，抖音根据首次真实运行的频率提示缩减为 4 个主题；每个主题最多读取 12 条首屏结果。
+每个主题最多读取 12 条首屏结果，查询间隔等本机保护设置位于 `config/trend-collector.json`。
+
+搜索什么词不需要再修改配置文件。项目负责人打开网站的“趋势发现”，点击右上角“设置采集词”，可以分别维护小红书和抖音的搜索入口词。采集器每次运行前会自动读取网站上保存的最新设置；网站暂时无法连接时，才会使用 `config/trend-collector.json` 中的备用词。
 
 ## 4. 首次登录
 
@@ -48,6 +54,8 @@ npm run trend:collect -- --platform douyin
 ```
 
 完成后打开网站侧边栏的“趋势发现”。页面会显示节点状态、候选词、趋势分和来源链接。
+
+修改采集词后不需要重新登录或重新部署。保存设置，再运行下一次 `npm run trend:collect` 即会生效。终端出现“已读取网站采集词”即表示读取成功。
 
 第一周先每天手动运行一次并观察结果。确认选择器和数据质量稳定后，再配置 Windows 任务计划每天运行 4 次。
 

@@ -1,6 +1,14 @@
 export const TREND_PLATFORMS = ['xiaohongshu', 'douyin', 'xiaoheihe'] as const
 export type TrendPlatform = typeof TREND_PLATFORMS[number]
 
+export const TREND_QUERY_PLATFORMS = ['xiaohongshu', 'douyin'] as const
+export type TrendQueryPlatform = typeof TREND_QUERY_PLATFORMS[number]
+
+export const TREND_QUERY_LIMITS: Record<TrendQueryPlatform, number> = {
+  xiaohongshu: 8,
+  douyin: 4,
+}
+
 export const TREND_STAGES = ['new', 'warming', 'hot', 'persistent', 'cooling'] as const
 export type TrendStage = typeof TREND_STAGES[number]
 
@@ -41,6 +49,29 @@ const TERM_STOP_WORDS = new Set([
 
 export function isTrendPlatform(value: unknown): value is TrendPlatform {
   return typeof value === 'string' && (TREND_PLATFORMS as readonly string[]).includes(value)
+}
+
+export function isTrendQueryPlatform(value: unknown): value is TrendQueryPlatform {
+  return typeof value === 'string' && (TREND_QUERY_PLATFORMS as readonly string[]).includes(value)
+}
+
+export function normalizeTrendQueries(platform: TrendQueryPlatform, value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const limit = TREND_QUERY_LIMITS[platform]
+  if (value.length < 1 || value.length > limit) return null
+
+  const queries: string[] = []
+  const seen = new Set<string>()
+  for (const raw of value) {
+    if (typeof raw !== 'string') return null
+    const query = cleanTrendText(raw, 40)
+    if (query.length < 2) return null
+    const normalized = query.toLocaleLowerCase('zh-CN')
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    queries.push(query)
+  }
+  return queries.length >= 1 && queries.length <= limit ? queries : null
 }
 
 export function isTrendStage(value: unknown): value is TrendStage {

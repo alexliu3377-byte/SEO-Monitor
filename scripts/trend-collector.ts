@@ -8,6 +8,7 @@ import {
   cleanTrendText,
   extractCandidateTerms,
   isTrendPlatform,
+  normalizeTrendQueries,
   normalizeTrendSourceUrl,
   type TrendMetrics,
   type TrendPlatform,
@@ -68,6 +69,37 @@ function loadConfig(): CollectorConfig {
   config.maxResultsPerQuery = Math.min(30, Math.max(1, config.maxResultsPerQuery || 12))
   config.delayBetweenQueriesMs = Math.min(60_000, Math.max(5_000, config.delayBetweenQueriesMs || 8_000))
   return config
+}
+
+async function loadRemoteQueries(config: CollectorConfig): Promise<void> {
+  const ingestUrl = process.env.TREND_INGEST_URL?.trim()
+  const secret = process.env.TREND_INGEST_SECRET?.trim()
+  if (!ingestUrl || !secret || secret.length < 24) return
+
+  try {
+    const ingest = new URL(ingestUrl)
+    const endpoint = new URL('/api/trend-discovery/collector-config', ingest.origin)
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${secret}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+    })
+    const data = await response.json().catch(() => null) as {
+      platforms?: { xiaohongshu?: unknown; douyin?: unknown }
+      error?: unknown
+    } | null
+    if (!response.ok) throw new Error(`HTTP ${response.status}：${String(data?.error || '未知错误')}`)
+
+    const xiaohongshu = normalizeTrendQueries('xiaohongshu', data?.platforms?.xiaohongshu)
+    const douyin = normalizeTrendQueries('douyin', data?.platforms?.douyin)
+    if (!xiaohongshu || !douyin) throw new Error('网站返回的采集词格式无效')
+    config.platforms.xiaohongshu.queries = xiaohongshu
+    config.platforms.douyin.queries = douyin
+    console.log(`已读取网站采集词：小红书 ${xiaohongshu.length} 个，抖音 ${douyin.length} 个`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`采集词读取失败，将使用本机备用配置：${message}`)
+  }
 }
 
 function parsePlatformArgument(config: CollectorConfig): TrendPlatform[] {
@@ -400,12 +432,14 @@ const PLATFORM_NAME: Record<TrendPlatform, string> = {
 async function main() {
   loadLocalEnvironment()
   const config = loadConfig()
-  const platforms = parsePlatformArgument(config)
   if (process.argv.includes('--setup')) {
+    const platforms = parsePlatformArgument(config)
     for (const platform of platforms) await setupPlatform(platform)
     console.log('登录状态已经保存在本机独立资料目录中。')
     return
   }
+  await loadRemoteQueries(config)
+  const platforms = parsePlatformArgument(config)
   for (const platform of platforms) await collectPlatform(config, platform)
 }
 

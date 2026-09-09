@@ -1,7 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { TrendPlatform, TrendReviewStatus, TrendStage } from '@/lib/trend-discovery'
+import {
+  TREND_QUERY_LIMITS,
+  type TrendPlatform,
+  type TrendQueryPlatform,
+  type TrendReviewStatus,
+  type TrendStage,
+} from '@/lib/trend-discovery'
 
 type Role = 'normal' | 'admin' | 'super'
 
@@ -52,6 +58,7 @@ type TrendSource = {
 }
 
 type Summary = Record<'new' | 'warming' | 'hot' | 'persistent' | 'tracked', number>
+type TrendQueryDrafts = Record<TrendQueryPlatform, string>
 
 const PLATFORM_LABELS: Record<TrendPlatform, string> = {
   xiaohongshu: '小红书',
@@ -145,6 +152,12 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   const [sources, setSources] = useState<TrendSource[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [queryDrafts, setQueryDrafts] = useState<TrendQueryDrafts>({ xiaohongshu: '', douyin: '' })
 
   const selectedTab = useMemo(() => TABS.find(tab => tab.key === activeTab) ?? TABS[0], [activeTab])
   const pageSize = 20
@@ -227,6 +240,62 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
     }
   }
 
+  async function openSettings() {
+    setSettingsOpen(true)
+    setSettingsLoading(true)
+    setSettingsError('')
+    setSettingsSaved(false)
+    try {
+      const response = await fetch('/api/trend-discovery/settings', { cache: 'no-store' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '采集词设置读取失败')
+      setQueryDrafts({
+        xiaohongshu: (data.platforms?.xiaohongshu ?? []).join('\n'),
+        douyin: (data.platforms?.douyin ?? []).join('\n'),
+      })
+    } catch (settingsLoadError) {
+      setSettingsError((settingsLoadError as Error).message)
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  function queryLines(platformName: TrendQueryPlatform) {
+    return queryDrafts[platformName]
+      .split(/\r?\n/)
+      .map(value => value.trim())
+      .filter(Boolean)
+  }
+
+  async function saveSettings() {
+    setSettingsSaving(true)
+    setSettingsError('')
+    setSettingsSaved(false)
+    try {
+      const response = await fetch('/api/trend-discovery/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platforms: {
+            xiaohongshu: queryLines('xiaohongshu'),
+            douyin: queryLines('douyin'),
+          },
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '采集词设置保存失败')
+      setQueryDrafts({
+        xiaohongshu: (data.platforms?.xiaohongshu ?? []).join('\n'),
+        douyin: (data.platforms?.douyin ?? []).join('\n'),
+      })
+      setSettingsSaved(true)
+    } catch (settingsSaveError) {
+      setSettingsError((settingsSaveError as Error).message)
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
   return (
     <div className="min-h-full bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
@@ -236,12 +305,20 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">趋势发现</h1>
             <p className="mt-2 text-sm text-slate-500">在百度数据出现以前，从公开社媒内容中发现正在形成的新词。</p>
           </div>
-          {initialRole === 'super' && (
-            <div className="hidden text-right sm:block">
-              <p className="text-xs text-slate-400">当前阶段</p>
-              <p className="mt-1 text-sm font-semibold text-slate-700">个人电脑低频试行</p>
-            </div>
-          )}
+          <div className="flex flex-none items-center gap-4">
+            {canManage && (
+              <button type="button" onClick={openSettings} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" /></svg>
+                设置采集词
+              </button>
+            )}
+            {initialRole === 'super' && (
+              <div className="hidden text-right lg:block">
+                <p className="text-xs text-slate-400">当前阶段</p>
+                <p className="mt-1 text-sm font-semibold text-slate-700">个人电脑低频试行</p>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -398,6 +475,69 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
           )}
         </section>
       </main>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="trend-settings-title" onMouseDown={event => { if (event.currentTarget === event.target && !settingsSaving) setSettingsOpen(false) }}>
+          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+              <div>
+                <h2 id="trend-settings-title" className="text-xl font-bold text-slate-950">设置采集词</h2>
+                <p className="mt-1 text-sm text-slate-500">每行一个搜索入口词，下次运行本机采集器时自动使用。</p>
+              </div>
+              <button type="button" aria-label="关闭" disabled={settingsSaving} onClick={() => setSettingsOpen(false)} className="flex h-10 w-10 flex-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeWidth={2} d="m6 6 12 12M18 6 6 18" /></svg>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-5 py-5 sm:px-6">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-6 text-emerald-900">
+                这里设置的是平台搜索词，例如“新手游”或“效率工具”。系统会从搜索结果中继续发现游戏名、APP 名和新表达。
+              </div>
+
+              {settingsLoading ? (
+                <div className="py-16 text-center text-sm text-slate-400">正在读取采集词…</div>
+              ) : (
+                <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                  {(['xiaohongshu', 'douyin'] as TrendQueryPlatform[]).map(platformName => {
+                    const count = queryLines(platformName).length
+                    const limit = TREND_QUERY_LIMITS[platformName]
+                    return (
+                      <label key={platformName} className="block">
+                        <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-800">
+                          <span>{PLATFORM_LABELS[platformName]}</span>
+                          <span className={count > limit || count < 1 ? 'text-red-500' : 'text-slate-400'}>{count} / {limit}</span>
+                        </span>
+                        <textarea
+                          value={queryDrafts[platformName]}
+                          onChange={event => {
+                            setQueryDrafts(current => ({ ...current, [platformName]: event.target.value }))
+                            setSettingsSaved(false)
+                          }}
+                          rows={9}
+                          maxLength={500}
+                          placeholder={platformName === 'xiaohongshu' ? '新手游\n宝藏APP\n效率工具' : '新游戏\n宝藏游戏\n新APP'}
+                          className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm leading-7 text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                        />
+                        <span className="mt-1.5 block text-xs text-slate-400">每个词 2–40 个字符，顺序就是采集顺序。</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+
+              {settingsError && <p className="mt-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{settingsError}</p>}
+              {settingsSaved && <p className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">已保存。本机采集器下次运行时会自动读取这些词。</p>}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
+              <button type="button" disabled={settingsSaving} onClick={() => setSettingsOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">关闭</button>
+              <button type="button" disabled={settingsLoading || settingsSaving} onClick={saveSettings} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                {settingsSaving ? '保存中…' : '保存设置'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="trend-detail-title" onMouseDown={event => { if (event.currentTarget === event.target) setSelected(null) }}>
