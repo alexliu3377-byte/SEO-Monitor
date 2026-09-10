@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
     "trend:setup": "tsx scripts/trend-collector.ts --setup",
-    "trend:collect": "tsx scripts/trend-collector.ts"
+    "trend:collect": "tsx scripts/trend-collector.ts",
+    "app-updates:crawl": "tsx scripts/app-update-crawl.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

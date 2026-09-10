@@ -123,6 +123,15 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ]
 
+const APP_UPDATE_ITEMS: NavItem[] = [
+  {
+    href: '/app-updates',
+    label: '更新工作台',
+    superOnly: true,
+    icon: <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 7l2-3h12l2 3M5 7v12a1 1 0 001 1h12a1 1 0 001-1V7M9 11h6m-6 4h4" /></svg>,
+  },
+]
+
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -184,7 +193,8 @@ export default function Sidebar() {
     router.refresh()
   }
 
-  const allItems = NAV_GROUPS.flatMap(group => group.items).filter(item => {
+  const isAppUpdateCenter = pathname.startsWith('/app-updates')
+  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : NAV_GROUPS.flatMap(group => group.items)).filter(item => {
     if (item.superOnly && role !== 'super') return false
     if (item.hideNormal && role === 'normal') return false
     return true
@@ -225,20 +235,40 @@ export default function Sidebar() {
         <div className="flex items-center gap-2.5">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 4px 12px rgba(22,163,74,0.35)' }}
+            style={{
+              background: isAppUpdateCenter
+                ? 'linear-gradient(135deg, #2563eb, #1d4ed8)'
+                : 'linear-gradient(135deg, #16a34a, #15803d)',
+              boxShadow: isAppUpdateCenter
+                ? '0 4px 12px rgba(37,99,235,0.35)'
+                : '0 4px 12px rgba(22,163,74,0.35)',
+            }}
           >
             <svg className="w-[18px] h-[18px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           </div>
           <div>
-            <p className="text-white font-semibold text-sm leading-tight">奇心内容发布系统</p>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>内容运营后台</p>
+            <p className="text-white font-semibold text-sm leading-tight">
+              {isAppUpdateCenter ? '奇心应用更新中心' : '奇心内容发布系统'}
+            </p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              {isAppUpdateCenter ? 'V4.0 超管实验' : '内容运营后台'}
+            </p>
           </div>
           <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
+        {role === 'super' && (
+          <Link
+            href={isAppUpdateCenter ? '/' : '/app-updates'}
+            className="mt-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
+          >
+            <span>{isAppUpdateCenter ? '返回内容发布系统' : '进入应用更新中心'}</span>
+            {!isAppUpdateCenter && <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] text-blue-200">实验</span>}
+          </Link>
+        )}
       </div>
 
       {/* ── Nav ── */}
@@ -254,7 +284,7 @@ export default function Sidebar() {
                   aria-current={isParentActive ? 'page' : undefined}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isParentActive
-                      ? 'bg-green-600 text-white'
+                      ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
                       : hasActiveChild
                       ? 'text-white/80 hover:bg-white/5'
                       : 'text-white/65 hover:bg-white/8 hover:text-white/95'
@@ -273,7 +303,7 @@ export default function Sidebar() {
                         aria-current={isChildActive ? 'page' : undefined}
                         className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                           isChildActive
-                            ? 'bg-green-600 text-white'
+                            ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
                             : 'text-white/60 hover:bg-white/8 hover:text-white/90'
                         }`}
                       >
@@ -297,7 +327,7 @@ export default function Sidebar() {
               aria-current={isActive ? 'page' : undefined}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 isActive
-                  ? 'bg-green-600 text-white'
+                  ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
                   : 'text-white/65 hover:bg-white/8 hover:text-white/95'
               }`}
             >

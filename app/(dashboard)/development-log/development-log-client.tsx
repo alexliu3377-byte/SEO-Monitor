@@ -10,6 +10,7 @@ type DevelopmentRelease = {
   release_date: string
   summary: string
   highlights: string[]
+  experimental_features: string[]
   implementation_notes: string[]
   limitations: string[]
   source_note: string | null
@@ -20,6 +21,7 @@ type ReleaseForm = {
   releaseDate: string
   summary: string
   highlights: string
+  experimentalFeatures: string
   implementationNotes: string
   limitations: string
   sourceNote: string
@@ -28,7 +30,7 @@ type ReleaseForm = {
 const PAGE_SIZE = 10
 const EMPTY_RELEASE: ReleaseForm = {
   version: '', title: '', releaseDate: '', summary: '',
-  highlights: '', implementationNotes: '', limitations: '', sourceNote: '',
+  highlights: '', experimentalFeatures: '', implementationNotes: '', limitations: '', sourceNote: '',
 }
 function lines(value: string) {
   return value.split('\n').map(item => item.trim()).filter(Boolean)
@@ -52,6 +54,26 @@ function HighlightList({ items }: { items: string[] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+function ExperimentalList({ items }: { items: string[] }) {
+  if (!items.length) return null
+  return (
+    <section className="mt-5 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[11px] font-bold text-white">实验中</span>
+        <p className="text-xs text-blue-800/70">已开放试用，仍会根据实际结果调整</p>
+      </div>
+      <ul className="mt-3 space-y-2.5">
+        {items.map((item, index) => (
+          <li key={`${index}-${item}`} className="flex gap-2.5 text-sm leading-6 text-blue-950/80">
+            <span aria-hidden="true" className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
@@ -128,6 +150,7 @@ export default function DevelopmentLogClient() {
     setForm({
       version: release.version, title: release.title, releaseDate: release.release_date,
       summary: release.summary, highlights: release.highlights.join('\n'),
+      experimentalFeatures: (release.experimental_features ?? []).join('\n'),
       implementationNotes: release.implementation_notes.join('\n'), limitations: release.limitations.join('\n'),
       sourceNote: release.source_note ?? '',
     })
@@ -141,6 +164,7 @@ export default function DevelopmentLogClient() {
     try {
       const payload = {
         kind: 'release', ...form, status: 'completed', highlights: lines(form.highlights),
+        experimentalFeatures: lines(form.experimentalFeatures),
         implementationNotes: lines(form.implementationNotes), limitations: lines(form.limitations),
       }
       const response = await fetch(editingId ? `/api/development-log/${editingId}` : '/api/development-log', {
@@ -249,6 +273,8 @@ function ReleaseTimelineItem({ release, canManage, onEdit }: { release: Developm
             </section>
           )}
 
+          <ExperimentalList items={release.experimental_features ?? []} />
+
           <ReleaseDetails implementation={release.implementation_notes ?? []} limitations={release.limitations ?? []} />
 
           {release.source_note && (
@@ -316,6 +342,7 @@ function ReleaseEditor({ form, setForm, saving, editing, onSubmit, onCancel }: {
 
           <EditorSection number="02" title="版本内容" description="这里会直接展示给其他超管；每行填写一项，页面会自动编号。">
             <Field label="本版本完成了什么"><textarea rows={6} value={form.highlights} onChange={e => update('highlights', e.target.value)} placeholder={'例如：\n新增分组任务认领\n新增成效追踪报告\n优化大型报告加载速度'} className="field" /></Field>
+            <div className="mt-4"><Field label="实验中" hint="每行一项；会与正式完成内容分开展示"><textarea rows={4} value={form.experimentalFeatures} onChange={e => update('experimentalFeatures', e.target.value)} placeholder={'例如：\n趋势发现：继续验证候选词价值\n应用更新中心：继续验证页面识别准确率'} className="field" /></Field></div>
           </EditorSection>
 
           <EditorSection number="03" title="交接说明" description="帮助以后维护系统的人理解实现方式，以及仍需留意的问题。">

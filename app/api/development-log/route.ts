@@ -112,6 +112,7 @@ export async function POST(req: Request) {
         status,
         summary,
         highlights: cleanStringList(body.highlights),
+        experimental_features: cleanStringList(body.experimentalFeatures, 10, 1000),
         implementation_notes: cleanStringList(body.implementationNotes),
         limitations: cleanStringList(body.limitations),
         deployment_range: cleanText(body.deploymentRange, 100) || null,
