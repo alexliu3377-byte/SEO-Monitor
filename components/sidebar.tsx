@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
+import { contentSystemPath } from '@/lib/system-routes'
 import { useUser } from '@/lib/user-context'
 
 type NavItem = {
@@ -132,6 +133,15 @@ const APP_UPDATE_ITEMS: NavItem[] = [
   },
 ]
 
+const CONTENT_ITEMS: NavItem[] = NAV_GROUPS.flatMap(group => group.items).map(item => ({
+  ...item,
+  href: contentSystemPath(item.href),
+  children: item.children?.map(child => ({
+    ...child,
+    href: contentSystemPath(child.href),
+  })),
+}))
+
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -194,7 +204,7 @@ export default function Sidebar() {
   }
 
   const isAppUpdateCenter = pathname.startsWith('/app-updates')
-  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : NAV_GROUPS.flatMap(group => group.items)).filter(item => {
+  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : CONTENT_ITEMS).filter(item => {
     if (item.superOnly && role !== 'super') return false
     if (item.hideNormal && role === 'normal') return false
     return true
@@ -260,15 +270,15 @@ export default function Sidebar() {
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        {role === 'super' && (
-          <Link
-            href={isAppUpdateCenter ? '/' : '/app-updates'}
-            className="mt-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
-          >
-            <span>{isAppUpdateCenter ? '返回内容发布系统' : '进入应用更新中心'}</span>
-            {!isAppUpdateCenter && <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] text-blue-200">实验</span>}
-          </Link>
-        )}
+        <Link
+          href="/"
+          className="mt-4 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm8 8a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4zM4 16a2 2 0 012-2h4a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10-12h4a2 2 0 012 2v2a2 2 0 01-2 2h-4a2 2 0 01-2-2V6a2 2 0 012-2z" />
+          </svg>
+          <span>返回系统首页</span>
+        </Link>
       </div>
 
       {/* ── Nav ── */}
@@ -317,8 +327,8 @@ export default function Sidebar() {
             )
           }
 
-          const isActive = item.href === '/'
-            ? pathname === '/'
+          const isActive = item.href === '/content'
+            ? pathname === '/content'
             : pathname.startsWith(item.href)
           return (
             <Link

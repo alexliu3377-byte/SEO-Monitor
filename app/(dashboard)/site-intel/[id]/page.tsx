@@ -379,7 +379,7 @@ export default function SiteIntelDetailPage() {
     return (
       <div className="p-8">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-600 text-sm">{error}</div>
-        <Link href="/site-intel" className="mt-4 inline-block text-sm text-green-600 hover:underline">← 返回站点情报</Link>
+        <Link href="/content/site-intel" className="mt-4 inline-block text-sm text-green-600 hover:underline">← 返回站点情报</Link>
       </div>
     )
   }
@@ -394,7 +394,7 @@ export default function SiteIntelDetailPage() {
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-6 flex items-center gap-3">
-        <Link href="/site-intel" className="text-gray-400 hover:text-gray-600 transition-colors">
+        <Link href="/content/site-intel" className="text-gray-400 hover:text-gray-600 transition-colors">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
@@ -646,7 +646,7 @@ export default function SiteIntelDetailPage() {
             <h3 className="text-sm font-semibold text-gray-700">收录页面</h3>
             {indexedPagesTotal > 0 && (
               <Link
-                href={`/index-pages?siteId=${id}`}
+                href={`/content/index-pages?siteId=${id}`}
                 className="text-xs border rounded px-2 py-0.5 transition-colors text-green-500 hover:text-green-700 border-green-100 hover:border-green-200"
               >
                 查看全部 {indexedPagesTotal.toLocaleString()} 条

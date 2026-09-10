@@ -105,7 +105,7 @@ export default function GuidePage() {
             <Section id="wf-task-groups" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
               <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
                 <h3 className="text-base font-bold text-gray-900">任务工作台——查看待办、认领并提交成果</h3>
-                <ExtLink href="/task-groups">打开任务工作台</ExtLink>
+                <ExtLink href="/content/task-groups">打开任务工作台</ExtLink>
               </div>
               <div className="p-6 space-y-5 text-sm text-gray-700">
                 <p>右侧的每个 tab 都是一种"词的来源"，系统每天会自动挖出这些词，你只要挑感兴趣的认领去做：</p>
@@ -176,7 +176,7 @@ export default function GuidePage() {
             <Section id="wf-group-report" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
               <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
                 <h3 className="text-base font-bold text-gray-900">成效报告——查看成果与历史表现</h3>
-                <ExtLink href="/group-report">打开成效报告</ExtLink>
+                <ExtLink href="/content/group-report">打开成效报告</ExtLink>
               </div>
               <div className="p-6 space-y-4 text-sm text-gray-700">
                 <div className="grid gap-3">
@@ -207,7 +207,7 @@ export default function GuidePage() {
             <Section id="ref-home" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">首页快报</h3>
-                <ExtLink href="/">打开首页快报</ExtLink>
+                <ExtLink href="/content">打开首页快报</ExtLink>
               </div>
               <p className="text-sm text-gray-600">登录后第一眼看的总览页。顶部 4 张预警卡片——权重变动 / 收录变动 / 新增变动 / 搜索量查询——出现红色或橙色说明有站点异常，点卡片里的条目会弹出这个站点的详情（权重、IP、收录趋势等）。下面还有大站/中站/小站的对比图表，可以勾选站点看趋势对比。</p>
             </Section>
@@ -215,7 +215,7 @@ export default function GuidePage() {
             <Section id="ref-site-intel" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">站点情报</h3>
-                <ExtLink href="/site-intel">打开站点情报</ExtLink>
+                <ExtLink href="/content/site-intel">打开站点情报</ExtLink>
               </div>
               <p className="text-sm text-gray-600">就是个搜索框——想看某个域名的完整数据，直接在这里搜，会跳到该站点的详情页。侧边栏"站点情报"下面还挂了四个子页面：</p>
               <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-gray-500">
@@ -234,7 +234,7 @@ export default function GuidePage() {
             <Section id="ref-competitor-daily" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">竞品日收——按钮最多，重点看一下</h3>
-                <ExtLink href="/competitor-daily">打开竞品日收</ExtLink>
+                <ExtLink href="/content/competitor-daily">打开竞品日收</ExtLink>
               </div>
               <p className="text-sm text-gray-600 mb-3">对比每个竞品站点昨天新增了多少关键词，状态列会标"正常/偏低/异常/偏高"——先按状态筛出异常的站点，再用下面这几个按钮深挖原因：</p>
               <div className="space-y-2">
@@ -261,7 +261,7 @@ export default function GuidePage() {
             <Section id="ref-charts" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">近期榜单</h3>
-                <ExtLink href="/charts">打开近期榜单</ExtLink>
+                <ExtLink href="/content/charts">打开近期榜单</ExtLink>
               </div>
               <p className="text-sm text-gray-600 mb-2"><b>月度趋势</b>tab：全部监控站点按月汇总应用/游戏新增关键词占比，能看涨跌词、搜索量变动、排名连续涨跌，跨年按月对比，找"哪个月哪个类目该发力"这种规律。</p>
               <p className="text-sm text-gray-600"><b>新游榜单</b>tab：纯资讯，汇总 TapTap 和好游快爆的游戏行业榜单（今日游戏、即将上线、热搜榜等），跟自家站点数据完全无关，了解行业动态、蹭热点选题时看看就好，<b>只供参考</b>。</p>
@@ -270,7 +270,7 @@ export default function GuidePage() {
             <Section id="ref-hot-keywords" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">热词雷达</h3>
-                <ExtLink href="/hot-keywords">打开热词雷达</ExtLink>
+                <ExtLink href="/content/hot-keywords">打开热词雷达</ExtLink>
               </div>
               <p className="text-sm text-gray-600">用来了解行业整体趋势、给分组任务的认领补灵感。右侧 6 个 tab（搜索量上涨/交叉词/竞品涨排名/连续上涨词/共新增词/更新词库）跟分组任务里的信号来源是同一套逻辑，只是这里是纯浏览，不能直接认领去做。理论上分组任务的词可以由管理员按分组筛选站点范围，热词雷达则看全部站点；不过现阶段各分组都还没设置筛选，两边看到的范围其实一样，这里就当参考用。</p>
             </Section>
@@ -278,7 +278,7 @@ export default function GuidePage() {
             <Section id="ref-research" className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-800">研究中心</h3>
-                <ExtLink href="/research">打开研究中心</ExtLink>
+                <ExtLink href="/content/research">打开研究中心</ExtLink>
               </div>
               <p className="text-sm text-gray-600">"研究周报"/"研究月报"两个 tab 所有人都能看：GitHub Actions 定时自动生成（周报每周一、月报每月1号），不用手动点"开始分析"。AI 通读这段时间每个站点的完整原始数据，写成大环境 / 自己站点成效 / 竞品成效 / 综合结论几段报告，顶部横排选期数，"各站点分析"里是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
             </Section>
@@ -295,7 +295,7 @@ export default function GuidePage() {
               <Section id="admin-sites" className="bg-white rounded-xl border border-violet-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-gray-800">网站管理</h3>
-                  <ExtLink href="/sites">打开网站管理</ExtLink>
+                  <ExtLink href="/content/sites">打开网站管理</ExtLink>
                 </div>
                 <p className="text-sm text-gray-600 mb-4">站点要先在这里登记，才会进入整个监控/抓取系统——是所有数据的源头，配置错了后面全部数据都会跟着错，要仔细来。</p>
 
@@ -354,7 +354,7 @@ export default function GuidePage() {
               <Section id="admin-crawl-log" className="bg-white rounded-xl border border-violet-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-gray-800">抓取日志</h3>
-                  <ExtLink href="/crawl-log">打开抓取日志</ExtLink>
+                  <ExtLink href="/content/crawl-log">打开抓取日志</ExtLink>
                 </div>
                 <p className="text-sm text-gray-600 mb-3">监控每天的抓取任务有没有正常跑完，纯监控+出问题时补救，不是配置页。</p>
                 <div className="space-y-2 text-sm text-gray-600">
@@ -376,7 +376,7 @@ export default function GuidePage() {
               <Section id="admin-research" className="bg-white rounded-xl border border-violet-200 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-gray-800">研究中心（管理员专属的另外4个tab）</h3>
-                  <ExtLink href="/research">打开研究中心</ExtLink>
+                  <ExtLink href="/content/research">打开研究中心</ExtLink>
                 </div>
                 <p className="text-sm text-gray-600 mb-3">2026-08-26 起研究中心对全员开放，但只开"研究周报"/"研究月报"两个tab（说明见上面"参考工具"区）——竞品成效、站点诊断、研究季报、研究年报这4个信息量更大/更偏管理决策，继续只给管理员看。</p>
                 <div className="space-y-2 text-sm text-gray-600">

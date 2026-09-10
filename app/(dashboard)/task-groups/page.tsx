@@ -1636,7 +1636,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   useEffect(() => { loadGroups() }, [groupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!loading && !isWorkspaceRoute && !canManage && groups.length > 0) {
-      router.replace(`/task-groups/${encodeURIComponent(groups[0].id)}`)
+      router.replace(`/content/task-groups/${encodeURIComponent(groups[0].id)}`)
     }
   }, [loading, isWorkspaceRoute, canManage, groups, router])
   useEffect(() => {
@@ -2861,7 +2861,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           {((isWorkspaceRoute && groups.length > 0) || (!isWorkspaceRoute && canManage)) && <BaiduCookiePoolManager />}
           {isWorkspaceRoute && groups.length > 0 && (
             <select aria-label="切换分组工作台" value={activeGroupId ?? ''}
-              onChange={event => router.push(`/task-groups/${encodeURIComponent(event.target.value)}`)}
+              onChange={event => router.push(`/content/task-groups/${encodeURIComponent(event.target.value)}`)}
               className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
               {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
@@ -2907,12 +2907,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
             {groups.map(g => (
               <div key={g.id} role="link" tabIndex={0}
-                onClick={() => router.push(`/task-groups/${encodeURIComponent(g.id)}`)}
+                onClick={() => router.push(`/content/task-groups/${encodeURIComponent(g.id)}`)}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget) return
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
-                    router.push(`/task-groups/${encodeURIComponent(g.id)}`)
+                    router.push(`/content/task-groups/${encodeURIComponent(g.id)}`)
                   }
                 }}
                 className="group cursor-pointer rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-green-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500">
@@ -2921,7 +2921,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                     <span className="block text-base font-semibold text-gray-900 group-hover:text-green-700">{g.name}</span>
                     <span className="mt-1 block text-xs text-gray-500">{g.members.length} 位成员 · {g.site_domains.length} 个站点</span>
                   </span>
-                  <Link href={`/task-groups/${encodeURIComponent(g.id)}`}
+                  <Link href={`/content/task-groups/${encodeURIComponent(g.id)}`}
                     onClick={event => event.stopPropagation()}
                     className="rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100 focus-visible:ring-2 focus-visible:ring-green-500">进入工作台</Link>
                 </span>
@@ -2947,7 +2947,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
               <p className="text-sm font-medium text-gray-700">无法进入这个分组工作台</p>
               <p className="mt-1 text-xs text-gray-400">分组不存在，或者你不是该分组成员。</p>
-              {canManage && <Link href="/task-groups" className="mt-4 btn-secondary">返回分组管理</Link>}
+              {canManage && <Link href="/content/task-groups" className="mt-4 btn-secondary">返回分组管理</Link>}
             </div>
           )}
 

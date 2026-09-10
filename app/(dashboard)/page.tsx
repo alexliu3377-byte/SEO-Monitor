@@ -8,6 +8,7 @@ import { isKeywordExportOwner } from '@/lib/kw-export-owner'
 import { computeIndexStatus } from '@/lib/index-status'
 import { computeKwStatus } from '@/lib/kw-status'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import SystemPortal from '@/components/system-portal'
 import {
   LineChart,
   Line,
@@ -120,7 +121,11 @@ function fmtNum(n: number): string {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+export default function SystemPortalPage() {
+  return <SystemPortal />
+}
+
+export function ContentDashboardPage() {
   const { role, accessibleSiteIds } = useUser()
   const [sites, setSites] = useState<Site[]>([])
   const [indexSnaps, setIndexSnaps] = useState<IndexSnap[]>([])

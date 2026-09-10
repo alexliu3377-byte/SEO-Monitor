@@ -467,7 +467,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
           </div>
           {groupId && groups.length > 0 && (
             <select aria-label="切换成效报告分组" value={activeTabId}
-              onChange={event => router.push(`/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
+              onChange={event => router.push(`/content/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
               className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:outline-none focus:ring-green-500">
               {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
@@ -521,7 +521,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
               <section key={group.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
                   <div>
-                    <Link href={`/group-report/${encodeURIComponent(group.id)}?view=outcomes`}
+                    <Link href={`/content/group-report/${encodeURIComponent(group.id)}?view=outcomes`}
                       className="inline-flex items-center gap-1.5 text-base font-semibold text-gray-900 hover:text-green-700 focus-visible:rounded focus-visible:ring-2 focus-visible:ring-green-500">
                       {group.name}<span aria-hidden="true">→</span>
                     </Link>
@@ -550,7 +550,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
         <div className="mx-6 mt-5 flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-20 text-center">
           <p className="text-sm font-medium text-gray-700">无法查看这个分组的成效报告</p>
           <p className="mt-1 text-xs text-gray-400">分组不存在，或者你没有该分组权限。</p>
-          <Link href="/group-report" className="mt-4 btn-secondary">选择其他分组</Link>
+          <Link href="/content/group-report" className="mt-4 btn-secondary">选择其他分组</Link>
         </div>
       ) : (
         <div className="px-6 py-5 space-y-5">
@@ -559,7 +559,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
             {([['outcomes', '成效追踪'], ['trackingSummary', '追踪总汇']] as [ReportTab, string][]).map(([tab, label]) => (
               <button key={tab} type="button" onClick={() => {
                 setReportTab(tab)
-                router.replace(`/group-report/${encodeURIComponent(activeTabId)}?view=${tab === 'trackingSummary' ? 'summary' : 'outcomes'}`)
+                router.replace(`/content/group-report/${encodeURIComponent(activeTabId)}?view=${tab === 'trackingSummary' ? 'summary' : 'outcomes'}`)
               }}
                 className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${reportTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                 {label}

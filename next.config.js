@@ -43,7 +43,7 @@ const nextConfig = {
   },
   async redirects() {
     return [
-      { source: '/rules', destination: '/research', permanent: true },
+      { source: '/rules', destination: '/content/research', permanent: true },
     ]
   },
 }

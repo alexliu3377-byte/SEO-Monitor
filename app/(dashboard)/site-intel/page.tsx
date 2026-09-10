@@ -37,7 +37,7 @@ export default function SiteIntelPage() {
         .select('id').eq('domain', d).maybeSingle() as { data: { id: string } | null }
 
       if (siteRow?.id) {
-        router.push(`/site-intel/${siteRow.id}`)
+        router.push(`/content/site-intel/${siteRow.id}`)
       } else {
         setNotFound(d)
       }

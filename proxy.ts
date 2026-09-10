@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
+import { legacyContentRedirect } from './lib/system-routes'
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -92,6 +93,13 @@ export async function proxy(request: NextRequest) {
         const blockedUrl = request.nextUrl.clone()
         blockedUrl.pathname = '/blocked'
         return NextResponse.redirect(blockedUrl)
+      }
+
+      const contentDestination = legacyContentRedirect(pathname)
+      if (contentDestination) {
+        const contentUrl = request.nextUrl.clone()
+        contentUrl.pathname = contentDestination
+        return NextResponse.redirect(contentUrl, 308)
       }
     } catch {
       if (isApi) {
