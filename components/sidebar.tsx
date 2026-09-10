@@ -13,7 +13,7 @@ type NavItem = {
   icon: React.ReactNode
   superOnly?: boolean
   hideNormal?: boolean
-  children?: { href: string; label: string; icon: React.ReactNode }[]
+  children?: NavItem[]
 }
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
@@ -133,14 +133,59 @@ const APP_UPDATE_ITEMS: NavItem[] = [
   },
 ]
 
-const CONTENT_ITEMS: NavItem[] = NAV_GROUPS.flatMap(group => group.items).map(item => ({
-  ...item,
-  href: contentSystemPath(item.href),
-  children: item.children?.map(child => ({
-    ...child,
-    href: contentSystemPath(child.href),
-  })),
-}))
+const BASE_CONTENT_ITEMS = NAV_GROUPS.flatMap(group => group.items)
+
+function findContentItem(href: string): NavItem {
+  for (const item of BASE_CONTENT_ITEMS) {
+    if (item.href === href) return item
+    const child = item.children?.find(candidate => candidate.href === href)
+    if (child) return child
+  }
+  throw new Error(`Missing sidebar item: ${href}`)
+}
+
+function contentLeaf(href: string, label?: string): NavItem {
+  const item = findContentItem(href)
+  return {
+    ...item,
+    href: contentSystemPath(href),
+    label: label ?? item.label,
+    children: undefined,
+  }
+}
+
+function contentGroup(href: string, label: string, icon: React.ReactNode, children: NavItem[]): NavItem {
+  return { href, label, icon, children }
+}
+
+const CONTENT_ITEMS: NavItem[] = [
+  contentLeaf('/guide'),
+  contentLeaf('/'),
+  contentGroup('group:tasks', '任务工作台', findContentItem('/task-groups').icon, [
+    contentLeaf('/task-groups', '任务提交'),
+    contentLeaf('/group-report'),
+  ]),
+  contentGroup('group:research', '趋势研究', findContentItem('/charts').icon, [
+    contentLeaf('/charts'),
+    contentLeaf('/research'),
+    contentLeaf('/hot-keywords'),
+    contentLeaf('/trend-discovery'),
+  ]),
+  contentGroup('group:sites', '站点情报', findContentItem('/site-intel').icon, [
+    contentLeaf('/site-intel', '站点搜索'),
+    contentLeaf('/weight-monitor'),
+    contentLeaf('/index-monitor'),
+    contentLeaf('/competitor-daily'),
+    contentLeaf('/index-pages'),
+  ]),
+  contentGroup('group:management', '系统管理', findContentItem('/sites').icon, [
+    contentLeaf('/sites', '网站关联'),
+    contentLeaf('/crawl-log'),
+    contentLeaf('/development-log'),
+    contentLeaf('/settings'),
+  ]),
+  contentLeaf('/feedback'),
+]
 
 
 export default function Sidebar() {
@@ -149,10 +194,28 @@ export default function Sidebar() {
   const { role } = useUser()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(
+    CONTENT_ITEMS
+      .filter(item => item.children?.some(child => pathname === child.href || pathname.startsWith(`${child.href}/`)))
+      .map(item => item.href)
+  ))
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
 
   useEffect(() => setMobileOpen(false), [pathname])
+
+  useEffect(() => {
+    const activeGroup = CONTENT_ITEMS.find(item =>
+      item.children?.some(child => pathname === child.href || pathname.startsWith(`${child.href}/`))
+    )
+    if (!activeGroup) return
+    setOpenGroups(current => {
+      if (current.has(activeGroup.href)) return current
+      const next = new Set(current)
+      next.add(activeGroup.href)
+      return next
+    })
+  }, [pathname])
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1023px)')
@@ -204,11 +267,17 @@ export default function Sidebar() {
   }
 
   const isAppUpdateCenter = pathname.startsWith('/app-updates')
-  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : CONTENT_ITEMS).filter(item => {
+  const canSeeItem = (item: NavItem) => {
     if (item.superOnly && role !== 'super') return false
     if (item.hideNormal && role === 'normal') return false
     return true
-  })
+  }
+  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : CONTENT_ITEMS)
+    .map(item => item.children
+      ? { ...item, children: item.children.filter(canSeeItem) }
+      : item
+    )
+    .filter(item => canSeeItem(item) && (!item.children || item.children.length > 0))
 
   return (
     <>
@@ -270,40 +339,40 @@ export default function Sidebar() {
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <Link
-          href="/"
-          className="mt-4 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm8 8a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4zM4 16a2 2 0 012-2h4a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10-12h4a2 2 0 012 2v2a2 2 0 01-2 2h-4a2 2 0 01-2-2V6a2 2 0 012-2z" />
-          </svg>
-          <span>返回系统首页</span>
-        </Link>
       </div>
 
       {/* ── Nav ── */}
       <nav className="flex-1 px-3 pb-3 overflow-y-auto space-y-0.5" style={{ scrollbarWidth: 'none' }}>
         {allItems.map(item => {
           if (item.children) {
-            const isParentActive = pathname === item.href
             const hasActiveChild = item.children.some(c => pathname.startsWith(c.href))
+            const isOpen = openGroups.has(item.href)
             return (
               <div key={item.href}>
-                <Link
-                  href={item.href}
-                  aria-current={isParentActive ? 'page' : undefined}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                    isParentActive
-                      ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
-                      : hasActiveChild
-                      ? 'text-white/80 hover:bg-white/5'
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpenGroups(current => {
+                    const next = new Set(current)
+                    if (next.has(item.href)) next.delete(item.href)
+                    else next.add(item.href)
+                    return next
+                  })}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
+                    hasActiveChild
+                      ? 'bg-white/5 text-white'
                       : 'text-white/65 hover:bg-white/8 hover:text-white/95'
                   }`}
                 >
-                  {item.icon}
-                  {item.label}
-                </Link>
-                <div className="ml-3 mt-0.5 space-y-0.5">
+                  <span className="flex items-center gap-3">
+                    {item.icon}
+                    {item.label}
+                  </span>
+                  <svg className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                {isOpen && <div className="ml-3 mt-0.5 space-y-0.5">
                   {item.children.map(child => {
                     const isChildActive = pathname.startsWith(child.href)
                     return (
@@ -322,7 +391,7 @@ export default function Sidebar() {
                       </Link>
                     )
                   })}
-                </div>
+                </div>}
               </div>
             )
           }
@@ -348,8 +417,17 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* ── Logout ── */}
-      <div className="px-3 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      {/* ── Account actions ── */}
+      <div className="space-y-1 px-3 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <Link
+          href="/"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-all duration-150 hover:bg-white/5 hover:text-white"
+        >
+          <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm8 8a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4zM4 16a2 2 0 012-2h4a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10-12h4a2 2 0 012 2v2a2 2 0 01-2 2h-4a2 2 0 01-2-2V6a2 2 0 012-2z" />
+          </svg>
+          返回系统首页
+        </Link>
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
