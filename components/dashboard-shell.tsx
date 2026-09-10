@@ -7,7 +7,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const pathname = usePathname()
 
   if (pathname === '/') {
-    return <main id="main-content" className="min-h-screen bg-slate-950">{children}</main>
+    return <main id="main-content" className="min-h-screen bg-slate-50">{children}</main>
   }
 
   return (
