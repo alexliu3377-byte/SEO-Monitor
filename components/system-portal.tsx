@@ -44,42 +44,42 @@ export default function SystemPortal() {
           <p className="mt-4 text-base leading-7 text-slate-600">各系统共用当前登录账号，但工作内容、导航和功能范围相互独立。</p>
         </section>
 
-        <section className="mt-10 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-4 sm:px-7">
+        <section className="mt-10">
+          <div className="mb-4">
             <h2 className="text-sm font-semibold text-slate-900">后台列表</h2>
             <p className="mt-1 text-xs text-slate-500">只显示当前账号可以访问的系统</p>
           </div>
 
-          <div className="divide-y divide-slate-100">
-            <Link href="/content" className="group flex items-center gap-4 px-5 py-6 transition hover:bg-emerald-50/40 sm:gap-5 sm:px-7">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19V9m5 10V5m5 14v-7m5 7V3" /></svg>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <h3 className="text-lg font-semibold text-slate-950">内容发布系统</h3>
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">正式使用</span>
+          <div className={`grid gap-5 ${role === 'super' ? 'md:grid-cols-2' : 'max-w-xl'}`}>
+            <Link href="/content" className="group flex min-h-72 flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md sm:p-7">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19V9m5 10V5m5 14v-7m5 7V3" /></svg>
                 </div>
-                <p className="mt-1.5 text-sm leading-6 text-slate-600">站点监控、任务协作、成效报告、研究中心与日常内容运营。</p>
-                <p className="mt-2 text-xs text-slate-400">/content</p>
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">正式使用</span>
               </div>
-              <span className="shrink-0 text-emerald-600 transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
+              <h3 className="mt-7 text-xl font-semibold text-slate-950">内容发布系统</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-600">站点监控、任务协作、成效报告、研究中心与日常内容运营。</p>
+              <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-5 text-sm font-semibold text-emerald-700">
+                <span>进入首页快报</span>
+                <span className="transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
+              </div>
             </Link>
 
             {role === 'super' && (
-              <Link href="/app-updates" className="group flex items-center gap-4 px-5 py-6 transition hover:bg-blue-50/40 sm:gap-5 sm:px-7">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-                  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 7l2-3h12l2 3M5 7v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7M9 11h6m-6 4h4" /></svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <h3 className="text-lg font-semibold text-slate-950">应用更新系统</h3>
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">实验中</span>
+              <Link href="/app-updates" className="group flex min-h-72 flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md sm:p-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 7l2-3h12l2 3M5 7v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7M9 11h6m-6 4h4" /></svg>
                   </div>
-                  <p className="mt-1.5 text-sm leading-6 text-slate-600">发现应用新版本，审核更新日志、公开下载资料并批量导出。</p>
-                  <p className="mt-2 text-xs text-slate-400">/app-updates · 仅超管</p>
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">实验中</span>
                 </div>
-                <span className="shrink-0 text-blue-600 transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
+                <h3 className="mt-7 text-xl font-semibold text-slate-950">应用更新系统</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">发现应用新版本，审核更新日志、公开下载资料并批量导出。</p>
+                <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-5 text-sm font-semibold text-blue-700">
+                  <span>进入更新工作台</span>
+                  <span className="transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
+                </div>
               </Link>
             )}
           </div>
