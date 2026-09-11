@@ -11,9 +11,18 @@ on:
         required: false
         default: ''
       queryCount:
-        description: '本轮搜索词数量（1-12，建议 8）'
+        description: '本轮搜索词数量（1-12，建议 12）'
         required: false
-        default: '8'
+        default: '12'
+      mode:
+        description: '采集方向；混合模式会各用一半应用词和游戏词'
+        required: false
+        type: choice
+        options:
+          - mixed
+          - games
+          - apps
+        default: mixed
       includeCharts:
         description: '同时读取免费榜和付费榜'
         required: false
@@ -40,6 +49,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DISCOVERY_COUNTRY: ${{ github.event.inputs.country }}
-          QUERY_COUNT: ${{ github.event.inputs.queryCount || '8' }}
+          QUERY_COUNT: ${{ github.event.inputs.queryCount || '12' }}
+          DISCOVERY_MODE: ${{ github.event.inputs.mode || 'mixed' }}
           INCLUDE_CHARTS: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.includeCharts }}
-        run: npx tsx scripts/app-store-discover.ts --country="$DISCOVERY_COUNTRY" --query-count="$QUERY_COUNT" --include-charts="$INCLUDE_CHARTS"
+        run: npx tsx scripts/app-store-discover.ts --country="$DISCOVERY_COUNTRY" --query-count="$QUERY_COUNT" --mode="$DISCOVERY_MODE" --include-charts="$INCLUDE_CHARTS"

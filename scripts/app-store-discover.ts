@@ -7,7 +7,9 @@ import {
 } from '../lib/app-store'
 import {
   APP_STORE_DISCOVERY_COUNTRIES,
+  APP_STORE_DISCOVERY_MODES,
   appStoreDailyDiscoveryPlan,
+  type AppStoreDiscoveryMode,
 } from '../lib/app-store-discovery'
 import { importAppStoreResults } from '../lib/app-store-import'
 
@@ -26,9 +28,13 @@ async function main() {
   if (!supabaseUrl || !serviceKey) throw new Error('缺少 Supabase GitHub Actions secrets')
 
   const requestedCountry = (argument('country') || process.env.DISCOVERY_COUNTRY || '').toLowerCase()
-  const queryCount = Number.parseInt(argument('query-count') || process.env.QUERY_COUNT || '8', 10)
+  const queryCount = Number.parseInt(argument('query-count') || process.env.QUERY_COUNT || '12', 10)
+  const requestedMode = (argument('mode') || process.env.DISCOVERY_MODE || 'mixed').toLowerCase()
+  const mode: AppStoreDiscoveryMode = APP_STORE_DISCOVERY_MODES.includes(requestedMode as AppStoreDiscoveryMode)
+    ? requestedMode as AppStoreDiscoveryMode
+    : 'mixed'
   const includeCharts = (argument('include-charts') || process.env.INCLUDE_CHARTS || 'true') !== 'false'
-  const plan = appStoreDailyDiscoveryPlan(new Date(), queryCount)
+  const plan = appStoreDailyDiscoveryPlan(new Date(), queryCount, mode)
   const country = APP_STORE_DISCOVERY_COUNTRIES.includes(requestedCountry as typeof APP_STORE_DISCOVERY_COUNTRIES[number])
     ? requestedCountry
     : plan.country
@@ -36,7 +42,7 @@ async function main() {
   const discovered = new Map<string, AppStoreLookupResult>()
   let failedRequests = 0
 
-  console.log(`App Store 目录扩展：地区=${country.toUpperCase()}，搜索词=${plan.terms.join('、')}，榜单=${includeCharts ? '是' : '否'}`)
+  console.log(`App Store 目录扩展：地区=${country.toUpperCase()}，模式=${plan.mode}，搜索词=${plan.terms.join('、')}，榜单=${includeCharts ? '是' : '否'}`)
 
   if (includeCharts) {
     for (const chart of plan.charts) {

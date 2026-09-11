@@ -84,6 +84,20 @@ test('App Store discovery plan is deterministic and bounded for a day', () => {
   assert.match(first.country, /^[a-z]{2}$/)
 })
 
+test('App Store mixed discovery reserves half of the searches for games', () => {
+  const plan = appStoreDailyDiscoveryPlan(new Date('2026-09-11T05:00:00Z'), 12, 'mixed')
+  assert.equal(plan.mode, 'mixed')
+  assert.equal(plan.terms.length, 12)
+  assert.equal(plan.terms.filter(term => /游戏|game|RPG/i.test(term)).length, 6)
+})
+
+test('App Store game discovery supports a games-only expansion run', () => {
+  const plan = appStoreDailyDiscoveryPlan(new Date('2026-09-11T05:00:00Z'), 12, 'games')
+  assert.equal(plan.mode, 'games')
+  assert.equal(plan.terms.length, 12)
+  assert.ok(plan.terms.every(term => /游戏|手游|game|RPG|开放世界/i.test(term)))
+})
+
 test('App Store lookup data becomes a reviewable release', () => {
   const result = appStoreResultToUpdate({
     wrapperType: 'software',
