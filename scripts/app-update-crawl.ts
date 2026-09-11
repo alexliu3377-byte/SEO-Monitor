@@ -9,6 +9,8 @@ import {
   parseAppStoreIds,
 } from '../lib/app-store'
 import { fetchPublicUrl } from '../lib/safe-remote-url'
+import { fetchGooglePlayUpdate, googlePlayLocaleFromUrl, googlePlayPackageFromUrl } from '../lib/google-play'
+import { fetchTapTapUpdates, tapTapAppIdFromUrl } from '../lib/taptap'
 
 type SourceRow = {
   id: string
@@ -102,7 +104,7 @@ async function main() {
           country
         )
         const current = appStoreRows[0] ? appStoreResultToUpdate(appStoreRows[0]) : null
-        const history = await fetchAppStoreVersionHistory(appStoreId, country, 50)
+        const history = await fetchAppStoreVersionHistory(appStoreId, country, 5)
         const byVersion = new Map(history.map(release => [release.normalizedVersion, release]))
         if (current) {
           const historicalCurrent = byVersion.get(current.normalizedVersion)
@@ -115,6 +117,16 @@ async function main() {
         }
         extractedRows = [...byVersion.values()]
         console.log(`  App Store 版本历史：${extractedRows.length} 条`)
+      } else if (source.source_type === 'google_play') {
+        const packageId = googlePlayPackageFromUrl(source.source_url)
+        if (!packageId) throw new Error('Google Play 来源缺少有效的应用包名')
+        const locale = googlePlayLocaleFromUrl(source.source_url)
+        const update = await fetchGooglePlayUpdate(packageId, locale.country, locale.lang)
+        if (update) extractedRows = [update]
+      } else if (source.source_type === 'taptap') {
+        const tapTapId = tapTapAppIdFromUrl(source.source_url)
+        if (!tapTapId) throw new Error('TapTap 来源缺少有效的应用 ID')
+        extractedRows = (await fetchTapTapUpdates(tapTapId)).slice(0, 5)
       } else {
         const response = await fetchPublicUrl(source.source_url, {
           headers: {

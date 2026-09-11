@@ -33,7 +33,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   android: 'Android', ios: 'iOS', windows: 'Windows', macos: 'macOS', web: 'Web', other: '其他',
 }
 const SOURCE_LABELS: Record<string, string> = {
-  official: '官方网站', app_store: '应用商店', download_site: '下载站', other: '其他来源',
+  official: '官方网站', app_store: 'App Store', google_play: 'Google Play', taptap: 'TapTap', download_site: '下载站', other: '其他来源',
 }
 const REVIEW_META = {
   pending: { label: '待审核', className: 'border-amber-200 bg-amber-50 text-amber-700' },
@@ -197,7 +197,8 @@ export default function AppUpdateCenterClient() {
             <p className="mt-2 text-sm text-slate-500">集中发现应用新版本、审核更新日志并批量导出。</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-store-discovery.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">目录扩展任务</a>
+            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-store-discovery.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Apple 目录扩展</a>
+            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/marketplace-discovery.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">安卓目录扩展</a>
             <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-update-crawl.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">打开抓取任务</a>
             <button type="button" onClick={() => { setError(''); setNotice(''); setAppStoreImportOpen(true) }} className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50">批量导入 App Store</button>
             <button type="button" onClick={openNewTarget} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">＋ 新增应用</button>

@@ -121,7 +121,7 @@ function appStoreReleaseDate(value: unknown): string | null {
 export function parseAppStoreVersionHistoryHtml(
   html: string,
   sourceUrl: string,
-  maxVersions = 50,
+  maxVersions = 5,
 ): ExtractedAppUpdate[] {
   const serialized = load(html)('#serialized-server-data').text().trim()
   if (!serialized) return []
@@ -174,7 +174,7 @@ export function parseAppStoreVersionHistoryHtml(
 export async function fetchAppStoreVersionHistory(
   appId: string,
   country = 'cn',
-  maxVersions = 50,
+  maxVersions = 5,
 ): Promise<ExtractedAppUpdate[]> {
   if (!/^\d{5,}$/.test(appId)) return []
   const storefront = /^[a-z]{2}$/i.test(country) ? country.toLowerCase() : 'cn'

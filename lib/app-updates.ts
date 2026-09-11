@@ -1,7 +1,7 @@
 export const APP_UPDATE_PLATFORMS = ['android', 'ios', 'windows', 'macos', 'web', 'other'] as const
 export type AppUpdatePlatform = typeof APP_UPDATE_PLATFORMS[number]
 
-export const APP_UPDATE_SOURCE_TYPES = ['official', 'app_store', 'download_site', 'other'] as const
+export const APP_UPDATE_SOURCE_TYPES = ['official', 'app_store', 'google_play', 'taptap', 'download_site', 'other'] as const
 export type AppUpdateSourceType = typeof APP_UPDATE_SOURCE_TYPES[number]
 
 export const APP_UPDATE_REVIEW_STATUSES = ['pending', 'approved', 'rejected'] as const

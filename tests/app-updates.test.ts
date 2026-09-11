@@ -15,6 +15,8 @@ import {
   parseAppStoreVersionHistoryHtml,
 } from '../lib/app-store'
 import { appStoreDailyDiscoveryPlan } from '../lib/app-store-discovery'
+import { googlePlayAppToUpdate, googlePlayPackageFromUrl } from '../lib/google-play'
+import { parseTapTapAppHtml, tapTapAppIdFromUrl } from '../lib/taptap'
 
 test('app version normalization removes labels and keeps comparable characters', () => {
   assert.equal(normalizeAppVersion(' Version v2.03.1-beta '), '2.03.1-beta')
@@ -148,4 +150,29 @@ test('App Store product page history becomes multiple releases', () => {
   assert.deepEqual(releases.map(release => release.version), ['8.0.2', '8.0.1'])
   assert.equal(releases[0].releaseDate, '2026-09-08')
   assert.equal(releases[0].changelog, '新增功能')
+})
+
+test('Google Play keeps update text but never stores a download URL', () => {
+  assert.equal(googlePlayPackageFromUrl('https://play.google.com/store/apps/details?id=com.example.game'), 'com.example.game')
+  const release = googlePlayAppToUpdate({
+    appId: 'com.example.game', title: 'Example', version: 'VARY',
+    updated: Date.parse('2026-09-10T00:00:00Z'), recentChanges: '修复问题<br>提升性能',
+  } as never)
+  assert.equal(release?.normalizedVersion, '2026.09.10')
+  assert.equal(release?.changelog, '修复问题\n提升性能')
+  assert.equal(release?.downloadUrl, null)
+})
+
+test('TapTap parses public version entries and never stores a download URL', () => {
+  assert.equal(tapTapAppIdFromUrl('/app/186013'), '186013')
+  const result = parseTapTapAppHtml(`
+    <h1>示例游戏</h1>
+    <div class="app-update-log-entry">
+      <div>版本：1.2.3</div><div>更新于 2026/09/10</div>
+      <div class="app-update-log-entry-content">新增地图并修复闪退</div>
+    </div>
+  `, 'https://www.taptap.cn/app/186013')
+  assert.equal(result.title, '示例游戏')
+  assert.equal(result.releases[0].normalizedVersion, '1.2.3')
+  assert.equal(result.releases[0].downloadUrl, null)
 })

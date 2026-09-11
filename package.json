@@ -11,9 +11,11 @@
     "trend:setup": "tsx scripts/trend-collector.ts --setup",
     "trend:collect": "tsx scripts/trend-collector.ts",
     "app-updates:crawl": "tsx scripts/app-update-crawl.ts",
-    "app-store:discover": "tsx scripts/app-store-discover.ts"
+    "app-store:discover": "tsx scripts/app-store-discover.ts",
+    "marketplace:discover": "tsx scripts/marketplace-discover.ts"
   },
   "dependencies": {
+    "@mradex77/google-play-scraper": "^1.1.0",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.44.4",
     "cheerio": "^1.0.0-rc.12",
