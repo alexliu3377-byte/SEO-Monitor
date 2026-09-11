@@ -4,6 +4,7 @@ import { extractAppUpdate, type AppUpdateExtractorConfig } from '../lib/app-upda
 import {
   appStoreCountryFromUrl,
   appStoreResultToUpdate,
+  fetchAppStoreVersionHistory,
   lookupAppStoreApps,
   parseAppStoreIds,
 } from '../lib/app-store'
@@ -90,16 +91,30 @@ async function main() {
 
     try {
       console.log(`[${index + 1}/${sources.length}] ${source.app_update_apps?.name ?? source.source_name}`)
-      let extracted: ReturnType<typeof extractAppUpdate> = null
+      let extractedRows: NonNullable<ReturnType<typeof extractAppUpdate>>[] = []
       const appStoreId = source.source_type === 'app_store'
         ? parseAppStoreIds(source.source_url, 1)[0]
         : undefined
       if (appStoreId) {
+        const country = appStoreCountryFromUrl(source.source_url)
         const appStoreRows = await lookupAppStoreApps(
           [appStoreId],
-          appStoreCountryFromUrl(source.source_url)
+          country
         )
-        extracted = appStoreRows[0] ? appStoreResultToUpdate(appStoreRows[0]) : null
+        const current = appStoreRows[0] ? appStoreResultToUpdate(appStoreRows[0]) : null
+        const history = await fetchAppStoreVersionHistory(appStoreId, country, 50)
+        const byVersion = new Map(history.map(release => [release.normalizedVersion, release]))
+        if (current) {
+          const historicalCurrent = byVersion.get(current.normalizedVersion)
+          byVersion.set(current.normalizedVersion, {
+            ...historicalCurrent,
+            ...current,
+            changelog: current.changelog || historicalCurrent?.changelog || '',
+            releaseDate: current.releaseDate || historicalCurrent?.releaseDate || null,
+          })
+        }
+        extractedRows = [...byVersion.values()]
+        console.log(`  App Store 版本历史：${extractedRows.length} 条`)
       } else {
         const response = await fetchPublicUrl(source.source_url, {
           headers: {
@@ -110,31 +125,38 @@ async function main() {
         })
         if (!response.ok) throw new Error(`来源页面返回 HTTP ${response.status}`)
         const html = await responseText(response)
-        extracted = extractAppUpdate(html, source.source_url, extractorConfig(source.extractor_config))
+        const extracted = extractAppUpdate(html, source.source_url, extractorConfig(source.extractor_config))
+        if (extracted) extractedRows = [extracted]
       }
-      if (!extracted) throw new Error('没有自动识别到版本号，需要为这个来源补充解析规则')
+      if (extractedRows.length === 0) throw new Error('没有自动识别到版本号，需要为这个来源补充解析规则')
 
-      const { data: existing } = await service
+      const normalizedVersions = extractedRows.map(extracted => extracted.normalizedVersion)
+      const { data: existingRows, error: existingError } = await service
         .from('app_update_releases')
-        .select('id')
+        .select('normalized_version')
         .eq('source_id', source.id)
-        .eq('normalized_version', extracted.normalizedVersion)
-        .maybeSingle()
-      const runStatus = existing ? 'no_change' : 'completed'
+        .in('normalized_version', normalizedVersions)
+      if (existingError) throw new Error(`检查已有版本失败：${existingError.message}`)
+      const existingVersions = new Set((existingRows ?? []).map(row => row.normalized_version as string))
+      const newVersionCount = normalizedVersions.filter(version => !existingVersions.has(version)).length
+      const runStatus = newVersionCount === 0 ? 'no_change' : 'completed'
       const now = new Date().toISOString()
-      const { error: releaseError } = await service.from('app_update_releases').upsert({
-        app_id: source.app_id,
-        source_id: source.id,
-        version: extracted.version,
-        normalized_version: extracted.normalizedVersion,
-        changelog: extracted.changelog,
-        release_date: extracted.releaseDate,
-        package_size: extracted.packageSize,
-        download_url: extracted.downloadUrl,
-        source_url: source.source_url,
-        extraction_confidence: extracted.confidence,
-        last_collected_at: now,
-      }, { onConflict: 'source_id,normalized_version' })
+      const { error: releaseError } = await service.from('app_update_releases').upsert(
+        extractedRows.map(extracted => ({
+          app_id: source.app_id,
+          source_id: source.id,
+          version: extracted.version,
+          normalized_version: extracted.normalizedVersion,
+          changelog: extracted.changelog,
+          release_date: extracted.releaseDate,
+          package_size: extracted.packageSize,
+          download_url: extracted.downloadUrl,
+          source_url: source.source_url,
+          extraction_confidence: extracted.confidence,
+          last_collected_at: now,
+        })),
+        { onConflict: 'source_id,normalized_version' },
+      )
       if (releaseError) throw new Error(`保存版本资料失败：${releaseError.message}`)
 
       const [sourceUpdate, runUpdate] = await Promise.all([
@@ -147,14 +169,14 @@ async function main() {
         }).eq('id', source.id),
         service.from('app_update_crawl_runs').update({
           status: runStatus,
-          discovered_version: extracted.version,
+          discovered_version: extractedRows[0].version,
           completed_at: now,
         }).eq('id', run.id),
       ])
       if (sourceUpdate.error || runUpdate.error) {
         throw new Error(`更新抓取状态失败：${sourceUpdate.error?.message ?? runUpdate.error?.message}`)
       }
-      console.log(`  ${runStatus === 'completed' ? '发现新版本' : '版本没有变化'}：${extracted.version}`)
+      console.log(`  ${runStatus === 'completed' ? `新增 ${newVersionCount} 条版本记录` : '版本没有变化'}；当前 ${extractedRows[0].version}`)
     } catch (crawlError) {
       failedSources += 1
       const message = (crawlError instanceof Error ? crawlError.message : String(crawlError)).slice(0, 1000)

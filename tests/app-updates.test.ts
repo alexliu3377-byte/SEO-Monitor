@@ -7,7 +7,13 @@ import {
   normalizeAppVersion,
   normalizePublicHttpUrl,
 } from '../lib/app-updates'
-import { appStoreResultToUpdate, isAppStoreChart, isAppStoreGame, parseAppStoreIds } from '../lib/app-store'
+import {
+  appStoreResultToUpdate,
+  isAppStoreChart,
+  isAppStoreGame,
+  parseAppStoreIds,
+  parseAppStoreVersionHistoryHtml,
+} from '../lib/app-store'
 import { appStoreDailyDiscoveryPlan } from '../lib/app-store-discovery'
 
 test('app version normalization removes labels and keeps comparable characters', () => {
@@ -129,4 +135,17 @@ test('App Store lookup data becomes a reviewable release', () => {
   assert.equal(result?.releaseDate, '2026-09-10')
   assert.equal(result?.packageSize, '50.0 MB')
   assert.equal(result?.changelog, '修复登录问题')
+})
+
+test('App Store product page history becomes multiple releases', () => {
+  const payload = [{ pageData: { shelves: [{ items: [
+    { $kind: 'TitledParagraph', style: 'detail', primarySubtitle: '8.0.2', secondarySubtitle: 'Tue Sep 08 2026 04:16:59 GMT+0000 (Coordinated Universal Time)', text: '新增功能' },
+    { $kind: 'TitledParagraph', style: 'detail', primarySubtitle: '8.0.1', secondarySubtitle: 'Fri Aug 21 2026 01:14:17 GMT+0000 (Coordinated Universal Time)', text: '修复问题' },
+    { $kind: 'TitledParagraph', style: 'overview', primarySubtitle: '版本 8.0.2', text: '重复摘要' },
+  ] }] } }]
+  const html = `<script type="application/json" id="serialized-server-data">${JSON.stringify(payload)}</script>`
+  const releases = parseAppStoreVersionHistoryHtml(html, 'https://apps.apple.com/cn/app/id123456789')
+  assert.deepEqual(releases.map(release => release.version), ['8.0.2', '8.0.1'])
+  assert.equal(releases[0].releaseDate, '2026-09-08')
+  assert.equal(releases[0].changelog, '新增功能')
 })

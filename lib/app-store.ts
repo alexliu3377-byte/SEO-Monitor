@@ -1,5 +1,6 @@
 import { cleanAppUpdateMultiline, cleanAppUpdateText, normalizeAppVersion } from './app-updates'
 import type { ExtractedAppUpdate } from './app-update-extractor'
+import { load } from 'cheerio'
 
 export type AppStoreLookupResult = {
   wrapperType?: string
@@ -101,6 +102,94 @@ export function appStoreResultToUpdate(result: AppStoreLookupResult): ExtractedA
     downloadUrl,
     confidence: Math.min(100, confidence),
   }
+}
+
+type AppStoreVersionParagraph = {
+  $kind?: unknown
+  style?: unknown
+  primarySubtitle?: unknown
+  secondarySubtitle?: unknown
+  text?: unknown
+}
+
+function appStoreReleaseDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10)
+}
+
+export function parseAppStoreVersionHistoryHtml(
+  html: string,
+  sourceUrl: string,
+  maxVersions = 50,
+): ExtractedAppUpdate[] {
+  const serialized = load(html)('#serialized-server-data').text().trim()
+  if (!serialized) return []
+
+  let root: unknown
+  try {
+    root = JSON.parse(serialized)
+  } catch {
+    return []
+  }
+
+  const paragraphs: AppStoreVersionParagraph[] = []
+  const pending: unknown[] = [root]
+  let inspected = 0
+  while (pending.length > 0 && inspected < 100_000) {
+    const value = pending.pop()
+    inspected += 1
+    if (!value || typeof value !== 'object') continue
+    if (Array.isArray(value)) {
+      pending.push(...value)
+      continue
+    }
+    const row = value as Record<string, unknown>
+    if (row.$kind === 'TitledParagraph' && row.style === 'detail') paragraphs.push(row)
+    pending.push(...Object.values(row))
+  }
+
+  const byVersion = new Map<string, ExtractedAppUpdate>()
+  for (const paragraph of paragraphs) {
+    const version = cleanAppUpdateText(paragraph.primarySubtitle, 100)
+    const normalizedVersion = normalizeAppVersion(version)
+    if (!normalizedVersion || byVersion.has(normalizedVersion)) continue
+    byVersion.set(normalizedVersion, {
+      version,
+      normalizedVersion,
+      changelog: cleanAppUpdateMultiline(paragraph.text, 30_000),
+      releaseDate: appStoreReleaseDate(paragraph.secondarySubtitle),
+      packageSize: null,
+      downloadUrl: sourceUrl,
+      confidence: 90,
+    })
+    if (byVersion.size >= Math.min(100, Math.max(1, maxVersions))) break
+  }
+  return [...byVersion.values()].sort((left, right) => (
+    (right.releaseDate ?? '').localeCompare(left.releaseDate ?? '')
+      || right.normalizedVersion.localeCompare(left.normalizedVersion, undefined, { numeric: true })
+  ))
+}
+
+export async function fetchAppStoreVersionHistory(
+  appId: string,
+  country = 'cn',
+  maxVersions = 50,
+): Promise<ExtractedAppUpdate[]> {
+  if (!/^\d{5,}$/.test(appId)) return []
+  const storefront = /^[a-z]{2}$/i.test(country) ? country.toLowerCase() : 'cn'
+  const sourceUrl = `https://apps.apple.com/${storefront}/app/id${appId}`
+  const response = await fetch(sourceUrl, {
+    headers: {
+      Accept: 'text/html,application/xhtml+xml',
+      'User-Agent': 'Mozilla/5.0 (compatible; QixinAppUpdateResearch/0.2)',
+    },
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!response.ok) throw new Error(`App Store 产品页返回 HTTP ${response.status}`)
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length > 5_000_000) throw new Error('App Store 产品页超过 5MB，已停止读取')
+  return parseAppStoreVersionHistoryHtml(bytes.toString('utf8'), sourceUrl, maxVersions)
 }
 
 function isLookupResult(value: unknown): value is AppStoreLookupResult {

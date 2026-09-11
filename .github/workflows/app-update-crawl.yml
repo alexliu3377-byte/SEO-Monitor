@@ -1,6 +1,9 @@
 name: App Update Center Experiment
 
 on:
+  schedule:
+    # 04:17 MYT，逐日补全一批应用的历史版本。
+    - cron: '17 20 * * *'
   workflow_dispatch:
     inputs:
       appId:
@@ -10,7 +13,7 @@ on:
       limit:
         description: '本轮最多检查的来源数'
         required: false
-        default: '20'
+        default: '50'
 
 concurrency:
   group: app-update-center-experiment
@@ -19,7 +22,7 @@ concurrency:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -32,5 +35,5 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_ID: ${{ github.event.inputs.appId }}
-          SOURCE_LIMIT: ${{ github.event.inputs.limit }}
+          SOURCE_LIMIT: ${{ github.event.inputs.limit || '50' }}
         run: npx tsx scripts/app-update-crawl.ts --app-id="$APP_ID" --limit="$SOURCE_LIMIT"
