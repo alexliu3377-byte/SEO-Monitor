@@ -20,7 +20,8 @@ export async function importMarketplaceApps(
   let releasesCreated = 0
   let skipped = 0
   for (const item of items) {
-    if (!item.name || item.releases.length === 0) {
+    const name = item.name.trim()
+    if (Array.from(name).length < 2 || Array.from(name).length > 120 || item.releases.length === 0) {
       skipped += 1
       continue
     }
@@ -29,7 +30,7 @@ export async function importMarketplaceApps(
     if (appError) throw new Error(`检查已有应用失败：${appError.message}`)
     if (!app) {
       const created = await service.from('app_update_apps').insert({
-        name: item.name.slice(0, 120), platform: item.platform,
+        name, platform: item.platform,
         package_identifier: item.packageIdentifier.slice(0, 255), created_by: actor,
       }).select('id').single()
       if (created.error || !created.data) throw new Error(`新增应用失败：${created.error?.message ?? '未知错误'}`)
