@@ -19,6 +19,19 @@ type AppStoreLookupResponse = {
   results?: unknown[]
 }
 
+type AppStoreChartResponse = {
+  feed?: {
+    results?: Array<{ id?: unknown }>
+  }
+}
+
+export const APP_STORE_CHARTS = ['top-free', 'top-paid'] as const
+export type AppStoreChart = typeof APP_STORE_CHARTS[number]
+
+export function isAppStoreChart(value: unknown): value is AppStoreChart {
+  return typeof value === 'string' && APP_STORE_CHARTS.includes(value as AppStoreChart)
+}
+
 export function parseAppStoreIds(value: unknown, maxItems = 100): string[] {
   if (typeof value !== 'string') return []
   const ids: string[] = []
@@ -104,4 +117,49 @@ export async function lookupAppStoreApps(ids: string[], country = 'cn'): Promise
   if (!response.ok) throw new Error(`App Store 接口返回 HTTP ${response.status}`)
   const body = await response.json() as AppStoreLookupResponse
   return Array.isArray(body.results) ? body.results.filter(isLookupResult) : []
+}
+
+export async function searchAppStoreApps(
+  term: string,
+  country = 'cn',
+  limit = 200
+): Promise<AppStoreLookupResult[]> {
+  const query = cleanAppUpdateText(term, 80)
+  if (!query) return []
+  const storefront = /^[a-z]{2}$/i.test(country) ? country.toLowerCase() : 'cn'
+  const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit) || 200))
+  const params = new URLSearchParams({
+    term: query,
+    country: storefront,
+    media: 'software',
+    entity: 'software',
+    limit: String(safeLimit),
+  })
+  const response = await fetch(`https://itunes.apple.com/search?${params}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!response.ok) throw new Error(`App Store 搜索接口返回 HTTP ${response.status}`)
+  const body = await response.json() as AppStoreLookupResponse
+  return Array.isArray(body.results) ? body.results.filter(isLookupResult) : []
+}
+
+export async function fetchAppStoreChartIds(
+  chart: AppStoreChart,
+  country = 'cn',
+  limit = 100
+): Promise<string[]> {
+  const storefront = /^[a-z]{2}$/i.test(country) ? country.toLowerCase() : 'cn'
+  const safeLimit = Math.min(100, Math.max(10, Math.trunc(limit) || 100))
+  const url = `https://rss.marketingtools.apple.com/api/v2/${storefront}/apps/${chart}/${safeLimit}/apps.json`
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!response.ok) throw new Error(`App Store 榜单接口返回 HTTP ${response.status}`)
+  const body = await response.json() as AppStoreChartResponse
+  const ids = body.feed?.results
+    ?.map(result => typeof result.id === 'string' ? result.id : '')
+    .filter(id => /^\d{5,}$/.test(id)) ?? []
+  return [...new Set(ids)].slice(0, safeLimit)
 }

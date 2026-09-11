@@ -1,0 +1,45 @@
+name: App Store Catalog Discovery
+
+on:
+  schedule:
+    # 03:17 MYT，错开现有内容抓取和缓存任务。
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+    inputs:
+      country:
+        description: '商店地区；留空时每天自动轮换 CN/HK/TW/MY/SG/US/JP'
+        required: false
+        default: ''
+      queryCount:
+        description: '本轮搜索词数量（1-12，建议 8）'
+        required: false
+        default: '8'
+      includeCharts:
+        description: '同时读取免费榜和付费榜'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: app-store-catalog-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Discover and import App Store catalog entries
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DISCOVERY_COUNTRY: ${{ github.event.inputs.country }}
+          QUERY_COUNT: ${{ github.event.inputs.queryCount || '8' }}
+          INCLUDE_CHARTS: ${{ github.event_name == 'schedule' && 'true' || github.event.inputs.includeCharts }}
+        run: npx tsx scripts/app-store-discover.ts --country="$DISCOVERY_COUNTRY" --query-count="$QUERY_COUNT" --include-charts="$INCLUDE_CHARTS"

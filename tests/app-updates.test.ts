@@ -7,7 +7,8 @@ import {
   normalizeAppVersion,
   normalizePublicHttpUrl,
 } from '../lib/app-updates'
-import { appStoreResultToUpdate, parseAppStoreIds } from '../lib/app-store'
+import { appStoreResultToUpdate, isAppStoreChart, parseAppStoreIds } from '../lib/app-store'
+import { appStoreDailyDiscoveryPlan } from '../lib/app-store-discovery'
 
 test('app version normalization removes labels and keeps comparable characters', () => {
   assert.equal(normalizeAppVersion(' Version v2.03.1-beta '), '2.03.1-beta')
@@ -65,6 +66,22 @@ test('App Store batch input accepts links and numeric ids without duplicates', (
     id123456789
     invalid
   `), ['123456789', '987654321'])
+})
+
+test('App Store chart input only accepts supported public charts', () => {
+  assert.equal(isAppStoreChart('top-free'), true)
+  assert.equal(isAppStoreChart('top-paid'), true)
+  assert.equal(isAppStoreChart('top-grossing'), false)
+})
+
+test('App Store discovery plan is deterministic and bounded for a day', () => {
+  const date = new Date('2026-09-11T05:00:00Z')
+  const first = appStoreDailyDiscoveryPlan(date, 50)
+  const second = appStoreDailyDiscoveryPlan(date, 50)
+  assert.deepEqual(first, second)
+  assert.equal(first.terms.length, 12)
+  assert.deepEqual(first.charts, ['top-free', 'top-paid'])
+  assert.match(first.country, /^[a-z]{2}$/)
 })
 
 test('App Store lookup data becomes a reviewable release', () => {
