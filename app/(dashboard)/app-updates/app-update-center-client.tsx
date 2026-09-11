@@ -64,9 +64,13 @@ export default function AppUpdateCenterClient() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [detail, setDetail] = useState<ReleaseRow | null>(null)
   const [targetOpen, setTargetOpen] = useState(false)
+  const [appStoreImportOpen, setAppStoreImportOpen] = useState(false)
+  const [appStoreEntries, setAppStoreEntries] = useState('')
+  const [appStoreCountry, setAppStoreCountry] = useState('cn')
   const [sourceApp, setSourceApp] = useState<AppRow | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState('')
 
   const appMap = useMemo(() => new Map(apps.map(app => [app.id, app])), [apps])
   const sourceMap = useMemo(() => new Map(sources.map(source => [source.id, source])), [sources])
@@ -149,6 +153,28 @@ export default function AppUpdateCenterClient() {
     }
   }
 
+  async function importAppStoreApps() {
+    setSaving(true); setError(''); setNotice('')
+    try {
+      const response = await fetch('/api/app-updates/import-app-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: appStoreEntries, country: appStoreCountry }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'App Store 批量导入失败')
+      const missing = Array.isArray(data.missingIds) && data.missingIds.length > 0
+        ? `；${data.missingIds.length} 个 ID 未找到`
+        : ''
+      setNotice(`App Store 导入完成：新增 ${data.imported} 个，已有 ${data.existing} 个${missing}`)
+      setAppStoreImportOpen(false); setAppStoreEntries(''); await load()
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : 'App Store 批量导入失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function openNewTarget() {
     setSourceApp(null); setForm(EMPTY_FORM); setTargetOpen(true)
   }
@@ -167,6 +193,7 @@ export default function AppUpdateCenterClient() {
           </div>
           <div className="flex gap-2">
             <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-update-crawl.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">打开抓取任务</a>
+            <button type="button" onClick={() => { setError(''); setNotice(''); setAppStoreImportOpen(true) }} className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50">批量导入 App Store</button>
             <button type="button" onClick={openNewTarget} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">＋ 新增应用</button>
           </div>
         </div>
@@ -180,6 +207,7 @@ export default function AppUpdateCenterClient() {
         </div>
 
         {error && <div className="mt-4 flex items-center justify-between rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button onClick={load} className="font-semibold underline">重试</button></div>}
+        {notice && <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div>}
 
         <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -200,6 +228,8 @@ export default function AppUpdateCenterClient() {
           )}
         </section>
       </main>
+
+      {appStoreImportOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"><div className="flex items-start justify-between border-b border-slate-100 px-6 py-4"><div><h2 className="text-lg font-bold text-slate-950">批量导入 App Store 应用</h2><p className="mt-1 text-xs leading-5 text-slate-400">每行填写一个 App Store 链接或数字应用 ID，单次最多 100 个。导入后再运行抓取任务。</p></div><button onClick={() => setAppStoreImportOpen(false)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button></div><div className="space-y-4 px-6 py-5"><label className="block text-sm font-medium text-slate-700">商店地区<select value={appStoreCountry} onChange={event => setAppStoreCountry(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3"><option value="cn">中国大陆</option><option value="my">马来西亚</option><option value="us">美国</option><option value="hk">中国香港</option><option value="tw">中国台湾</option></select></label><label className="block text-sm font-medium text-slate-700">应用链接或 ID<textarea value={appStoreEntries} onChange={event => setAppStoreEntries(event.target.value)} rows={9} placeholder={'https://apps.apple.com/cn/app/.../id123456789\n987654321'} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-3 font-mono text-sm outline-none focus:border-blue-400" /></label><p className="text-xs leading-5 text-slate-400">系统会从 Apple 官方接口取得应用名称和 Bundle ID。重复应用不会再次建立。</p></div><div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button onClick={() => setAppStoreImportOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm">取消</button><button disabled={saving || !appStoreEntries.trim()} onClick={importAppStoreApps} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? '导入中…' : '开始导入'}</button></div></div></div>}
 
       {targetOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><div><h2 className="text-lg font-bold text-slate-950">{sourceApp ? `为 ${sourceApp.name} 添加来源` : '新增实验应用'}</h2><p className="mt-1 text-xs text-slate-400">先填写公开更新页面，GitHub Actions 会尝试自动识别资料。</p></div><button onClick={() => setTargetOpen(false)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button></div><div className="grid gap-4 px-6 py-5 sm:grid-cols-2">{!sourceApp && <><label className="text-sm font-medium text-slate-700">应用名称<input value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label><label className="text-sm font-medium text-slate-700">平台<select value={form.platform} onChange={event => setForm(current => ({ ...current, platform: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">包名或应用标识（可不填）<input value={form.packageIdentifier} onChange={event => setForm(current => ({ ...current, packageIdentifier: event.target.value }))} placeholder="例如 com.example.app" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label></>}<label className="text-sm font-medium text-slate-700">来源名称<input value={form.sourceName} onChange={event => setForm(current => ({ ...current, sourceName: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label><label className="text-sm font-medium text-slate-700">来源类型<select value={form.sourceType} onChange={event => setForm(current => ({ ...current, sourceType: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3">{Object.entries(SOURCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">更新页面 URL<input value={form.sourceUrl} onChange={event => setForm(current => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://..." className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label></div><div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button onClick={() => setTargetOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm">取消</button><button disabled={saving} onClick={saveTarget} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? '保存中…' : '保存'}</button></div></div></div>}
 

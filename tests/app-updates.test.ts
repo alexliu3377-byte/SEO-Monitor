@@ -7,6 +7,7 @@ import {
   normalizeAppVersion,
   normalizePublicHttpUrl,
 } from '../lib/app-updates'
+import { appStoreResultToUpdate, parseAppStoreIds } from '../lib/app-store'
 
 test('app version normalization removes labels and keeps comparable characters', () => {
   assert.equal(normalizeAppVersion(' Version v2.03.1-beta '), '2.03.1-beta')
@@ -55,4 +56,32 @@ test('extractor tolerates invalid optional selectors', () => {
   )
   assert.equal(result?.normalizedVersion, '2.5.0')
   assert.equal(result?.changelog, '修复问题')
+})
+
+test('App Store batch input accepts links and numeric ids without duplicates', () => {
+  assert.deepEqual(parseAppStoreIds(`
+    https://apps.apple.com/cn/app/example/id123456789
+    987654321
+    id123456789
+    invalid
+  `), ['123456789', '987654321'])
+})
+
+test('App Store lookup data becomes a reviewable release', () => {
+  const result = appStoreResultToUpdate({
+    wrapperType: 'software',
+    kind: 'software',
+    trackId: 123456789,
+    trackName: 'Example App',
+    bundleId: 'com.example.app',
+    version: '4.2.1',
+    releaseNotes: '修复登录问题',
+    currentVersionReleaseDate: '2026-09-10T01:02:03Z',
+    fileSizeBytes: '52428800',
+    trackViewUrl: 'https://apps.apple.com/cn/app/example/id123456789',
+  })
+  assert.equal(result?.normalizedVersion, '4.2.1')
+  assert.equal(result?.releaseDate, '2026-09-10')
+  assert.equal(result?.packageSize, '50.0 MB')
+  assert.equal(result?.changelog, '修复登录问题')
 })

@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
 import iconv from 'iconv-lite'
 import { extractAppUpdate, type AppUpdateExtractorConfig } from '../lib/app-update-extractor'
+import {
+  appStoreCountryFromUrl,
+  appStoreResultToUpdate,
+  lookupAppStoreApps,
+  parseAppStoreIds,
+} from '../lib/app-store'
 import { fetchPublicUrl } from '../lib/safe-remote-url'
 
 type SourceRow = {
@@ -8,6 +14,7 @@ type SourceRow = {
   app_id: string
   source_url: string
   source_name: string
+  source_type: string
   extractor_config: unknown
   app_update_apps: { id: string; name: string; status: string } | null
 }
@@ -55,7 +62,7 @@ async function main() {
 
   let query = service
     .from('app_update_sources')
-    .select('id, app_id, source_url, source_name, extractor_config, app_update_apps!inner(id, name, status)')
+    .select('id, app_id, source_url, source_name, source_type, extractor_config, app_update_apps!inner(id, name, status)')
     .eq('enabled', true)
     .eq('app_update_apps.status', 'active')
     .order('last_checked_at', { ascending: true, nullsFirst: true })
@@ -83,16 +90,28 @@ async function main() {
 
     try {
       console.log(`[${index + 1}/${sources.length}] ${source.app_update_apps?.name ?? source.source_name}`)
-      const response = await fetchPublicUrl(source.source_url, {
-        headers: {
-          'User-Agent': 'QixinAppUpdateResearch/0.1 (+internal version research)',
-          Accept: 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.5',
-        },
-        signal: AbortSignal.timeout(30_000),
-      })
-      if (!response.ok) throw new Error(`来源页面返回 HTTP ${response.status}`)
-      const html = await responseText(response)
-      const extracted = extractAppUpdate(html, source.source_url, extractorConfig(source.extractor_config))
+      let extracted: ReturnType<typeof extractAppUpdate> = null
+      const appStoreId = source.source_type === 'app_store'
+        ? parseAppStoreIds(source.source_url, 1)[0]
+        : undefined
+      if (appStoreId) {
+        const appStoreRows = await lookupAppStoreApps(
+          [appStoreId],
+          appStoreCountryFromUrl(source.source_url)
+        )
+        extracted = appStoreRows[0] ? appStoreResultToUpdate(appStoreRows[0]) : null
+      } else {
+        const response = await fetchPublicUrl(source.source_url, {
+          headers: {
+            'User-Agent': 'QixinAppUpdateResearch/0.1 (+internal version research)',
+            Accept: 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.5',
+          },
+          signal: AbortSignal.timeout(30_000),
+        })
+        if (!response.ok) throw new Error(`来源页面返回 HTTP ${response.status}`)
+        const html = await responseText(response)
+        extracted = extractAppUpdate(html, source.source_url, extractorConfig(source.extractor_config))
+      }
       if (!extracted) throw new Error('没有自动识别到版本号，需要为这个来源补充解析规则')
 
       const { data: existing } = await service
