@@ -202,8 +202,9 @@ async function main() {
     if (index < sources.length - 1) await new Promise(resolve => setTimeout(resolve, 4_000))
   }
 
-  if (failedSources > 0) {
-    throw new Error(`本轮有 ${failedSources} 个来源抓取失败，请查看应用更新中心的抓取记录`)
+  console.log(`本轮完成：成功 ${sources.length - failedSources}，失败 ${failedSources}`)
+  if (sources.length > 0 && failedSources >= Math.max(1, Math.ceil(sources.length / 2))) {
+    throw new Error(`本轮有 ${failedSources}/${sources.length} 个来源抓取失败，请查看应用更新中心的抓取记录`)
   }
 }
 
