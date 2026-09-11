@@ -39,6 +39,7 @@ import {
   normalizeTrendSourceUrl,
   normalizeTrendTerm,
 } from '../lib/trend-discovery'
+import { isCrawlStep, normalizeCrawlDomain } from '../lib/github-actions'
 
 const blockedUrls = [
   'file:///etc/passwd',
@@ -63,6 +64,15 @@ test('domain normalization removes schemes, paths and duplicates', () => {
     normalizeDomains([' HTTPS://Example.COM/path ', 'example.com.', 'api.example.com']),
     ['example.com', 'api.example.com']
   )
+})
+
+test('manual crawl dispatch accepts only valid domains and supported steps', () => {
+  assert.equal(normalizeCrawlDomain(' HTTPS://DIYIYOU.COM/path '), 'diyiyou.com')
+  assert.equal(normalizeCrawlDomain('https://user:secret@example.com'), null)
+  assert.equal(normalizeCrawlDomain('localhost'), null)
+  assert.equal(normalizeCrawlDomain('example.com:8443'), null)
+  assert.equal(isCrawlStep('weight'), true)
+  assert.equal(isCrawlStep('unknown-step'), false)
 })
 
 test('task-group members use canonical profile names', async () => {

@@ -24,7 +24,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '抓取对象', text: '仅 is_enabled=true 且 list_url 已填写的站点；is_enabled 由用户在网站管理"关键词数据"开关控制，关闭后跳过关键词抓取但权重/排名照常运行' },
       { label: '文章链接抓取', text: '各来源可在"文章链接CSS选择器"（url_selectors 字段，||| 分隔多来源）填写指定 CSS 选择器；填写后爬虫用该选择器在每条记录的容器内查找 <a> 元素并写入 raw_keywords.source_url；留空则 source_url 为 null；支持完整URL和相对路径（相对路径自动补全域名）' },
       { label: '频率规则', text: '所有站点均为 daily（每天）' },
-      { label: '翻页策略', text: '最多3页；正式 GitHub Actions 抓取每页间隔随机等待10~15秒；单站手动重试跳过等待直接顺序翻页；若某页全部条目日期解析失败（日期CSS选择器很可能配置错误，而不是碰到没见过的日期格式），当页翻页立即停止，不再继续翻到第2、3页——避免选择器坏了时把更多页的旧内容当"昨日新增"批量抓入（2026-07-29 加入；JSON-HTML混合模式同样逻辑，上限从30页降到出问题即停）' },
+      { label: '翻页策略', text: '最多3页；GitHub Actions 抓取每页间隔随机等待10~15秒，页面发起的单站重抓也进入同一 Actions 流程并遵守相同间隔；若某页全部条目日期解析失败（日期CSS选择器很可能配置错误，而不是碰到没见过的日期格式），当页翻页立即停止，不再继续翻到第2、3页——避免选择器坏了时把更多页的旧内容当"昨日新增"批量抓入（2026-07-29 加入；JSON-HTML混合模式同样逻辑，上限从30页降到出问题即停）' },
       { label: '去重', text: '与数据库同日期已有词对比去重，批次内也去重；新词写入 raw_keywords' },
       { label: '版本号清洗', text: '启用版本号清洗时：发现 v/V 前缀版本号（如 v2.3.1）时，从该版本号起连同其后所有内容一并删除（如"使命召唤v2.3.1安卓版"→"使命召唤"，"世界1.20.4中文版v1.20.4"→"世界1.20.4中文版"）；不含 v 前缀的纯数字版本号（如1.20.4）和独立"xxx版"词组保留不处理' },
       { label: '写入表', text: 'raw_keywords（新词）/ competitor_kw_stats（app/game分类计数）' },
@@ -42,7 +42,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '数据来源', text: '爱站 aizhan.com，抓取 PC/移动权重、收录数、来路IP区间' },
       { label: '限流保护', text: '失败后等30秒重试，最多3次（共3次尝试，每次换新UA）；站点间隔3秒' },
       { label: '写入表', text: 'weight_history（pc/mobile权重+IP区间，按 site_id+record_date upsert）/ index_snapshots（收录数，按 site_id+snapshot_date upsert）' },
-      { label: '手动重抓', text: '页面"重抓"按钮 → /api/trigger-crawl → /api/cron?step=weight&site=xxx，IP来自 Vercel，记录为 cron_manual' },
+      { label: '手动重抓', text: '页面"重抓"按钮 → /api/trigger-crawl → GitHub Actions daily-crawl.yml 单站任务；接口只负责排队，不再等待抓取完成，避免 Vercel 50秒超时导致按钮报错' },
     ],
   },
   {
@@ -65,13 +65,13 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'cron_manual',
     title: '手动重抓',
-    badge: '触发方式：页面按钮 → Vercel /api/trigger-crawl',
+    badge: '触发方式：页面按钮 → /api/trigger-crawl → GitHub Actions 单站任务',
     items: [
-      { label: 'IP来源', text: 'Vercel serverless（与 GitHub Actions IP 不同），仅用于单站补抓，不适合替代 GitHub Actions 跑全量' },
-      { label: '触发路径', text: '页面按钮 → POST /api/trigger-crawl { site, step }（需 admin/super 权限）→ GET /api/cron?site=xxx&step=yyy → 单站抓取（走 /api/cron，与 GitHub Actions 的 scripts/crawl.ts 是两条不同执行路径）；trigger-crawl 超时限制 50s，为避免超时：keywords 步骤去掉翻页间隔延迟（正常 10-15s，单站模式跳过），weight 步骤重试间隔缩短为 5s（正常为 30s）' },
+      { label: 'IP来源', text: 'GitHub Actions runner，与每日定时抓取使用同一执行环境和抓取代码' },
+      { label: '触发路径', text: '页面按钮 → POST /api/trigger-crawl { site, step }（需 admin/super 权限）→ GitHub API workflow_dispatch → daily-crawl.yml 单站 job；接口收到 GitHub 的排队确认后立即返回，页面显示"已加入重抓队列"，完成结果稍后刷新查看' },
       { label: '写入', text: '与定时任务相同的写入逻辑；weight 步骤写入 weight_history + index_snapshots；keywords 步骤写入 raw_keywords + competitor_kw_stats' },
-      { label: '日志', text: '记录为 cron_manual，来源 Vercel，detail 显示写入行数' },
-      { label: '涨跌排行的已知限制', text: 'Vercel 手动重抓/导出涨跌排行相关接口（/api/rank-changes、/api/export-rankup-history、/api/export-rank-history、/api/cron?step=rank）用的是 lib/crawler.ts 里更早一版的 fetchRankChanges/prefetchRankCookie，只识别 2026-06-19 那版"内嵌 document.cookie"挑战，不处理 HTTP 302+Set-Cookie 形式，也没有 lib/crawler-aizhan-http.ts 的重试/hop 逻辑；爱站挑战机制变化期间这条路径可能比 GitHub Actions 那条（scripts/crawl.ts / crawl-rank.ts，已切到 lib/crawler-aizhan-http.ts）更容易抓空，这是已知的、可接受的降级——日常抓取走的是 GitHub Actions 那条路径' },
+      { label: '日志', text: '与 daily-crawl.yml 的定时任务采用相同日志格式；单站任务只处理按钮提交的域名' },
+      { label: '队列说明', text: '按钮显示"已排队"只代表 GitHub 已接受任务，不代表数据已经抓完；任务可能因账号并发额度短暂排队，完成后刷新对应页面或在抓取日志查看结果' },
     ],
   },
   {
@@ -91,7 +91,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '收录页面追踪',
     badge: 'step=index-pages · GitHub Actions · 03:30 MYT（cron 19:30 UTC）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 19 * * * UTC = 03:30 MYT)，setup job 仅查询 has_index_pages=true 的站点数决定 job 数，每站一个 job（SPG=1）；retry-crawl.yml (cron 30 22 UTC = 06:30 MYT) 自动补抓；支持页面手动重抓 → /api/trigger-crawl → /api/cron?step=index-pages' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 19 * * * UTC = 03:30 MYT)，setup job 仅查询 has_index_pages=true 的站点数决定 job 数，每站一个 job（SPG=1）；retry-crawl.yml (cron 30 22 UTC = 06:30 MYT) 自动补抓；页面手动重抓通过 /api/trigger-crawl 排入同一个 daily-crawl.yml 单站任务' },
       { label: '抓取对象', text: '仅 has_index_pages=true 的站点（在收录页面追踪页面逐站开关，默认 false）；setup 阶段已精确过滤，不会为其他类型站点创建多余 job' },
       { label: '抓取方式', text: '百度 site:domain 搜索，时间窗口分批策略：周(7天)+日(1天) 每天为全部站点运行；月(31天) 窗口按 3 天轮转批次（MYT 天数 mod 3 = 批次号，每站按其在站点数组的下标 idx%3 决定当天是否跑月度窗口），每天约 1/3 站点跑月度，3 天内覆盖所有站点；gpc=stf={now-Nd},{now}|stftype=1 + tfflag=1 + ct=2097152/si=domain/fenlei=256；pn=0/10/20... 翻页，无页数上限；停止条件：空页、被拦截（captcha 则中止当站）、或整页URL相同；翻页间隔 5-8 秒随机' },
       { label: 'Cookie 来源', text: 'app_settings.baidu_index_cookie 手动 Cookie 池（JSON 数组，从已登录/长期使用的浏览器复制账号 cookie，"分组任务"页面右上角"管理 Cookie 池"维护，所有登录用户都可查看和维护，非仅管理员），每次抓取随机取一个使用；翻页过程中沿用 fetchBaiduIndexPages() 原有逻辑：每页 Referer 指向上一页、Cookie 随每页 Set-Cookie 滚动更新。2026-07-27 曾短暂尝试用 Playwright headless Chromium 自动访问百度现拿匿名 cookie 替代手动池，但真实 GitHub Actions A/B 对比显示效果明显更差（匿名新 cookie 首次请求就100%被拦截，而手动池里"资历更老"的账号 cookie 能连续拿到3-5页真实数据）——判断是 Baidu 反爬会评估 cookie 的"资历"（关联的浏览历史/账号信息越老越可信），不是单纯看请求是否来自真实浏览器，因此改回手动池为唯一来源，不再自动获取' },

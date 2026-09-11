@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { dispatchGitHubWorkflow, isCrawlStep, normalizeCrawlDomain } from '@/lib/github-actions'
 
-export const maxDuration = 55
+export const maxDuration = 15
 
 export async function POST(req: Request) {
   const supabase = await createClient()
@@ -13,27 +14,22 @@ export async function POST(req: Request) {
   const role = profile?.role ?? 'normal'
   if (role === 'normal') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { site, step } = await req.json().catch(() => ({}))
-  if (!site || !step) return NextResponse.json({ error: '缺少参数' }, { status: 400 })
-
-  const cronSecret = process.env.CRON_SECRET
-  if (!cronSecret) return NextResponse.json({ error: '服务未配置' }, { status: 500 })
-
-  const appUrl = (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  ).replace(/\/$/, '')
-  const url = `${appUrl}/api/cron?site=${encodeURIComponent(site)}&step=${encodeURIComponent(step)}`
+  const body = await req.json().catch(() => ({}))
+  const site = normalizeCrawlDomain(body.site)
+  if (!site) return NextResponse.json({ error: '请输入有效的站点域名' }, { status: 400 })
+  if (!isCrawlStep(body.step)) return NextResponse.json({ error: '无效的抓取步骤' }, { status: 400 })
 
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${cronSecret}` },
-      signal: AbortSignal.timeout(50000),
+    const result = await dispatchGitHubWorkflow('daily-crawl.yml', {
+      step: body.step,
+      site,
+      date: '',
     })
-    const data = await res.json()
-    return NextResponse.json(data)
-  } catch (err) {
-    console.error('Crawl dispatch failed', err)
-    return NextResponse.json({ error: '触发失败' }, { status: 500 })
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+
+    return NextResponse.json({ ok: true, queued: true, site, step: body.step }, { status: 202 })
+  } catch (error) {
+    console.error('Crawl dispatch failed', error)
+    return NextResponse.json({ error: '重抓任务启动失败，请稍后重试' }, { status: 502 })
   }
 }

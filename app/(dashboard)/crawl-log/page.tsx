@@ -202,8 +202,8 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
                       </span>
                     </label>
                     <div className="text-xs ml-3 flex-shrink-0 w-16 text-right">
-                      {ps === 'retrying' && <span className="text-blue-500 animate-pulse">重试中…</span>}
-                      {ps === 'ok' && <span className="text-green-600">✓ 成功</span>}
+                      {ps === 'retrying' && <span className="text-blue-500 animate-pulse">提交中…</span>}
+                      {ps === 'ok' && <span className="text-green-600">✓ 已排队</span>}
                       {ps === 'fail' && <span className="text-red-500">✗ 失败</span>}
                       {(ps === 'pending' || !ps) && <span className="text-gray-200">—</span>}
                     </div>
@@ -218,7 +218,7 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
           {done ? (
             <div className="space-y-3">
               <p className="text-sm text-center text-gray-600">
-                重试完成：<span className="text-green-600 font-medium">{okCount} 成功</span>
+                提交完成：<span className="text-green-600 font-medium">{okCount} 已排队</span>
                 {completedCount - okCount > 0 && (
                   <span className="text-red-500 font-medium ml-2">{completedCount - okCount} 失败</span>
                 )}
@@ -237,8 +237,8 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
               <button onClick={handleRetry} disabled={running || selected.size === 0}
                 className="flex-1 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50">
                 {running
-                  ? `重试中 ${completedCount}/${selected.size}`
-                  : `开始重试（${selected.size} 站）`}
+                  ? `提交中 ${completedCount}/${selected.size}`
+                  : `提交重试（${selected.size} 站）`}
               </button>
             </div>
           )}

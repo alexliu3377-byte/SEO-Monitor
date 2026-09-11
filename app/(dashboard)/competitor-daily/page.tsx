@@ -333,12 +333,14 @@ export default function CompetitorDailyPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         setKwCrawlMsg({ text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else if (data?.queued) {
+        setKwCrawlMsg({ text: '已加入重抓队列，完成后刷新查看', ok: true })
       } else {
         const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === selectedSite.domain)
         if (siteResult?.error) setKwCrawlMsg({ text: siteResult.error, ok: false })
         else setKwCrawlMsg({ text: `抓取成功，新增${siteResult?.count ?? 0}条`, ok: true })
       }
-      await fetchKeywordsForDate(selectedSite, kwDate, kwTab)
+      if (!data?.queued) await fetchKeywordsForDate(selectedSite, kwDate, kwTab)
     } catch {
       setKwCrawlMsg({ text: '请求失败，请检查网络', ok: false })
     } finally {
@@ -484,6 +486,8 @@ export default function CompetitorDailyPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         setRankCrawlMsg({ text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else if (data?.queued) {
+        setRankCrawlMsg({ text: '已加入重抓队列，完成后刷新查看', ok: true })
       } else {
         const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === rankSite.domain)
         if (siteResult?.error) setRankCrawlMsg({ text: siteResult.error, ok: false })
@@ -491,8 +495,10 @@ export default function CompetitorDailyPage() {
         // 条数（只有失败才会push进results）——没有条数信息时不要编一个"0条"出来
         else setRankCrawlMsg({ text: siteResult?.count != null ? `抓取成功，${siteResult.count}条` : '抓取成功', ok: true })
       }
-      await fetchRankPage(rankSite, rankDate, rankType, 0, pageSize, true)
-      setRankPage(0)
+      if (!data?.queued) {
+        await fetchRankPage(rankSite, rankDate, rankType, 0, pageSize, true)
+        setRankPage(0)
+      }
     } catch {
       setRankCrawlMsg({ text: '请求失败，请检查网络', ok: false })
     } finally {
@@ -774,7 +780,7 @@ export default function CompetitorDailyPage() {
                     disabled={kwCrawling}
                     className="text-xs text-gray-400 hover:text-green-600 px-2 py-1 rounded hover:bg-gray-100 transition-colors disabled:opacity-40"
                   >
-                    {kwCrawling ? '抓取中…' : '重抓'}
+                    {kwCrawling ? '提交中…' : '重抓'}
                   </button>
                 )}
                 <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600">
@@ -942,7 +948,7 @@ export default function CompetitorDailyPage() {
                     disabled={rankCrawling}
                     className="text-xs text-gray-400 hover:text-purple-600 px-2 py-1 rounded hover:bg-purple-50 transition-colors disabled:opacity-40"
                   >
-                    {rankCrawling ? '抓取中…' : '重抓'}
+                    {rankCrawling ? '提交中…' : '重抓'}
                   </button>
                 )}
                 <button onClick={() => setRankSite(null)} className="text-gray-400 hover:text-gray-600">

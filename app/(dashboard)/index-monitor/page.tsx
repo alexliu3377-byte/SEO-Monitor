@@ -77,12 +77,14 @@ export default function IndexMonitorPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         setCrawlMsg({ domain, text: data?.error || `请求失败（${res.status}）`, ok: false })
+      } else if (data?.queued) {
+        setCrawlMsg({ domain, text: '已加入重抓队列，完成后刷新查看', ok: true })
       } else {
         const siteResult = (data?.results ?? []).find((r: { site: string; error?: string }) => r.site === domain)
         if (siteResult?.error) setCrawlMsg({ domain, text: siteResult.error, ok: false })
         else setCrawlMsg({ domain, text: '抓取成功', ok: true })
       }
-      await loadData()
+      if (!data?.queued) await loadData()
     } catch {
       setCrawlMsg({ domain, text: '请求失败，请检查网络', ok: false })
     } finally {
@@ -293,7 +295,7 @@ export default function IndexMonitorPage() {
                                 disabled={crawling === row.domain}
                                 className="text-xs text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors disabled:opacity-40"
                               >
-                                {crawling === row.domain ? '抓取中…' : '重抓'}
+                                {crawling === row.domain ? '提交中…' : '重抓'}
                               </button>
                             )}
                           </div>

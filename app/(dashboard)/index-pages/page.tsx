@@ -74,7 +74,7 @@ export default function IndexPagesPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        setVerifyMsg(recheck ? '已触发，重新验证已脱收中…' : '已触发，验证中…')
+        setVerifyMsg(recheck ? '已加入重新验证队列' : '已加入验证队列')
       } else {
         setVerifyMsg(data.error || '触发失败')
       }
@@ -215,7 +215,7 @@ const [triggering, setTriggering] = useState(false)
             )}
             {triggered ? (
               <>
-                <span className="text-xs text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">已触发，抓取中…</span>
+                <span className="text-xs text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">已加入抓取队列</span>
                 <button onClick={() => setTriggered(false)} className="text-xs text-gray-400 hover:text-gray-600">重置</button>
               </>
             ) : (

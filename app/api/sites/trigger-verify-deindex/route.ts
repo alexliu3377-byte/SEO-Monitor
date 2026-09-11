@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-
-const REPO = 'jiianzhi98-ui/SEO-Monitor'
-const WORKFLOW = 'verify-deindex.yml'
+import { dispatchGitHubWorkflow } from '@/lib/github-actions'
 
 // POST /api/sites/trigger-verify-deindex
 // Body: { recheck?: boolean }
@@ -20,30 +18,10 @@ export async function POST(req: Request) {
 
   const { recheck } = await req.json().catch(() => ({}))
 
-  const pat = process.env.GITHUB_PAT
-  if (!pat) return NextResponse.json({ error: '服务器未配置 GITHUB_PAT，请联系管理员' }, { status: 500 })
+  const result = await dispatchGitHubWorkflow('verify-deindex.yml', {
+    recheck_disappeared: recheck ? 'true' : 'false',
+  })
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
 
-  const ghRes = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${pat}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-      body: JSON.stringify({
-        ref: 'main',
-        inputs: { recheck_disappeared: recheck ? 'true' : 'false' },
-      }),
-    }
-  )
-
-  if (!ghRes.ok) {
-    const errText = await ghRes.text()
-    return NextResponse.json({ error: `GitHub API 错误 (${ghRes.status}): ${errText}` }, { status: 502 })
-  }
-
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, queued: true }, { status: 202 })
 }
