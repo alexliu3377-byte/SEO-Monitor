@@ -1,12 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 import {
   fetchAppStoreChartIds,
+  isAppStoreGame,
   lookupAppStoreApps,
   searchAppStoreApps,
   type AppStoreLookupResult,
 } from '../lib/app-store'
 import {
   APP_STORE_DISCOVERY_COUNTRIES,
+  APP_STORE_GAME_DISCOVERY_TERMS,
   APP_STORE_DISCOVERY_MODES,
   appStoreDailyDiscoveryPlan,
   type AppStoreDiscoveryMode,
@@ -48,9 +50,14 @@ async function main() {
     for (const chart of plan.charts) {
       try {
         const ids = await fetchAppStoreChartIds(chart, country, 100)
-        const rows = await lookupAppStoreApps(ids, country)
+        const lookupRows = await lookupAppStoreApps(ids, country)
+        const rows = mode === 'games'
+          ? lookupRows.filter(isAppStoreGame)
+          : mode === 'apps'
+            ? lookupRows.filter(row => !isAppStoreGame(row))
+            : lookupRows
         for (const row of rows) discovered.set(row.bundleId, row)
-        console.log(`${chart}: 取得 ${rows.length} 个应用`)
+        console.log(`${chart}: 取得 ${lookupRows.length}，按模式保留 ${rows.length}`)
       } catch (error) {
         failedRequests += 1
         console.error(`${chart}: ${error instanceof Error ? error.message : error}`)
@@ -61,9 +68,13 @@ async function main() {
 
   for (const [index, term] of plan.terms.entries()) {
     try {
-      const rows = await searchAppStoreApps(term, country, 200)
+      const searchRows = await searchAppStoreApps(term, country, 200)
+      const expectsGames = mode === 'games' || APP_STORE_GAME_DISCOVERY_TERMS.includes(term)
+      const rows = expectsGames
+        ? searchRows.filter(isAppStoreGame)
+        : searchRows.filter(row => !isAppStoreGame(row))
       for (const row of rows) discovered.set(row.bundleId, row)
-      console.log(`[${index + 1}/${plan.terms.length}] ${term}: 取得 ${rows.length}，本轮去重后 ${discovered.size}`)
+      console.log(`[${index + 1}/${plan.terms.length}] ${term}: 取得 ${searchRows.length}，分类校验后 ${rows.length}，本轮去重后 ${discovered.size}`)
     } catch (error) {
       failedRequests += 1
       console.error(`${term}: ${error instanceof Error ? error.message : error}`)

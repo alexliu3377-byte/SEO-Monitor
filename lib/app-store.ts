@@ -12,6 +12,9 @@ export type AppStoreLookupResult = {
   currentVersionReleaseDate?: string
   fileSizeBytes?: string
   trackViewUrl: string
+  primaryGenreId?: number
+  primaryGenreName?: string
+  genreIds?: string[]
 }
 
 type AppStoreLookupResponse = {
@@ -61,6 +64,12 @@ export function appStoreCountryFromUrl(value: string, fallback = 'cn') {
 export function canonicalAppStoreUrl(result: AppStoreLookupResult) {
   const normalized = cleanAppUpdateText(result.trackViewUrl, 1200)
   return normalized || `https://apps.apple.com/app/id${result.trackId}`
+}
+
+export function isAppStoreGame(result: AppStoreLookupResult) {
+  return result.primaryGenreId === 6014
+    || result.genreIds?.includes('6014') === true
+    || result.primaryGenreName?.toLowerCase() === 'games'
 }
 
 function formatFileSize(value: string | undefined): string | null {

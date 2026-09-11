@@ -7,7 +7,7 @@ import {
   normalizeAppVersion,
   normalizePublicHttpUrl,
 } from '../lib/app-updates'
-import { appStoreResultToUpdate, isAppStoreChart, parseAppStoreIds } from '../lib/app-store'
+import { appStoreResultToUpdate, isAppStoreChart, isAppStoreGame, parseAppStoreIds } from '../lib/app-store'
 import { appStoreDailyDiscoveryPlan } from '../lib/app-store-discovery'
 
 test('app version normalization removes labels and keeps comparable characters', () => {
@@ -96,6 +96,20 @@ test('App Store game discovery supports a games-only expansion run', () => {
   assert.equal(plan.mode, 'games')
   assert.equal(plan.terms.length, 12)
   assert.ok(plan.terms.every(term => /游戏|手游|game|RPG|开放世界/i.test(term)))
+})
+
+test('App Store game classification uses the Apple Games genre', () => {
+  const base = {
+    trackId: 123456789,
+    trackName: 'Example',
+    bundleId: 'com.example.game',
+    version: '1.0.0',
+    trackViewUrl: 'https://apps.apple.com/app/id123456789',
+  }
+  assert.equal(isAppStoreGame({ ...base, primaryGenreId: 6014 }), true)
+  assert.equal(isAppStoreGame({ ...base, genreIds: ['6014', '7001'] }), true)
+  assert.equal(isAppStoreGame({ ...base, primaryGenreName: 'Games' }), true)
+  assert.equal(isAppStoreGame({ ...base, primaryGenreName: 'Productivity' }), false)
 })
 
 test('App Store lookup data becomes a reviewable release', () => {
