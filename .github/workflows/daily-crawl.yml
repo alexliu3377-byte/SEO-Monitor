@@ -55,7 +55,6 @@ jobs:
         env:
           SITE_INPUT: ${{ inputs.site || github.event.inputs.site }}
           STEP_INPUT: ${{ inputs.step || github.event.inputs.step }}
-          EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -68,7 +67,10 @@ jobs:
             echo "Single-site run ($SITE) → 1 group"
           else
             # 根据 step 决定每组站点上限
-            if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
+            # A reusable workflow keeps the caller's event name (for example
+            # "schedule"), so github.event_name cannot reliably tell us that
+            # inputs.step came from workflow_call. Prefer any explicit input.
+            if [ -n "$STEP_INPUT" ]; then
               STEP="$STEP_INPUT"
             elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
               STEP="keywords"
@@ -83,6 +85,10 @@ jobs:
             else
               STEP="all"
             fi
+            case "$STEP" in
+              all|keywords|weight|rank|rank-title|index-pages|tracking) ;;
+              *) echo "Invalid crawl step: $STEP" >&2; exit 1 ;;
+            esac
             # 2026-08-28：keywords/rank/weight/默认(all) 这几个步骤共用同一批81个
             # 站点（is_enabled/has_rank_data/has_index_pages 任一开着），SPG从
             # 4-5调到6——账号是GitHub Free，同时最多只能跑20个job，SPG=4时
@@ -150,10 +156,11 @@ jobs:
         id: vars
         env:
           STEP_INPUT: ${{ inputs.step || github.event.inputs.step }}
-          EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
+          # workflow_call inherits the caller's event name. The explicit input
+          # is therefore the source of truth whenever it is present.
+          if [ -n "$STEP_INPUT" ]; then
             STEP="$STEP_INPUT"
           elif [ "$EVENT_SCHEDULE" = "5 16 * * *" ]; then
             STEP="keywords"
@@ -168,6 +175,10 @@ jobs:
           else
             STEP="all"
           fi
+          case "$STEP" in
+            all|keywords|weight|rank|rank-title|index-pages|tracking) ;;
+            *) echo "Invalid crawl step: $STEP" >&2; exit 1 ;;
+          esac
           echo "step=$STEP" >> $GITHUB_OUTPUT
           echo "Running step: $STEP (group ${{ matrix.group }}/${{ needs.setup.outputs.total }})"
 
