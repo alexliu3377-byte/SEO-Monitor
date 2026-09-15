@@ -48,16 +48,17 @@ function getMYDate(offsetDays = 0): string {
 
 type Badge = 'new' | 'updated' | null
 
-// 今日 = first_date 是今天/昨天（刚进入此 tab）；更新 = 旧词有新活动
-function getBadge(first_date: string, last_date: string, yesterday: string): Badge {
-  if (!last_date || last_date < yesterday) return null
-  if (first_date >= yesterday) return 'new'
+// 标签描述这条资料在其记录日期当天的性质，而不是只提醒今天。这样轮休后
+// 回看旧日期时，仍能分清它是首次出现还是旧词再次发生变化。
+function getBadge(first_date: string, last_date: string, _yesterday: string): Badge {
+  if (!last_date) return null
+  if (first_date && first_date === last_date) return 'new'
   return 'updated'
 }
 
-// 连续上涨词：streak==2 刚达到门槛→今日；streak>2 持续上涨→更新
-function getStreakBadge(streak: number, last_date: string, yesterday: string): Badge {
-  if (!last_date || last_date < yesterday) return null
+// 连续上涨词：刚达到两天门槛算新增，之后继续上涨算更新。
+function getStreakBadge(streak: number, last_date: string, _yesterday: string): Badge {
+  if (!last_date) return null
   return streak <= 2 ? 'new' : 'updated'
 }
 
@@ -98,7 +99,7 @@ const DIM_LABELS: Record<string, { label: string; cls: string }> = {
 function BadgeChip({ badge }: { badge: Badge }) {
   if (!badge) return null
   if (badge === 'new')
-    return <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-green-500 text-white leading-none">今日</span>
+    return <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-green-500 text-white leading-none">新增</span>
   return <span className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-400 text-white leading-none">更新</span>
 }
 
@@ -233,6 +234,7 @@ export default function HotRadarPage() {
   const [minStreak, setMinStreak] = useState(2)
   const [filterSite, setFilterSite]       = useState('')
   const [filterKeyword, setFilterKeyword] = useState('')
+  const [filterDate, setFilterDate]       = useState('')
   const [page, setPage]         = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(50)
   const [weightMap, setWeightMap]     = useState<Map<string, WeightInfo>>(new Map())
@@ -525,6 +527,10 @@ export default function HotRadarPage() {
     filteredStreakWords,
   [filtered, activeTab, wordLibFiltered, filteredStreakWords])
 
+  const availableDates = useMemo(() => Array.from(new Set(
+    baseList.map(row => row.last_date).filter(Boolean),
+  )).sort((a, b) => b.localeCompare(a)), [baseList])
+
   const activeList = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let list = [...(baseList as any[])]
@@ -539,6 +545,7 @@ export default function HotRadarPage() {
       const kw = filterKeyword.trim().toLowerCase()
       list = list.filter((w: any) => w.keyword.toLowerCase().includes(kw))
     }
+    if (filterDate) list = list.filter((w: any) => w.last_date === filterDate)
     if (sortCol && sortDir) {
       list.sort((a: any, b: any) => {
         let va: string | number = 0, vb: string | number = 0
@@ -558,11 +565,11 @@ export default function HotRadarPage() {
     }
     return list
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseList, filterSite, filterKeyword, sortCol, sortDir])
+  }, [baseList, filterSite, filterKeyword, filterDate, sortCol, sortDir])
 
   const pagedList = activeList.slice(page * pageSize, (page + 1) * pageSize)
 
-  function handleTabChange(tab: Tab) { setActiveTab(tab); setPage(0); setSortCol(''); setSortDir('') }
+  function handleTabChange(tab: Tab) { setActiveTab(tab); setPage(0); setFilterDate(''); setSortCol('date'); setSortDir('desc') }
 
   const sortIcons = (col: string) => {
     const isAsc = sortCol === col && sortDir === 'asc'
@@ -669,6 +676,22 @@ export default function HotRadarPage() {
                   onChange={e => { setFilterKeyword(e.target.value); setPage(0) }}
                   placeholder="搜索..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-32" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">资料日期</span>
+                <select aria-label="筛选资料日期" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0) }}
+                  className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+                  <option value="">近30天全部</option>
+                  {availableDates.map(date => <option key={date} value={date}>{date}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">日期顺序</span>
+                <select aria-label="日期排序" value={sortCol === 'date' && sortDir ? sortDir : 'desc'}
+                  onChange={e => { setSortCol('date'); setSortDir(e.target.value as 'asc' | 'desc'); setPage(0) }}
+                  className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
+                  <option value="desc">最新在前</option><option value="asc">最早在前</option>
+                </select>
               </div>
               <div className="flex items-center gap-1.5">
                 {activeTab === 'wordLib' ? (
@@ -872,7 +895,7 @@ export default function HotRadarPage() {
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
-                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={null} />
+                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge="updated" />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
                           </td>
