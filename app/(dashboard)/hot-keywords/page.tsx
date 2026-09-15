@@ -686,14 +686,6 @@ export default function HotRadarPage() {
                 </select>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-400">日期顺序</span>
-                <select aria-label="日期排序" value={sortCol === 'date' && sortDir ? sortDir : 'desc'}
-                  onChange={e => { setSortCol('date'); setSortDir(e.target.value as 'asc' | 'desc'); setPage(0) }}
-                  className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
-                  <option value="desc">最新在前</option><option value="asc">最早在前</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-1.5">
                 {activeTab === 'wordLib' ? (
                   <>
                     <span className="text-xs text-gray-400">最少站点数</span>
