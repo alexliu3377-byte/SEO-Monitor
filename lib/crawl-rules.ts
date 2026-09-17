@@ -198,9 +198,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'environment-snapshot',
     title: '环境快照',
-    badge: 'retry-crawl.yml · tracking 完成后立即运行（可手动补跑）',
+    badge: 'retry-crawl.yml · index-pages 最后重试完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 在 index-pages 最后重试及 tracking 全部完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），不再等待固定时刻，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 在 index-pages 最后重试完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），与 tracking 并行、不再等待 tracking 全部完成，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
       { label: '计算来源', text: '① rank_changes：统计目标日期全站涨/跌排名词总数及有数据站点数；② index_snapshots：对比目标日期与前一日各站收录数，计算平均变化百分比；③ 日期本身：计算星期几、是否中国大陆法定节假日、是否学生放假期间（暑假7-8月、寒假1月20日-2月底）' },
       { label: '写入表', text: 'environment_daily（按 date 唯一 upsert；字段：date, weekday, is_holiday, is_school_holiday, total_rankup, total_rankdown, sites_with_rank_data, avg_index_change_pct, sites_with_index_data, crawl_anomaly；永久保留）' },
       { label: 'crawl_anomaly 判定', text: '当日 total_rankup + total_rankdown = 0 时标记为 true，表示排名数据疑似未抓取到；用于在评分时排除异常日期的数据' },
@@ -213,7 +213,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '热词雷达缓存',
     badge: 'retry-crawl.yml · 环境快照完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 的同一个 post-crawl-refresh job 在环境快照完成后立即调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET），不再单独排队启动定时 runner，也不需要进入页面；hot-radar-cache.yml 保留 workflow_dispatch 手动补跑入口' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 的 post-index-refresh job 在 index-pages 最后重试完成后调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET），与 tracking 并行，避免某一组 tracking 过慢时热词雷达和任务提交一直停在昨天；hot-radar-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-11 新增）', text: '热词雷达（研究中心/分组任务共用同一个 /api/hot-radar 接口）之前每次打开页面都现场跑 get_hot_new_words/get_hot_rank_words/get_hot_streak_words 三个 RPC，各自要扫 rank_changes/site_keyword_ranks 近30天全量数据——这两张表永久保留、每天持续写入，随数据量增长单次调用要2-8秒，实测 get_hot_rank_words 通过真实 PostgREST 接口（8秒默认超时）会直接超时报错，页面表现为"暂无数据"（用户反馈"每天打开都很慢"）；已同时给 site_keyword_ranks 补上覆盖索引（跟 rank_changes 那边已有的同款）、调大这三个函数的 work_mem/statement_timeout，但即使修好索引这类"扫全量近30天数据"的查询仍会随表继续增长而变慢，遂改成定时预算好+缓存' },
       { label: '计算逻辑', text: 'lib/hot-radar.ts 的 computeHotRadarPayload()——原本写在 /api/hot-radar/route.ts 里的聚合逻辑原样抽出来，供读接口（缓存未命中兜底）和刷新接口共用同一份代码，不会出现两边逻辑长出差异' },
       { label: '写入表', text: 'hot_radar_cache（单行，id 固定为 \'latest\'，upsert；字段 payload 存完整JSON结果，computed_at 记录算的时间）' },
@@ -228,14 +228,15 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'group-tracking-cache',
     title: '分组报告缓存',
-    badge: 'retry-crawl.yml · 热词缓存完成后立即运行（可手动补跑）',
+    badge: 'retry-crawl.yml · tracking 完成后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 的同一个 post-crawl-refresh job 在 tracking、环境快照和热词缓存之后立即调用 GET /api/tracking-cache/refresh（Bearer CRON_SECRET），不再等待 08:05 MYT，也不需要进入页面；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
+      { label: '触发方式', text: '每日由 retry-crawl.yml 在 tracking 全部完成后读取分组清单，每个分组各自并行调用 GET /api/tracking-cache/refresh?groupId=...（Bearer CRON_SECRET），避免三个分组串在同一个 Vercel 请求内触发504；它不再阻塞环境快照和热词缓存，两者会在 index-pages 最后重试后并行刷新；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-18 新增）', text: '分组报告"成效追踪"（/api/task-groups/[id]/outcomes）和"追踪汇总"（/api/task-groups/[id]/tracking-summary）之前每次打开页面都现场对 site_tracking_records 做全量扫描（这张表永久保留，接口本身不带时间范围限制）+ 批量查认领来源/排名匹配词 + "更新"型claim的真新排名历史判断，多轮查询叠加导致打开很慢（用户反馈）。用户明确接受"数据只到当天早上、当天新提交的记录要等第二天才反映"这个延迟，换成定时预算好+缓存，跟热词雷达同一套思路' },
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
       { label: '写入表', text: '2026-09-04 起使用分页缓存：group_tracking_cache_rows 每个claim一行并保存可索引的筛选/排序字段，group_tracking_cache_state 只保存更新时间、行数和小型月度汇总；replace_group_tracking_paged_cache RPC 在一个事务里原子替换。旧 group_tracking_cache 大JSON暂时继续同步，作为迁移期间的兼容兜底' },
       { label: '读取方', text: '"成效追踪"通过 get_group_tracking_outcomes_page 在数据库端筛选、排序、统计，只返回当前20条；"追踪汇总"只读预先算好的月度小型汇总；排名/收录明细通过 get_group_tracking_detail_page 直接分页，不再扫描原始历史表。快速缓存未安装、超过26小时或尚未首次生成时，才退回旧缓存/现场计算' },
-      { label: '缓存连续性', text: '认领、提交、成员调整和每日 tracking 写入不再删除上一版缓存；旧版本会一直可读，直到 post-crawl-refresh 或管理员手动刷新成功后由事务原子替换。这样工作时间有人操作分组时不会出现缓存被清空、页面退回全量计算并超时的空档；报告仍按既定口径在每日任务完成后统一更新' },
+      { label: '历史表性能修复（2026-09-17）', text: 'get_latest_group_tracking_records RPC 利用 group_id+claim_id+日期索引，直接在数据库内为每个claim取最新一条并分页返回；不再把site_tracking_records每天累积的全部历史下载到Vercel后才去重。自己站点排名匹配同步改用 get_latest_site_keyword_ranks_by_urls RPC，只返回每个URL/关键词最新一条，避免批量URL查询随历史增长产生数百次statement timeout。' },
+      { label: '缓存连续性', text: '认领、提交、成员调整和每日 tracking 写入不再删除上一版缓存；旧版本会一直可读，直到 post-tracking-refresh 或管理员手动刷新成功后由事务原子替换。这样工作时间有人操作分组时不会出现缓存被清空、页面退回全量计算并超时的空档；报告仍按既定口径在每日任务完成后统一更新' },
       { label: '"追踪汇总"得分口径变化', text: '之前"追踪汇总"的"得分"是现场用简化版公式估算（"更新"型claim不查历史、prev_rank_position为null时保守当非提升处理）；现在跟"成效追踪"共用同一份缓存，缓存里的分数是精确版（带"真新排名"历史查询），两个页面的分数口径统一了' },
       { label: '失败兜底', text: '刷新接口逐个分组处理，某个分组算失败时跳过它、保留它上一次成功算出来的缓存，不会用报错/空结果覆盖掉——照抄 hot_radar_cache 那次"静默失败覆盖好缓存"事故后加的保护逻辑' },
     ],

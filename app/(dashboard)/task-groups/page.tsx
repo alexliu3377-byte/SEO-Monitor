@@ -47,6 +47,7 @@ interface SubmissionHistoryRow {
 type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
+type BadgeFilter = 'all' | 'new' | 'updated'
 interface DetailRow { date: string; domain: string }
 interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
 
@@ -133,10 +134,9 @@ function getStreakBadge(streak: number, last_date: string, _yesterday: string): 
 function filterByRadarDate<T extends { last_date: string }>(rows: T[], date: string): T[] {
   return date ? rows.filter(row => row.last_date === date) : rows
 }
-function badgePriority(first_date: string, last_date: string, yesterday: string): number {
-  if (!last_date || last_date < yesterday) return 2
-  if (first_date >= yesterday) return 0
-  return 1
+function badgePriority(first_date: string, last_date: string, _yesterday: string): number {
+  if (!last_date) return 2
+  return first_date && first_date === last_date ? 0 : 1
 }
 function sortByDate<T extends { last_date: string; first_date: string }>(
   list: T[], yesterday: string, secondary: (a: T, b: T) => number
@@ -660,6 +660,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [radarDate, setRadarDate]       = useState('')
+  const [newWordBadgeFilter, setNewWordBadgeFilter] = useState<BadgeFilter>('all')
 
   // Group management
   const [showCreate, setShowCreate] = useState(false)
@@ -2483,11 +2484,18 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'newWords') {
       const base_new = filterByRadarDate(allNewWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+        .filter(w => newWordBadgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === newWordBadgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_new = sortCol && sortDir ? [...base_new].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.count??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.count??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        if (typeof va === 'string') {
+          const dateOrder = sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+          if (dateOrder !== 0) return dateOrder
+          const badgeOrder = badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
+          if (badgeOrder !== 0) return badgeOrder
+          return (b.count ?? 0) - (a.count ?? 0) || (b.siteCount ?? 0) - (a.siteCount ?? 0)
+        }
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_new
       const slice = sorted_new.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
@@ -3151,6 +3159,21 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
                       </select>
                     </label>
+                    {rightTab === 'newWords' && (
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                        类型
+                        <div className="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
+                          {([['all', '全部'], ['new', '新增'], ['updated', '更新']] as const).map(([value, label]) => (
+                            <button key={value} type="button"
+                              aria-pressed={newWordBadgeFilter === value}
+                              onClick={() => { setNewWordBadgeFilter(value); setTabPage(current => ({ ...current, newWords: 0 })) }}
+                              className={`px-2.5 py-1 text-xs transition-colors ${newWordBadgeFilter === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {rightTab === 'wordLib' && (
                       <label className="flex items-center gap-1.5 text-xs text-gray-400">
                         关键词

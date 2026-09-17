@@ -6,10 +6,10 @@ import type { UserRole } from '@/lib/user-context'
 
 export const maxDuration = 300
 
-// The final retry workflow calls this after tracking, environment snapshot and
-// hot-radar refresh. It atomically writes paged rows, compact monthly summaries
-// and the legacy compatibility cache. Admin/super sessions may also refresh one
-// group with ?groupId=...; CRON_SECRET refreshes every group.
+// The final retry workflow calls this once per group after tracking. It
+// atomically writes paged rows, compact monthly summaries and the legacy
+// compatibility cache. Admin/super sessions may also refresh one group with
+// ?groupId=...; omitting it remains available as a legacy all-group fallback.
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET

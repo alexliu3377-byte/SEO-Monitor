@@ -339,25 +339,27 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     }
   }
 
-  // site_tracking_records 永久保留、按claim每天一行持续增长，PostgREST 在这个
-  // 项目上单次请求硬顶3000行，必须真分页（fetchAllRows）才能拿全，见
-  // project_supabase_row_limit_hard_cap 这类踩过的坑。
-  const trackRows = await fetchAllRows<RawTrackRow>((from, to) => service
-    .from('site_tracking_records')
-    .select('id, claim_id, user_id, keyword, final_keyword, page_url, operation_type, search_volume, submit_date, record_date, is_indexed, index_first_seen, index_disappeared, rank_keyword, rank_position, prev_rank_position, rank_volume, rank_date, effectiveness')
-    .eq('group_id', groupId)
-    .order('record_date', { ascending: false })
-    .order('submit_date', { ascending: false })
-    .order('id', { ascending: true })
-    .range(from, to))
-
-  // Deduplicate: keep only the latest record per claim (rows already sorted record_date DESC)
-  const seen = new Set<string>()
-  const dedupedRows = ((trackRows || []) as RawTrackRow[]).filter(r => {
-    if (seen.has(r.claim_id)) return false
-    seen.add(r.claim_id)
-    return true
-  })
+  // Ask Postgres for only the latest record per claim. The previous version
+  // downloaded every daily historical row and deduplicated in Node, making a
+  // three-group refresh exceed Vercel's function limit as history accumulated.
+  const dedupedRows: RawTrackRow[] = []
+  const pageSize = 1000
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await service.rpc('get_latest_group_tracking_records', {
+      p_group_id: groupId,
+      p_offset: offset,
+      p_limit: pageSize,
+    })
+    if (error) {
+      throw new Error(
+        `get_latest_group_tracking_records failed: ${error.message ?? JSON.stringify(error)}. ` +
+        'Run migration 20260917_tracking_retry_timeout_fix.sql before refreshing the cache.'
+      )
+    }
+    const page = (data ?? []) as RawTrackRow[]
+    dedupedRows.push(...page)
+    if (page.length < pageSize) break
+  }
   const usernameOf = await resolveUserDisplayNames(
     service,
     dedupedRows.map(row => row.user_id),

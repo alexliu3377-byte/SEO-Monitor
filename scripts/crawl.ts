@@ -13,6 +13,7 @@ import { createAizhanHttpSession, fetchRankChangesViaHttp } from '../lib/crawler
 import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 import { fetchAllRows } from '../lib/supabase-paginate'
+import { fetchLatestUrlRanks } from '../lib/tracking-rank-lookup'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -993,6 +994,7 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
   // 处理5195条，直接把Supabase Postgres/API Gateway打出一波错误尖峰。改成只
   // 让 group 0 跑一次，跟昨天 refresh_keyword_signal_rollup 那次改法同一个模式。
   let ownRows = 0
+  let ownTrackingError: Error | null = null
   const window90 = getMalaysiaDate(-90)
   if (group === 0) try {
     type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
@@ -1044,16 +1046,11 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
       const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
       for (const chunk of chunkArray(pageUrlVariants, 150)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         // 2026-08-26 起 M/PC 合并判定成效——去掉 platform 过滤，两端都参与匹配；
-        // 排序不用改，同一天内先比 rank_position 更好的那个自然排前面，
-        // rankByUrlMap 取第一条即是"M或PC里更好的那个"。
-        const { data: rRows, error: rankErr } = await (supabase.from('site_keyword_ranks') as any)
-          .select('url, keyword, rank_position, prev_rank, volume, stat_date')
-          .in('url', chunk).not('url', 'is', null)
-          .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
-        if (rankErr) console.error(`  [自己站点追踪] site_keyword_ranks 查询失败: ${JSON.stringify(rankErr)}`)
-        for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
+        // 数据库只返回每个 URL/关键词的最新记录；结果再按日期和排名排序，
+        // rankByUrlMap 取第一条即是“M或PC里最新且更好的那个”。
+        const rRows = await fetchLatestUrlRanks(supabase, chunk)
+        for (const r of rRows) {
           const key = bareUrl(r.url)
           if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
           if (!rankMatchesByUrlMap.has(key)) rankMatchesByUrlMap.set(key, new Map())
@@ -1127,16 +1124,18 @@ async function runTracking(sites: SiteRecord[], today: string, activityId: strin
       console.log('  [自己站点追踪] 无活跃提交记录，跳过')
     }
   } catch (e) {
-    console.error(`  [自己站点追踪] ✗  ${e instanceof Error ? e.message : e}`)
+    ownTrackingError = e instanceof Error ? e : new Error(String(e))
+    console.error(`  [自己站点追踪] ✗  ${ownTrackingError.message}`)
   }
 
   const durationMs = Date.now() - stepStart
   console.log(`\n  TRACKING 完成  ✓${ok}  ⚠${empty}  ✗${failed}  竞品=${totalRows}  自己站点=${ownRows}  耗时=${elapsed(durationMs)}`)
   if (activityId) await activityEnd(supabase, activityId, {
-    status: failed > 0 ? 'warn' : 'done',
+    status: failed > 0 || ownTrackingError ? 'warn' : 'done',
     ok, empty, fail: failed, rowsWritten: totalRows + ownRows, durationMs,
     summary: `竞品追踪 ${ok} 站成功，竞品 ${totalRows} 条，自己站点 ${ownRows} 条，${failed} 站失败`,
   })
+  if (ownTrackingError) throw ownTrackingError
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

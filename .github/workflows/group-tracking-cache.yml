@@ -6,23 +6,40 @@ on:
   workflow_dispatch:
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - name: Load task groups
+        id: groups
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          GROUPS=$(curl --fail-with-body --show-error --silent --max-time 60 \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
+          MATRIX=$(GROUPS="$GROUPS" python3 -c "import json,os; rows=json.loads(os.environ['GROUPS']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
   refresh:
+    needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
-      - name: Call tracking-cache refresh API
+      - name: Refresh tracking cache - ${{ matrix.group_name }}
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+          GROUP_ID: ${{ matrix.group_id }}
         run: |
-          RESPONSE=$(curl -sf \
+          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/tracking-cache/refresh")
+            "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
           echo "$RESPONSE"
-          SUCCESS=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('success',''))")
-          if [ "$SUCCESS" = "True" ]; then
-            echo "Group tracking cache refreshed successfully"
-          else
-            echo "ERROR: API returned failure for one or more groups"
-            exit 1
-          fi
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"

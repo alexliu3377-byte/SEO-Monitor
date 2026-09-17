@@ -183,18 +183,19 @@ jobs:
       step: tracking
     secrets: inherit
 
-  # Once tracking has finished, refresh all derived data on one lightweight
-  # runner instead of waiting for three separately scheduled workflows/runners.
-  post-crawl-refresh:
-    needs: tracking
+  # Environment and hot-radar data only depend on the completed crawl/retry
+  # batches. Do not make them wait for tracking: a single slow tracking group
+  # would otherwise keep both user-facing pages on yesterday's cache.
+  post-index-refresh:
+    needs: [setup, retry]
     if: >-
       always() &&
-      needs.tracking.result != 'cancelled' &&
-      needs.tracking.result != 'skipped' &&
+      needs.setup.result == 'success' &&
+      needs.retry.result != 'cancelled' &&
       ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Refresh environment daily snapshot
         id: environment
@@ -222,30 +223,66 @@ jobs:
           echo "$RESPONSE"
           RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
 
-      - name: Refresh group tracking cache
-        id: group_tracking
-        continue-on-error: true
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
-        run: |
-          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 600 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/tracking-cache/refresh")
-          echo "$RESPONSE"
-          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
-
-      - name: Verify all refreshes
+      - name: Verify independent refreshes
         if: always()
         env:
           ENVIRONMENT_RESULT: ${{ steps.environment.outcome }}
           HOT_RADAR_RESULT: ${{ steps.hot_radar.outcome }}
-          GROUP_TRACKING_RESULT: ${{ steps.group_tracking.outcome }}
         run: |
           echo "Environment: $ENVIRONMENT_RESULT"
           echo "Hot radar: $HOT_RADAR_RESULT"
-          echo "Group tracking: $GROUP_TRACKING_RESULT"
-          if [ "$ENVIRONMENT_RESULT" != "success" ] || [ "$HOT_RADAR_RESULT" != "success" ] || [ "$GROUP_TRACKING_RESULT" != "success" ]; then
-            echo "One or more post-crawl refreshes failed"
+          if [ "$ENVIRONMENT_RESULT" != "success" ] || [ "$HOT_RADAR_RESULT" != "success" ]; then
+            echo "One or more independent refreshes failed"
             exit 1
           fi
+
+  # Build one cache-refresh job per task group. A single request that computed
+  # every group sequentially exceeded Vercel's function timeout and returned
+  # 504 even when most of the work had already completed.
+  tracking_cache_setup:
+    needs: tracking
+    if: >-
+      always() &&
+      needs.tracking.result != 'cancelled' &&
+      needs.tracking.result != 'skipped' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - name: Load task groups
+        id: groups
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          GROUPS=$(curl --fail-with-body --show-error --silent --max-time 60 \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
+          MATRIX=$(GROUPS="$GROUPS" python3 -c "import json,os; rows=json.loads(os.environ['GROUPS']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  # Group tracking cache does depend on the tracking crawl. Each group now has
+  # its own Vercel invocation and runs in parallel with the other groups.
+  post-tracking-refresh:
+    needs: tracking_cache_setup
+    if: ${{ needs.tracking_cache_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tracking_cache_setup.outputs.matrix) }}
+    steps:
+      - name: Refresh group tracking cache - ${{ matrix.group_name }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+          GROUP_ID: ${{ matrix.group_id }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"

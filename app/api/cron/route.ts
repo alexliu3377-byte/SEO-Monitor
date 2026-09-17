@@ -42,6 +42,7 @@ import {
 import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { fetchLatestUrlRanks } from '@/lib/tracking-rank-lookup'
 
 interface SiteRecord {
   id: string
@@ -826,6 +827,7 @@ export async function GET(request: Request) {
 
       // Own-site tracking
       let ownRows = 0
+      let ownTrackingError: Error | null = null
       const window90 = getMalaysiaDate(-90)
       try {
         type ClaimRow = { id: string; group_id: string; user_id: string; keyword: string; final_keyword: string | null; page_url: string | null; operation_type: string | null; search_volume: number; submitted_at: string | null; claimed_date: string }
@@ -861,15 +863,10 @@ export async function GET(request: Request) {
           const rankByUrlMap = new Map<string, { keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }>()
           const rankMatchesByUrlMap = new Map<string, Map<string, { rank_position: number | null; prev_rank: number | null; volume: number }>>()
           for (const chunk of chunkArray(pageUrlVariants, 150)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             // 2026-08-26 起 M/PC 合并判定成效——去掉 platform 过滤，见
             // scripts/crawl.ts 同一处改动的注释。
-            const { data: rRows, error: rankErr } = await (supabase.from('site_keyword_ranks') as any)
-              .select('url, keyword, rank_position, prev_rank, volume, stat_date')
-              .in('url', chunk).not('url', 'is', null)
-              .order('stat_date', { ascending: false }).order('rank_position', { ascending: true, nullsFirst: false })
-            if (rankErr) console.error(`[自己站点追踪] site_keyword_ranks 查询失败: ${JSON.stringify(rankErr)}`)
-            for (const r of (rRows || []) as { url: string; keyword: string; rank_position: number | null; prev_rank: number | null; volume: number; stat_date: string }[]) {
+            const rRows = await fetchLatestUrlRanks(supabase, chunk)
+            for (const r of rRows) {
               const key = bareUrl(r.url)
               if (!rankByUrlMap.has(key)) rankByUrlMap.set(key, { keyword: r.keyword, rank_position: r.rank_position, prev_rank: r.prev_rank, volume: r.volume, stat_date: r.stat_date })
               if (!rankMatchesByUrlMap.has(key)) rankMatchesByUrlMap.set(key, new Map())
@@ -933,16 +930,17 @@ export async function GET(request: Request) {
           ownRows = ownUpsertRows.length
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : '自己站点追踪失败'
-        console.error('own-site tracking error:', msg)
+        ownTrackingError = e instanceof Error ? e : new Error('自己站点追踪失败')
+        console.error('own-site tracking error:', ownTrackingError.message)
       }
 
       if (trkAid) await activityEnd(supabase, trkAid, {
-        status: trkFail > 0 ? 'warn' : 'done',
+        status: trkFail > 0 || ownTrackingError ? 'warn' : 'done',
         ok: trkOk, empty: trkEmpty, fail: trkFail, rowsWritten: trkRows + ownRows,
         durationMs: Date.now() - trkStart,
         summary: `竞品追踪 ${trkOk} 站成功，竞品 ${trkRows} 条，自己站点 ${ownRows} 条，${trkFail} 站失败`,
       })
+      if (ownTrackingError) throw ownTrackingError
     }
 
     return NextResponse.json({ date: today, yesterday, results })
