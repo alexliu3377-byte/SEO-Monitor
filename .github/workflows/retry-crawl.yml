@@ -257,11 +257,11 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          GROUPS=$(curl --fail-with-body --show-error --silent --max-time 60 \
+          TASK_GROUPS_JSON=$(curl --fail-with-body --show-error --silent --max-time 60 \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
-          MATRIX=$(GROUPS="$GROUPS" python3 -c "import json,os; rows=json.loads(os.environ['GROUPS']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
+          MATRIX=$(TASK_GROUPS_JSON="$TASK_GROUPS_JSON" python3 -c "import json,os; rows=json.loads(os.environ['TASK_GROUPS_JSON']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   # Group tracking cache does depend on the tracking crawl. Each group now has
