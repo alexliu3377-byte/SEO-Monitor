@@ -8,6 +8,12 @@
 
 `supabase/migrations/20260910_app_update_center_foundation.sql`
 
+如果之前已运行基础 SQL，部署新版列表接口前还需在 Supabase SQL Editor 运行：
+
+`supabase/migrations/20260921_app_update_paged_list.sql`
+
+这份 SQL 只新增列表分页查询函数，不会删除已有应用或版本。列表会先在数据库中筛选并取每款应用的最新版本，仅返回当前页；历史版本仍在点击“查看”时读取。
+
 成功后不需要新增 Supabase 密钥。GitHub Actions 继续使用项目已有的：
 
 - `NEXT_PUBLIC_SUPABASE_URL`

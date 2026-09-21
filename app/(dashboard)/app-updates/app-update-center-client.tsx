@@ -60,7 +60,7 @@ export default function AppUpdateCenterClient() {
   const [tab, setTab] = useState<'updates' | 'apps' | 'runs'>('updates')
   const [apps, setApps] = useState<AppRow[]>([])
   const [sources, setSources] = useState<SourceRow[]>([])
-  const [releases, setReleases] = useState<ReleaseGroup[]>([])
+  const [releases, setReleases] = useState<ReleaseRow[]>([])
   const [runs, setRuns] = useState<RunRow[]>([])
   const [summary, setSummary] = useState({ apps: 0, pending: 0, failingSources: 0, approved: 0 })
   const [loading, setLoading] = useState(true)
@@ -73,6 +73,8 @@ export default function AppUpdateCenterClient() {
   const [total, setTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [detail, setDetail] = useState<ReleaseGroup | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
   const [targetOpen, setTargetOpen] = useState(false)
   const [appStoreImportOpen, setAppStoreImportOpen] = useState(false)
   const [appStoreEntries, setAppStoreEntries] = useState('')
@@ -109,6 +111,24 @@ export default function AppUpdateCenterClient() {
   }, [deferredSearch, page, reviewFilter, sourceFilter, tab])
 
   useEffect(() => { load() }, [load])
+
+  async function openDetail(release: ReleaseRow) {
+    setDetail({ ...release, release_count: 0, releases: [] })
+    setDetailLoading(true)
+    setDetailError('')
+    try {
+      const response = await fetch(`/api/app-updates/${release.app_id}/releases`, { cache: 'no-store' })
+      const data = await response.json() as { releases?: ReleaseRow[]; release_count?: number; error?: string }
+      if (!response.ok) throw new Error(data.error || '历史版本读取失败')
+      setDetail(current => current?.app_id === release.app_id
+        ? { ...current, releases: data.releases ?? [], release_count: data.release_count ?? 0 }
+        : current)
+    } catch (loadError) {
+      setDetailError(loadError instanceof Error ? loadError.message : '历史版本读取失败')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   async function saveTarget() {
     setSaving(true); setError('')
@@ -261,7 +281,7 @@ export default function AppUpdateCenterClient() {
 
           {loading ? <div className="py-24 text-center text-sm text-slate-400">正在读取资料…</div> : tab === 'updates' ? (
             <div className="overflow-x-auto"><table className="w-full min-w-[980px] table-fixed"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="w-12 px-5 py-3"><input type="checkbox" aria-label="全选本页应用" title="全选本页应用" checked={releases.length > 0 && releases.every(release => selectedIds.includes(release.app_id))} onChange={event => toggleCurrentPage(event.target.checked)} /></th><th className="w-52 px-3 py-3">应用</th><th className="w-32 px-3 py-3">最新版本</th><th className="px-3 py-3">最新更新日志</th><th className="w-32 px-3 py-3">来源</th><th className="w-28 px-3 py-3">状态</th><th className="w-32 px-3 py-3">发现时间</th><th className="w-24 px-3 py-3"></th></tr></thead><tbody className="divide-y divide-slate-100">
-              {releases.length === 0 ? <tr><td colSpan={8} className="py-20 text-center text-sm text-slate-400">没有符合条件的应用更新。</td></tr> : releases.map(release => { const meta = REVIEW_META[release.review_status]; return <tr key={release.app_id} className="hover:bg-blue-50/30"><td className="px-5 py-4"><input type="checkbox" aria-label={`选择 ${release.app_name}`} checked={selectedIds.includes(release.app_id)} onChange={event => setSelectedIds(current => event.target.checked ? [...new Set([...current, release.app_id])] : current.filter(id => id !== release.app_id))} /></td><td className="px-3 py-4"><p className="truncate text-sm font-semibold text-slate-900">{release.app_name}</p><p className="mt-1 text-xs text-slate-400">{PLATFORM_LABELS[release.app_platform] ?? release.app_platform} · 共 {release.release_count} 个版本</p></td><td className="px-3 py-4"><p className="font-mono text-sm font-semibold text-slate-800">{release.version}</p><p className="mt-1 text-xs text-slate-400">{release.release_date ?? release.package_size ?? '日期未知'}</p></td><td className="px-3 py-4"><p className="line-clamp-2 text-sm leading-6 text-slate-600">{release.changelog || '未提取到更新日志'}</p></td><td className="px-3 py-4 text-sm text-slate-600">{release.source_name}</td><td className="px-3 py-4"><span className={`rounded-full border px-2.5 py-1 text-xs ${meta.className}`}>{meta.label}</span></td><td className="px-3 py-4 text-xs text-slate-500">{formatTime(release.discovered_at)}</td><td className="px-3 py-4"><button onClick={() => setDetail(release)} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:border-blue-300 hover:text-blue-700">查看</button></td></tr> })}
+              {releases.length === 0 ? <tr><td colSpan={8} className="py-20 text-center text-sm text-slate-400">没有符合条件的应用更新。</td></tr> : releases.map(release => { const meta = REVIEW_META[release.review_status]; return <tr key={release.app_id} className="hover:bg-blue-50/30"><td className="px-5 py-4"><input type="checkbox" aria-label={`选择 ${release.app_name}`} checked={selectedIds.includes(release.app_id)} onChange={event => setSelectedIds(current => event.target.checked ? [...new Set([...current, release.app_id])] : current.filter(id => id !== release.app_id))} /></td><td className="px-3 py-4"><p className="truncate text-sm font-semibold text-slate-900">{release.app_name}</p><p className="mt-1 text-xs text-slate-400">{PLATFORM_LABELS[release.app_platform] ?? release.app_platform} · 点击查看历史版本</p></td><td className="px-3 py-4"><p className="font-mono text-sm font-semibold text-slate-800">{release.version}</p><p className="mt-1 text-xs text-slate-400">{release.release_date ?? release.package_size ?? '日期未知'}</p></td><td className="px-3 py-4"><p className="line-clamp-2 text-sm leading-6 text-slate-600">{release.changelog || '未提取到更新日志'}</p></td><td className="px-3 py-4 text-sm text-slate-600">{release.source_name}</td><td className="px-3 py-4"><span className={`rounded-full border px-2.5 py-1 text-xs ${meta.className}`}>{meta.label}</span></td><td className="px-3 py-4 text-xs text-slate-500">{formatTime(release.discovered_at)}</td><td className="px-3 py-4"><button onClick={() => openDetail(release)} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:border-blue-300 hover:text-blue-700">查看</button></td></tr> })}
             </tbody></table></div>
           ) : tab === 'apps' ? (
             <div className="overflow-x-auto"><table className="w-full min-w-[850px]"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-5 py-3">应用</th><th className="px-4 py-3">已通过版本</th><th className="px-4 py-3">抓取来源</th><th className="px-4 py-3">最近检查</th><th className="px-5 py-3 text-right">操作</th></tr></thead><tbody className="divide-y divide-slate-100">{apps.length === 0 ? <tr><td colSpan={5} className="py-20 text-center text-sm text-slate-400">没有符合条件的应用</td></tr> : apps.map(app => { const appSources = sources.filter(source => source.app_id === app.id); const latestCheck = appSources.map(source => source.last_checked_at).filter(Boolean).sort().at(-1) ?? null; return <tr key={app.id}><td className="px-5 py-4"><p className="text-sm font-semibold text-slate-900">{app.name}</p><p className="mt-1 text-xs text-slate-400">{PLATFORM_LABELS[app.platform]}{app.package_identifier ? ` · ${app.package_identifier}` : ''}</p></td><td className="px-4 py-4 font-mono text-sm text-slate-700">{app.latest_approved_version ?? '—'}</td><td className="px-4 py-4"><div className="flex flex-wrap gap-1.5">{appSources.map(source => <a key={source.id} href={source.source_url} target="_blank" rel="noreferrer" title={source.last_error ?? source.source_url} className={`rounded px-2 py-1 text-xs ${source.last_status === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600'}`}>{source.source_name}</a>)}</div></td><td className="px-4 py-4 text-sm text-slate-500">{formatTime(latestCheck)}</td><td className="px-5 py-4 text-right"><button onClick={() => openNewSource(app)} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:border-blue-300 hover:text-blue-700">添加来源</button></td></tr> })}</tbody></table></div>
@@ -279,10 +299,12 @@ export default function AppUpdateCenterClient() {
       {detail && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
         <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
-            <div><p className="text-xs text-slate-400">{PLATFORM_LABELS[detail.app_platform] ?? detail.app_platform}</p><h2 className="mt-1 text-xl font-bold text-slate-950">{detail.app_name}</h2><p className="mt-1 text-xs text-slate-500">共保留 {detail.release_count} 个版本，最新版本排在前面</p></div>
+            <div><p className="text-xs text-slate-400">{PLATFORM_LABELS[detail.app_platform] ?? detail.app_platform}</p><h2 className="mt-1 text-xl font-bold text-slate-950">{detail.app_name}</h2><p className="mt-1 text-xs text-slate-500">{detailLoading ? '正在读取历史版本…' : `共保留 ${detail.release_count} 个版本，最新版本排在前面`}</p></div>
             <button onClick={() => setDetail(null)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
           </div>
           <div className="space-y-4 overflow-y-auto bg-slate-50/70 px-6 py-5">
+            {detailLoading && <p className="py-12 text-center text-sm text-slate-500">正在读取历史版本…</p>}
+            {detailError && <div className="flex items-center justify-between gap-3 rounded-lg bg-red-50 p-4 text-sm text-red-700"><span>{detailError}</span><button type="button" onClick={() => openDetail(detail)} className="font-semibold underline">重试</button></div>}
             {detail.releases.map((release, index) => { const meta = REVIEW_META[release.review_status]; return <article key={release.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-mono text-base font-bold text-slate-900">版本 {release.version}</h3>{index === 0 && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">最新</span>}<span className={`rounded-full border px-2 py-0.5 text-[11px] ${meta.className}`}>{meta.label}</span></div><p className="mt-1 text-xs text-slate-400">{release.release_date ?? '发布日期未识别'} · {release.source_name} · {formatTime(release.discovered_at)} 发现</p></div>

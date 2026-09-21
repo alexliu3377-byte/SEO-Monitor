@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { assertSafeRemoteUrl } from '@/lib/safe-remote-url'
 import { appUpdateDatabaseError, requireAppUpdateSuper } from '@/lib/app-update-server'
 import { cleanAppUpdateText, isAppUpdatePlatform, isAppUpdateSourceType } from '@/lib/app-updates'
-import { fetchAllRows } from '@/lib/supabase-paginate'
 
 const TABS = ['updates', 'apps', 'runs'] as const
 export const maxDuration = 60
@@ -12,42 +11,9 @@ type JoinedRow = Record<string, unknown> & {
   app_update_sources: unknown
 }
 
-type FlatRelease = Record<string, unknown> & {
-  id: string
-  app_id: string
-  release_date: string | null
-  discovered_at: string
-  app_name: unknown
-  app_platform: unknown
-  source_name: unknown
-  source_type: unknown
-}
-
 function oneRelation(value: unknown): Record<string, unknown> {
   if (Array.isArray(value)) return (value[0] ?? {}) as Record<string, unknown>
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
-}
-
-function flattenRelease(row: JoinedRow): FlatRelease {
-  const app = oneRelation(row.app_update_apps)
-  const source = oneRelation(row.app_update_sources)
-  const { app_update_apps: _app, app_update_sources: _source, ...release } = row
-  void _app; void _source
-  return {
-    ...release,
-    app_name: app.name ?? '未知应用', app_platform: app.platform ?? 'other',
-    source_name: source.source_name ?? '未知来源', source_type: source.source_type ?? 'other',
-  } as FlatRelease
-}
-
-function releaseTimestamp(release: FlatRelease) {
-  return Date.parse(release.release_date ?? release.discovered_at) || Date.parse(release.discovered_at) || 0
-}
-
-function newestFirst(a: FlatRelease, b: FlatRelease) {
-  return releaseTimestamp(b) - releaseTimestamp(a)
-    || Date.parse(b.discovered_at) - Date.parse(a.discovered_at)
-    || b.id.localeCompare(a.id)
 }
 
 export async function GET(request: Request) {
@@ -81,58 +47,16 @@ export async function GET(request: Request) {
   }
 
   if (tab === 'updates') {
-    let matchingRows: FlatRelease[]
-    try {
-      const rows = await fetchAllRows<JoinedRow>((rangeFrom, rangeTo) => {
-        let query = service.from('app_update_releases').select(`
-          id, app_id, source_id, version, changelog, release_date, package_size,
-          download_url, source_url, review_status, extraction_confidence, discovered_at,
-          app_update_apps!inner(name, platform), app_update_sources!inner(source_name, source_type)
-        `).order('discovered_at', { ascending: false }).order('id', { ascending: false }).range(rangeFrom, rangeTo)
-        if (reviewStatus && ['pending', 'approved', 'rejected'].includes(reviewStatus)) query = query.eq('review_status', reviewStatus)
-        if (sourceType && ['official', 'app_store', 'google_play', 'taptap', 'download_site', 'other'].includes(sourceType)) {
-          query = query.eq('app_update_sources.source_type', sourceType)
-        }
-        if (search) query = query.ilike('app_update_apps.name', `%${search}%`)
-        return query
-      }, { pageSize: 1000 })
-      matchingRows = rows.map(flattenRelease).sort(newestFirst)
-    } catch {
-      return NextResponse.json({ error: '更新记录读取失败' }, { status: 500 })
-    }
-
-    // The storefront-style list contains one row per application. Filters
-    // decide which applications qualify and which matching release is shown.
-    const latestByApp = new Map<string, FlatRelease>()
-    for (const release of matchingRows) {
-      if (!latestByApp.has(release.app_id)) latestByApp.set(release.app_id, release)
-    }
-    const grouped = [...latestByApp.values()]
-    const pageLatest = grouped.slice(from, to + 1)
-    const pageAppIds = pageLatest.map(release => release.app_id)
-
-    let historyByApp = new Map<string, FlatRelease[]>()
-    if (pageAppIds.length > 0) {
-      const historyResult = await service.from('app_update_releases').select(`
-        id, app_id, source_id, version, changelog, release_date, package_size,
-        download_url, source_url, review_status, extraction_confidence, discovered_at,
-        app_update_apps!inner(name, platform), app_update_sources!inner(source_name, source_type)
-      `).in('app_id', pageAppIds).order('discovered_at', { ascending: false }).order('id', { ascending: false })
-      if (historyResult.error) return appUpdateDatabaseError(historyResult.error, '应用历史版本读取失败')
-      historyByApp = new Map()
-      for (const release of (historyResult.data ?? []).map((row: JoinedRow) => flattenRelease(row)).sort(newestFirst)) {
-        const history = historyByApp.get(release.app_id) ?? []
-        history.push(release)
-        historyByApp.set(release.app_id, history)
-      }
-    }
-
-    const items = pageLatest.map(latest => ({
-      ...latest,
-      release_count: historyByApp.get(latest.app_id)?.length ?? 1,
-      releases: historyByApp.get(latest.app_id) ?? [latest],
-    }))
-    return NextResponse.json({ tab, items, total: grouped.length, page, pageSize, summary })
+    const { data, error } = await service.rpc('get_app_update_releases_page', {
+      p_search: search,
+      p_review_status: reviewStatus && ['pending', 'approved', 'rejected'].includes(reviewStatus) ? reviewStatus : '',
+      p_source_type: sourceType && ['official', 'app_store', 'google_play', 'taptap', 'download_site', 'other'].includes(sourceType) ? sourceType : '',
+      p_offset: from,
+      p_limit: pageSize,
+    })
+    if (error) return appUpdateDatabaseError(error, '更新记录读取失败')
+    const result = (data ?? {}) as { items?: unknown[]; total?: number }
+    return NextResponse.json({ tab, items: result.items ?? [], total: result.total ?? 0, page, pageSize, summary })
   }
 
   if (tab === 'apps') {
