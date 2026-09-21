@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchBaiduSuggestionsUnfiltered } from '@/lib/crawler'
 import { fetchOwnSiteDomains } from '@/lib/tracking-summary'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -16,7 +17,7 @@ function delay(ms: number) {
 }
 
 interface RankRow {
-  site_id: string; keyword: string; rank_position: number | null
+  id: string; site_id: string; keyword: string; rank_position: number | null
   title: string | null; url: string | null; platform: string; stat_date: string
 }
 interface GroupResult {
@@ -27,6 +28,7 @@ interface CoverageRow {
   domain: string; siteName: string; isOwnSite: boolean
   rankPosition: number | null; title: string | null; url: string | null
   platform: string; statDate: string
+  searchVolume: number
 }
 
 // 研究中心"商业词"tab 的核心接口——每个概念分组下的每个别名都逐个挖下拉词，
@@ -92,14 +94,34 @@ export async function POST(req: Request) {
   const since = new Date(Date.now() + 8 * 3600000 - 7 * 86400000).toISOString().slice(0, 10)
   const rankRows: RankRow[] = []
   for (const chunk of chunkArray(allKeywords, 150)) {
-    const { data, error } = await service
-      .from('site_keyword_ranks')
-      .select('site_id, keyword, rank_position, title, url, platform, stat_date')
+    try {
+      const rows = await fetchAllRows<RankRow>((from, to) => service
+        .from('site_keyword_ranks')
+        .select('id, site_id, keyword, rank_position, title, url, platform, stat_date')
+        .in('keyword', chunk)
+        .gte('stat_date', since)
+        .order('stat_date', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, to))
+      rankRows.push(...rows)
+    } catch (error) {
+      console.error('商业词覆盖查询 site_keyword_ranks 失败:', error)
+      return NextResponse.json({ error: '排名覆盖读取失败，请稍后重试' }, { status: 500 })
+    }
+  }
+
+  const volumeMap = new Map<string, number>()
+  for (const chunk of chunkArray(allKeywords, 150)) {
+    const { data, error } = await service.from('keyword_volume')
+      .select('keyword, volume')
       .in('keyword', chunk)
-      .gte('stat_date', since)
-      .order('stat_date', { ascending: false })
-    if (error) console.error('商业词覆盖查询 site_keyword_ranks 失败:', error.message)
-    if (data) rankRows.push(...(data as RankRow[]))
+    if (error) {
+      console.error('商业词覆盖查询 keyword_volume 失败:', error.message)
+      continue
+    }
+    for (const row of (data ?? []) as { keyword: string; volume: number | null }[]) {
+      volumeMap.set(row.keyword, Number(row.volume) || 0)
+    }
   }
 
   // 每个 (site_id, keyword, platform) 组合取最新一条（rankRows 已按 stat_date desc 排好）
@@ -132,8 +154,13 @@ export async function POST(req: Request) {
       url: r.url,
       platform: r.platform,
       statDate: r.stat_date,
+      searchVolume: volumeMap.get(r.keyword) ?? 0,
     }
   }).sort((a, b) => {
+    const volumeDiff = b.searchVolume - a.searchVolume
+    if (volumeDiff !== 0) return volumeDiff
+    const keywordDiff = a.keyword.localeCompare(b.keyword, 'zh-CN')
+    if (keywordDiff !== 0) return keywordDiff
     if (a.rankPosition == null && b.rankPosition == null) return 0
     if (a.rankPosition == null) return 1
     if (b.rankPosition == null) return -1

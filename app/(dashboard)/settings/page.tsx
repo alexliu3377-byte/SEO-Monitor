@@ -736,10 +736,12 @@ function ManagerSettings({ callerId, callerRole }: { callerId: string; callerRol
                     )}
                   </td>
                   <td className="table-td text-gray-500">
-                    <div>{new Date(user.created_at).toLocaleDateString('zh-CN')}</div>
-                    {!user.is_active && user.disabled_at && (
-                      <div className="mt-0.5 text-xs text-gray-400">停用：{new Date(user.disabled_at).toLocaleDateString('zh-CN')}</div>
-                    )}
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <span>{new Date(user.created_at).toLocaleDateString('zh-CN')}</span>
+                      {!user.is_active && user.disabled_at && (
+                        <span className="text-xs text-gray-400">停用：{new Date(user.disabled_at).toLocaleDateString('zh-CN')}</span>
+                      )}
+                    </div>
                   </td>
                   <td className="table-td text-right">
                     <div className="flex items-center justify-end gap-1.5">

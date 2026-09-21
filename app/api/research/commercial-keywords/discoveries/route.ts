@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 async function requireAdmin() {
   const authClient = await createClient()
@@ -12,7 +13,7 @@ async function requireAdmin() {
   return { user, service }
 }
 
-const VALID_STATUSES = ['pending', 'accepted', 'ignored']
+const VALID_STATUSES = ['pending', 'accepted']
 
 // "新词发现"审核列表——rank-title 抓取时顺手记录的"来源词↔已知商业概念组"
 // 命中证据（见 scripts/crawl-rank.ts 的 upsertDiscovery）。默认只看待审核的，
@@ -25,31 +26,40 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status') || 'pending'
   const groupName = searchParams.get('groupName')
+  const summary = searchParams.get('summary')
   if (!VALID_STATUSES.includes(status)) return NextResponse.json({ error: '无效的状态' }, { status: 400 })
+
+  if (summary === 'groups') {
+    const rows = await fetchAllRows<{ group_name: string }>((from, to) => service
+      .from('commercial_keyword_discoveries')
+      .select('group_name')
+      .eq('status', status)
+      .order('id', { ascending: true })
+      .range(from, to))
+    const groups: Record<string, number> = {}
+    for (const row of rows) groups[row.group_name] = (groups[row.group_name] ?? 0) + 1
+    return NextResponse.json({ groups, total: rows.length })
+  }
+
+  const page = Math.max(1, Number.parseInt(searchParams.get('page') ?? '1', 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('pageSize') ?? '20', 10) || 20))
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
 
   let query = service
     .from('commercial_keyword_discoveries')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('status', status)
+    .order('seen_count', { ascending: false })
+    .order('best_rank_position', { ascending: true, nullsFirst: false })
     .order('last_seen_at', { ascending: false })
-    .limit(500)
+    .order('id', { ascending: true })
+    .range(from, to)
   if (groupName) query = query.eq('group_name', groupName)
-  const { data, error } = await query
+  const { data, error, count } = await query
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
-  const rows = (data ?? []) as { site_domains: string[] | null; seen_count: number; best_rank_position: number | null }[]
-  rows.sort((a, b) => {
-    const siteCountDiff = (b.site_domains?.length ?? 0) - (a.site_domains?.length ?? 0)
-    if (siteCountDiff !== 0) return siteCountDiff
-    const seenDiff = b.seen_count - a.seen_count
-    if (seenDiff !== 0) return seenDiff
-    if (a.best_rank_position == null && b.best_rank_position == null) return 0
-    if (a.best_rank_position == null) return 1
-    if (b.best_rank_position == null) return -1
-    return a.best_rank_position - b.best_rank_position
-  })
-
-  return NextResponse.json({ discoveries: rows })
+  return NextResponse.json({ discoveries: data ?? [], total: count ?? 0, page, pageSize })
 }
 
 export async function PATCH(req: Request) {
@@ -64,9 +74,24 @@ export async function PATCH(req: Request) {
   if (action !== 'accept' && action !== 'ignore') return NextResponse.json({ error: '无效的操作' }, { status: 400 })
 
   if (action === 'ignore') {
-    const { error } = await service.from('commercial_keyword_discoveries')
-      .update({ status: 'ignored', reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+    const { data: discovery, error: readError } = await service.from('commercial_keyword_discoveries')
+      .select('source_keyword')
       .eq('id', id)
+      .maybeSingle()
+    if (readError || !discovery?.source_keyword) return NextResponse.json({ error: '找不到这个新词' }, { status: 404 })
+
+    const { error: ignoreError } = await service.from('commercial_keyword_ignored_terms').upsert({
+      normalized_keyword: discovery.source_keyword.trim().toLowerCase(),
+      ignored_by: user.id,
+      ignored_at: new Date().toISOString(),
+    }, { onConflict: 'normalized_keyword' })
+    if (ignoreError) return NextResponse.json({ error: '忽略名单尚未建立，请先运行最新数据库迁移' }, { status: 503 })
+
+    // Once a term is blacklisted, remove all of its evidence rows. The small
+    // blacklist entry is enough to prevent it from being discovered again.
+    const { error } = await service.from('commercial_keyword_discoveries')
+      .delete()
+      .eq('source_keyword', discovery.source_keyword)
     if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
@@ -76,10 +101,27 @@ export async function PATCH(req: Request) {
   if (!alias || !alias.trim()) return NextResponse.json({ error: '缺少要加入的别名' }, { status: 400 })
   if (!groupName || !groupName.trim()) return NextResponse.json({ error: '缺少所属概念组' }, { status: 400 })
 
-  const { error: insertError } = await service
+  const normalizedAlias = alias.trim()
+  const normalizedGroupName = groupName.trim()
+  const { data: existingKeyword, error: existingError } = await service
     .from('commercial_keywords')
-    .upsert({ keyword: alias.trim(), group_name: groupName.trim(), added_by: user.id }, { onConflict: 'keyword', ignoreDuplicates: true })
-  if (insertError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    .select('group_name')
+    .ilike('keyword', normalizedAlias)
+    .limit(1)
+    .maybeSingle()
+  if (existingError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  if (existingKeyword && existingKeyword.group_name !== normalizedGroupName) {
+    return NextResponse.json({
+      error: `这个词已经属于「${existingKeyword.group_name}」，请先确认后再调整`,
+    }, { status: 409 })
+  }
+
+  if (!existingKeyword) {
+    const { error: insertError } = await service
+      .from('commercial_keywords')
+      .insert({ keyword: normalizedAlias, group_name: normalizedGroupName, added_by: user.id })
+    if (insertError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 
   const { error } = await service.from('commercial_keyword_discoveries')
     .update({ status: 'accepted', reviewed_by: user.id, reviewed_at: new Date().toISOString() })

@@ -292,10 +292,10 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '清单维护', text: '用户手动贴一份商业词清单存入 commercial_keywords 表（keyword 唯一），不含挖出来的下拉词——那部分现查现用不落库，保证新鲜度；单次最多贴100个词（含别名展开后）' },
       { label: '概念分组', text: '同一行可贴多个别名（同一商业概念的不同叫法，用顿号/逗号分隔，如"纸飞机、telegram、telegreat"），共享同一个 group_name（取该行第一个词）；查覆盖时按组归拢展示，删除支持整组删或单个别名删' },
       { label: '下拉词挖掘', text: '点"查覆盖"时，对清单里每个词（组内每个别名都单独查一次，而不是每组只查一次）依次调用百度 suggestion.baidu.com/su 建议接口（lib/crawler.ts 的 fetchBaiduSuggestionsUnfiltered，未鉴权公开接口，不需要cookie/session；GBK编码需用 iconv 按 content-type 解码，不能直接 res.text()）；词与词之间间隔200ms，避免短时间集中打接口' },
-      { label: '排名覆盖查询', text: '种子词+全部下拉词去重后，分批（150个一批）查 site_keyword_ranks 近7天数据，取每个"站点+关键词+平台"组合最新一条；只有"排名"模式站点（has_rank_title=true）有 rank_position/title 细节，"涨跌"模式站点（写 rank_changes）没有这些字段，查不到，不是漏做' },
+      { label: '排名覆盖查询', text: '种子词+全部下拉词去重后，分批（150个一批）并逐页读取 site_keyword_ranks 近7天完整数据，取每个"站点+关键词+平台"组合最新一条；结果按搜索量从高到低、同名词相邻展示并分页。只有"排名"模式站点（has_rank_title=true）有 rank_position/title 细节，"涨跌"模式站点（写 rank_changes）没有这些字段，查不到，不是漏做' },
       { label: '写入表', text: 'commercial_keywords（清单）；覆盖查询本身不写库，每次现查现返回' },
       { label: '不设门槛', text: '覆盖结果不按排名过滤，全部列出来（含未上榜的词），用户自己按排名数字判断——这是用户明确要求的' },
-      { label: '新词发现（标题共现）', text: '百度下拉词对敏感/被限制话题词经常返回空或文不对题（实测验证），改成从每天的 rank-title 抓取里顺手挖：抓到的标题里如果出现词组库已知别名的文字（如"纸飞机"），而这条关键词本身还不是已知别名，就当作候选证据累积进 commercial_keyword_discoveries（见 scripts/crawl-rank.ts 的 upsertDiscovery，插在 site_keyword_ranks 写入之后）；范围仅限16个rank-title站点（唯一有标题数据的地方），太短的别名（英文<4字符）不参与匹配，避免误报；累积字段含出现站点数/次数/历史最佳排名，供"商业词"tab的"新词发现"面板按证据强度排序人工审核（加入词组/忽略），不自动收编' },
+      { label: '新词发现（标题共现）', text: '百度下拉词对敏感/被限制话题词经常返回空或文不对题（实测验证），改成从每天的 rank-title 抓取里顺手挖：抓到的标题里如果出现词组库已知别名的文字（如"纸飞机"），而这条关键词本身还不是已知别名，就当作候选证据累积进 commercial_keyword_discoveries（见 scripts/crawl-rank.ts 的 upsertDiscovery，插在 site_keyword_ranks 写入之后）；范围仅限16个rank-title站点（唯一有标题数据的地方），太短的别名（英文<4字符）不参与匹配，避免误报；候选可在词组详情直接加入，忽略时删除证据并只把规范化词写入 commercial_keyword_ignored_terms，后续抓取永久跳过，不再重复出现' },
     ],
   },
 ]

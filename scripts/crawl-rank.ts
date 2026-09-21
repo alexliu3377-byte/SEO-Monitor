@@ -54,7 +54,7 @@ function isEligibleAlias(alias: string): boolean {
   return isAscii ? alias.length >= 4 : alias.length >= 2
 }
 
-async function loadCommercialAliases(): Promise<{ eligible: CommercialAlias[]; knownSet: Set<string> }> {
+async function loadCommercialAliases(): Promise<{ eligible: CommercialAlias[]; knownSet: Set<string>; ignoredSet: Set<string> }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (supabase as any).from('commercial_keywords').select('keyword, group_name')
   const rows = (data || []) as { keyword: string; group_name: string | null }[]
@@ -62,7 +62,15 @@ async function loadCommercialAliases(): Promise<{ eligible: CommercialAlias[]; k
   const eligible = rows
     .filter(r => isEligibleAlias(r.keyword))
     .map(r => ({ alias: r.keyword, groupName: r.group_name || r.keyword }))
-  return { eligible, knownSet }
+  // The ignore table deliberately stores only normalized terms, not their
+  // evidence payload. If the migration has not run yet, degrade safely to an
+  // empty set so the main rank crawl can still finish.
+  const { data: ignoredRows } = await (supabase as any)
+    .from('commercial_keyword_ignored_terms')
+    .select('normalized_keyword')
+  const ignoredSet = new Set(((ignoredRows || []) as { normalized_keyword: string }[])
+    .map(row => row.normalized_keyword))
+  return { eligible, knownSet, ignoredSet }
 }
 
 function findMatchedAlias(title: string, eligible: CommercialAlias[]): CommercialAlias | null {
@@ -232,7 +240,7 @@ async function main() {
   const session = await createAizhanHttpSession()
   console.log(`  ✓ 会话就绪 (${ts()})`)
 
-  const { eligible: eligibleAliases, knownSet: knownAliasSet } = await loadCommercialAliases()
+  const { eligible: eligibleAliases, knownSet: knownAliasSet, ignoredSet } = await loadCommercialAliases()
 
   for (let i = 0; i < sites.length; i++) {
     const { id: siteId, domain, track_pc_rank } = sites[i]
@@ -293,6 +301,7 @@ async function main() {
             for (const e of entries) {
               if (!e.title) continue
               if (knownAliasSet.has(e.keyword.toLowerCase())) continue
+              if (ignoredSet.has(e.keyword.trim().toLowerCase())) continue
               const matched = findMatchedAlias(e.title, eligibleAliases)
               if (!matched) continue
               await upsertDiscovery({

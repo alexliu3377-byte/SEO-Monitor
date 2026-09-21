@@ -373,7 +373,7 @@ interface CoverageRow {
   keyword: string; isExpansion: boolean; groupName: string
   domain: string; siteName: string; isOwnSite: boolean
   rankPosition: number | null; title: string | null; url: string | null
-  platform: string; statDate: string
+  platform: string; statDate: string; searchVolume: number
 }
 interface CoverageResult {
   groupResults: GroupResult[]; coverage: CoverageRow[]; noDataKeywords: string[]; totalKeywordsChecked: number
@@ -387,7 +387,7 @@ interface Discovery {
 }
 
 type CommercialSubView = 'list' | 'detail' | 'discoveries'
-type DiscoveryStatus = 'pending' | 'accepted' | 'ignored'
+type DiscoveryStatus = 'pending' | 'accepted'
 const ALIAS_SPLIT_RE = /[\n,，、]+/
 
 function parseAliasInput(text: string): string[] {
@@ -434,11 +434,8 @@ function CommercialKeywordsTab() {
     fetch('/api/research/commercial-keywords').then(r => r.json()).then(d => setKeywords(d.keywords ?? [])).finally(() => setLoadingList(false))
   }
   function loadPendingSummary() {
-    fetch('/api/research/commercial-keywords/discoveries?status=pending').then(r => r.json()).then(d => {
-      const rows = (d.discoveries ?? []) as Discovery[]
-      const map = new Map<string, number>()
-      for (const r of rows) map.set(r.group_name, (map.get(r.group_name) ?? 0) + 1)
-      setPendingByGroup(map)
+    fetch('/api/research/commercial-keywords/discoveries?status=pending&summary=groups').then(r => r.json()).then(d => {
+      setPendingByGroup(new Map(Object.entries(d.groups ?? {}).map(([group, count]) => [group, Number(count) || 0])))
     })
   }
   useEffect(() => { loadList(); loadPendingSummary() }, [])
@@ -760,8 +757,10 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   const [filterPlatform, setFilterPlatform] = useState<'all' | 'mobile' | 'pc'>('all')
   const [filterAlias, setFilterAlias] = useState('')
   const [rankSortDir, setRankSortDir] = useState<'asc' | 'desc'>('asc')
+  const [coveragePage, setCoveragePage] = useState(0)
 
   const [groupDiscoveries, setGroupDiscoveries] = useState<Discovery[]>([])
+  const [addingDiscoveryId, setAddingDiscoveryId] = useState<string | null>(null)
 
   function runCoverage() {
     setLoading(true); setError(''); setResult(null)
@@ -776,8 +775,8 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   }
   useEffect(() => { runCoverage(); setRenameValue(groupName) }, [groupName]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}`)
-      .then(r => r.json()).then(d => setGroupDiscoveries((d.discoveries ?? []).slice(0, 5)))
+    fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}&pageSize=5`)
+      .then(r => r.json()).then(d => setGroupDiscoveries(d.discoveries ?? []))
   }, [groupName])
 
   async function confirmRename() {
@@ -833,17 +832,53 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
     onGroupDeleted()
   }
 
+  async function addDiscoveryToGroup(discovery: Discovery) {
+    if (addingDiscoveryId) return
+    setAddingDiscoveryId(discovery.id)
+    setAddAliasError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: discovery.id,
+          action: 'accept',
+          alias: discovery.source_keyword,
+          groupName,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAddAliasError(data.error || '加入词组失败'); return }
+      setGroupDiscoveries(current => current.filter(item => item.id !== discovery.id))
+      onKeywordsChanged()
+      runCoverage()
+    } catch {
+      setAddAliasError('加入词组失败（网络异常）')
+    } finally {
+      setAddingDiscoveryId(null)
+    }
+  }
+
   const filteredCoverage = (result?.coverage ?? [])
     .filter(c => filterOwn === 'all' || (filterOwn === 'own' ? c.isOwnSite : !c.isOwnSite))
     .filter(c => filterPlatform === 'all' || c.platform.toLowerCase().includes(filterPlatform === 'pc' ? 'pc' : 'mobile') || c.platform.toLowerCase() === (filterPlatform === 'pc' ? 'pc' : 'm'))
     .filter(c => !filterAlias || c.keyword === filterAlias)
     .sort((a, b) => {
+      const volumeDiff = b.searchVolume - a.searchVolume
+      if (volumeDiff !== 0) return volumeDiff
+      const keywordDiff = a.keyword.localeCompare(b.keyword, 'zh-CN')
+      if (keywordDiff !== 0) return keywordDiff
       const av = a.rankPosition, bv = b.rankPosition
       if (av == null && bv == null) return 0
       if (av == null) return 1
       if (bv == null) return -1
       return rankSortDir === 'asc' ? av - bv : bv - av
     })
+  const coverageTotalPages = Math.max(1, Math.ceil(filteredCoverage.length / PAGE_SIZE))
+  const clampedCoveragePage = Math.min(coveragePage, coverageTotalPages - 1)
+  const pagedCoverage = filteredCoverage.slice(
+    clampedCoveragePage * PAGE_SIZE,
+    (clampedCoveragePage + 1) * PAGE_SIZE,
+  )
 
   return (
     <div className="space-y-4">
@@ -914,13 +949,13 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between flex-wrap gap-2">
               <span className="text-sm font-semibold text-gray-700">排名覆盖 · {filteredCoverage.length} 条</span>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <select aria-label="选择选项" value={filterOwn} onChange={e => setFilterOwn(e.target.value as typeof filterOwn)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterOwn} onChange={e => { setFilterOwn(e.target.value as typeof filterOwn); setCoveragePage(0) }} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="all">全部站点</option><option value="own">自己</option><option value="ref">竞品</option>
                 </select>
-                <select aria-label="选择选项" value={filterPlatform} onChange={e => setFilterPlatform(e.target.value as typeof filterPlatform)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterPlatform} onChange={e => { setFilterPlatform(e.target.value as typeof filterPlatform); setCoveragePage(0) }} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="all">PC+M</option><option value="mobile">M</option><option value="pc">PC</option>
                 </select>
-                <select aria-label="选择选项" value={filterAlias} onChange={e => setFilterAlias(e.target.value)} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
+                <select aria-label="选择选项" value={filterAlias} onChange={e => { setFilterAlias(e.target.value); setCoveragePage(0) }} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="">全部别名</option>
                   {members.map(m => <option key={m.id} value={m.keyword}>{m.keyword}</option>)}
                 </select>
@@ -936,8 +971,9 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
                       <th className="text-left px-4 py-2 font-medium">关键词</th>
                       <th className="text-left px-4 py-2 font-medium">站点</th>
                       <th className="text-left px-4 py-2 font-medium">平台</th>
+                      <th className="text-right px-4 py-2 font-medium">搜索量</th>
                       <th className="text-right px-4 py-2 font-medium cursor-pointer select-none" onClick={() => setRankSortDir(d => d === 'asc' ? 'desc' : 'asc')}>
-                        排名 {rankSortDir === 'asc' ? '▲' : '▼'}
+                        同词排名 {rankSortDir === 'asc' ? '▲' : '▼'}
                       </th>
                       <th className="text-left px-4 py-2 font-medium">标题</th>
                       <th className="text-left px-4 py-2 font-medium">URL</th>
@@ -945,14 +981,15 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {filteredCoverage.map((c, i) => (
-                      <tr key={i} className="text-gray-700">
+                    {pagedCoverage.map(c => (
+                      <tr key={`${c.keyword}|${c.domain}|${c.platform}|${c.url ?? ''}`} className="text-gray-700">
                         <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span>{c.isExpansion && <span className="text-[10px] text-blue-500 ml-1">下拉</span>}</td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">
                           {c.domain}
                           <span className={`ml-1 px-1 py-0.5 rounded text-[10px] ${c.isOwnSite ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400'}`}>{c.isOwnSite ? '自己' : '竞品'}</span>
                         </td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">{c.platform}</td>
+                        <td className="px-4 py-2 text-right text-xs tabular-nums whitespace-nowrap">{c.searchVolume > 0 ? c.searchVolume.toLocaleString() : '—'}</td>
                         <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{c.rankPosition ?? '—'}</td>
                         <td className="px-4 py-2 max-w-[240px]"><span className="block truncate" title={c.title ?? ''}>{c.title ?? '—'}</span></td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">
@@ -963,6 +1000,11 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {filteredCoverage.length > 0 && (
+              <div className="border-t border-gray-100 px-4 py-2">
+                <SimplePagination page={clampedCoveragePage} total={filteredCoverage.length} onChange={setCoveragePage} />
               </div>
             )}
           </div>
@@ -976,9 +1018,16 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
             <button onClick={onViewAllDiscoveries} className="text-xs text-gray-400 hover:text-gray-700">查看全部 →</button>
           </div>
           {groupDiscoveries.map(d => (
-            <p key={d.id} className="text-xs text-gray-500">
-              <span className="font-medium text-gray-700">{d.source_keyword}</span> · {d.site_domains?.length ?? 0}个站点 · 出现{d.seen_count}次 · 最佳排名{d.best_rank_position ?? '—'}
-            </p>
+            <div key={d.id} className="flex items-center justify-between gap-3 text-xs text-gray-500">
+              <p className="min-w-0 truncate">
+                <span className="font-medium text-gray-700">{d.source_keyword}</span> · {d.site_domains?.length ?? 0}个站点 · 出现{d.seen_count}次 · 最佳排名{d.best_rank_position ?? '—'}
+              </p>
+              <button type="button" disabled={addingDiscoveryId === d.id}
+                onClick={() => addDiscoveryToGroup(d)}
+                className="flex-shrink-0 rounded-lg bg-green-500 px-2.5 py-1 font-medium text-white hover:bg-green-600 disabled:opacity-50">
+                {addingDiscoveryId === d.id ? '加入中…' : '加入该词组'}
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -986,8 +1035,8 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   )
 }
 
-// 新词发现审核工作台。默认待审核；已加入/已忽略数量只在切到那个tab时才查，
-// 避免一次性拉三份列表。
+// 新词发现审核工作台。忽略后只保留极小的排除名单，证据行会删除，
+// 所以这里只需要待审核和已加入两个视图。
 function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; onIgnored: () => void }) {
   const [status, setStatus] = useState<DiscoveryStatus>('pending')
   const [discoveries, setDiscoveries] = useState<Discovery[]>([])
@@ -995,24 +1044,29 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
   const [error, setError] = useState('')
   const [countCache, setCountCache] = useState<Partial<Record<DiscoveryStatus, number>>>({})
   const [page, setPage] = useState(0)
+  const [total, setTotal] = useState(0)
 
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptAlias, setAcceptAlias] = useState('')
   const [acceptGroup, setAcceptGroup] = useState('')
 
-  function load(s: DiscoveryStatus) {
+  function load(s: DiscoveryStatus, targetPage: number) {
     setLoading(true); setError('')
-    fetch(`/api/research/commercial-keywords/discoveries?status=${s}`)
+    fetch(`/api/research/commercial-keywords/discoveries?status=${s}&page=${targetPage + 1}&pageSize=${PAGE_SIZE}`)
       .then(r => r.json())
-      .then(d => { setDiscoveries(d.discoveries ?? []); setCountCache(prev => ({ ...prev, [s]: (d.discoveries ?? []).length })) })
+      .then(d => {
+        setDiscoveries(d.discoveries ?? [])
+        setTotal(d.total ?? 0)
+        setCountCache(prev => ({ ...prev, [s]: d.total ?? 0 }))
+      })
       .catch(() => setError('加载失败（网络异常）'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load(status); setPage(0) }, [status])
+  useEffect(() => { load(status, page) }, [status, page])
 
-  const totalPages = Math.max(1, Math.ceil(discoveries.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const clampedPage = Math.min(page, totalPages - 1)
-  const paged = discoveries.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE)
+  const paged = discoveries
 
   function openAcceptForm(d: Discovery) {
     setAcceptingId(d.id); setAcceptAlias(d.source_keyword); setAcceptGroup(d.group_name)
@@ -1030,6 +1084,8 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
       if (!res.ok) { setError(data.error || '操作失败'); return }
       setAcceptingId(null)
       setDiscoveries(prev => prev.filter(d => d.id !== id))
+      setTotal(current => Math.max(0, current - 1))
+      if (discoveries.length === 1 && page > 0) setPage(current => current - 1)
       onAccepted()
     } catch {
       setError('操作失败（网络异常）')
@@ -1046,6 +1102,8 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
       const data = await res.json()
       if (!res.ok) { setError(data.error || '操作失败'); return }
       setDiscoveries(prev => prev.filter(d => d.id !== id))
+      setTotal(current => Math.max(0, current - 1))
+      if (discoveries.length === 1 && page > 0) setPage(current => current - 1)
       onIgnored()
     } catch {
       setError('操作失败（网络异常）')
@@ -1057,10 +1115,10 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
       <p className="text-xs text-gray-400">抓排名标题时（rank-title步骤，16个"排名"模式站点）顺手检查标题里有没有出现已知别名文字，命中了但关键词本身还不认识，就是新词候选——每天抓取慢慢攒出来的，不是一次性挖干净。</p>
 
       <div className="flex items-center gap-1.5">
-        {(['pending', 'accepted', 'ignored'] as const).map(s => (
-          <button key={s} onClick={() => setStatus(s)}
+        {(['pending', 'accepted'] as const).map(s => (
+          <button key={s} onClick={() => { setStatus(s); setPage(0) }}
             className={`px-3 py-1 text-xs rounded-full border transition-colors ${status === s ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
-            {s === 'pending' ? '待审核' : s === 'accepted' ? '已加入' : '已忽略'}{countCache[s] != null ? ` ${countCache[s]}` : ''}
+            {s === 'pending' ? '待审核' : '已加入'}{countCache[s] != null ? ` ${countCache[s]}` : ''}
           </button>
         ))}
       </div>
@@ -1068,7 +1126,7 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
 
       {loading ? <Spinner /> : discoveries.length === 0 ? (
         <p className="text-sm text-gray-300 text-center py-8">
-          {status === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : status === 'accepted' ? '还没有已加入的新词' : '还没有已忽略的新词'}
+          {status === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : '还没有已加入的新词'}
         </p>
       ) : (
         <div className="space-y-2">
@@ -1119,7 +1177,7 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
           ))}
         </div>
       )}
-      {discoveries.length > 0 && <SimplePagination page={clampedPage} total={discoveries.length} onChange={setPage} />}
+      {total > 0 && <SimplePagination page={clampedPage} total={total} onChange={setPage} />}
     </div>
   )
 }
