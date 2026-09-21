@@ -1545,8 +1545,11 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 
       const list = (d.reports ?? []) as ReportListItem[]
       setReports(list)
       setSelectedId(list.length > 0 ? list[0].id : null)
-      setFilterYear(list.length > 0 ? list[0].period_start.slice(0, 4) : '')
-      setFilterMonth(list.length > 0 ? list[0].period_start.slice(5, 7) : '')
+      const latestBucketDate = list.length > 0
+        ? (periodType === 'week' ? list[0].period_end : list[0].period_start)
+        : ''
+      setFilterYear(latestBucketDate.slice(0, 4))
+      setFilterMonth(latestBucketDate.slice(5, 7))
     }).finally(() => setLoading(false))
   }, [periodType])
 
@@ -1557,29 +1560,34 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 
   // 月份，因为一年52周直接铺一排还是太长）再看卡片，卡片行不会随时间无限变长；
   // 年报本身一年只多一张，不需要这层筛选。年份/月份下拉一直显示——不要因为
   // "目前数据只有一个年份/月份"就隐藏掉，隐藏会让人以为这个筛选功能没做。
-  const years = Array.from(new Set(reports.map(r => r.period_start.slice(0, 4)))).sort((a, b) => b.localeCompare(a))
+  // 跨月周报按结束日期归档。例如 2026-08-31～2026-09-06 是 9 月第一周；
+  // 若按开始日期筛选，用户会误以为 9 月第一周没有生成。
+  const bucketDate = (report: ReportListItem) => periodType === 'week' ? report.period_end : report.period_start
+  const years = Array.from(new Set(reports.map(r => bucketDate(r).slice(0, 4)))).sort((a, b) => b.localeCompare(a))
   const monthsInYear = Array.from(new Set(
-    reports.filter(r => r.period_start.startsWith(filterYear)).map(r => r.period_start.slice(5, 7))
+    reports.filter(r => bucketDate(r).startsWith(filterYear)).map(r => bucketDate(r).slice(5, 7))
   )).sort((a, b) => b.localeCompare(a))
 
   const visibleReports = periodType === 'year'
     ? reports
     : periodType === 'week'
-      ? reports.filter(r => r.period_start.startsWith(`${filterYear}-${filterMonth}`))
+      ? reports.filter(r => bucketDate(r).startsWith(`${filterYear}-${filterMonth}`))
       : reports.filter(r => r.period_start.startsWith(filterYear))
 
   function changeYear(y: string) {
     setFilterYear(y)
-    const monthsForY = Array.from(new Set(reports.filter(r => r.period_start.startsWith(y)).map(r => r.period_start.slice(5, 7)))).sort((a, b) => b.localeCompare(a))
+    const monthsForY = Array.from(new Set(reports.filter(r => bucketDate(r).startsWith(y)).map(r => bucketDate(r).slice(5, 7)))).sort((a, b) => b.localeCompare(a))
     const m = monthsForY[0] ?? ''
     setFilterMonth(m)
-    const first = reports.find(r => r.period_start.startsWith(periodType === 'week' ? `${y}-${m}` : y))
+    const first = reports.find(r => periodType === 'week'
+      ? bucketDate(r).startsWith(`${y}-${m}`)
+      : r.period_start.startsWith(y))
     setSelectedId(first ? first.id : null)
   }
 
   function changeMonth(m: string) {
     setFilterMonth(m)
-    const first = reports.find(r => r.period_start.startsWith(`${filterYear}-${m}`))
+    const first = reports.find(r => bucketDate(r).startsWith(`${filterYear}-${m}`))
     setSelectedId(first ? first.id : null)
   }
 
