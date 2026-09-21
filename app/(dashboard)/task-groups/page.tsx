@@ -660,7 +660,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [radarDate, setRadarDate]       = useState('')
-  const [newWordBadgeFilter, setNewWordBadgeFilter] = useState<BadgeFilter>('all')
+  const [badgeFilter, setBadgeFilter] = useState<BadgeFilter>('all')
 
   // Group management
   const [showCreate, setShowCreate] = useState(false)
@@ -2338,7 +2338,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ) : slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge="updated"
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge="updated" />}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '搜索上涨', w.volume)}
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
@@ -2362,11 +2362,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (rightTab === 'cross') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const base_cross = filterByRadarDate(crossWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_cross = sortCol && sortDir ? [...base_cross].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : 0
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : 0
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
+          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
+          || (b.volume ?? 0) - (a.volume ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_cross
       const slice = sorted_cross.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
@@ -2381,10 +2384,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有交叉词</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={getBadge(w.first_date, w.last_date, yesterday)}
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} />}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} includeYesterday />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '交叉词', w.volume)}
                   onView={() => openDetail(w.keyword, '交叉词')}>
@@ -2406,11 +2410,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'rank') {
       const base_rank = filterByRadarDate(rankWordsSorted.filter(w => !submittedSet.has(w.keyword)), radarDate)
+        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_rank = sortCol && sortDir ? [...base_rank].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'rankDays' ? (a.rankDays??0) : 0
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'rankDays' ? (b.rankDays??0) : 0
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
+          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
+          || (b.volume ?? 0) - (a.volume ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_rank
       const slice = sorted_rank.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
@@ -2425,10 +2432,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有竞品涨排名词</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={getBadge(w.first_date, w.last_date, yesterday)}
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} />}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} includeYesterday />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '竞品涨排名', w.volume)}
                   onView={() => openDetail(w.keyword, '竞品涨排名')}>
@@ -2445,11 +2453,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'streak') {
       const base_streak = filterByRadarDate(streakWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+        .filter(w => badgeFilter === 'all' || getStreakBadge(w.streak, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_streak = sortCol && sortDir ? [...base_streak].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'streak' ? (a.streak??0) : 0
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'streak' ? (b.streak??0) : 0
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
+          || (getStreakBadge(a.streak, a.last_date, yesterday) === 'new' ? 0 : 1)
+            - (getStreakBadge(b.streak, b.last_date, yesterday) === 'new' ? 0 : 1)
+          || (b.streak ?? 0) - (a.streak ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_streak
       const slice = sorted_streak.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
@@ -2464,10 +2476,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有连续上涨词</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={getStreakBadge(w.streak, w.last_date, yesterday)}
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getStreakBadge(w.streak, w.last_date, yesterday)} />}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getStreakBadge(w.streak, w.last_date, yesterday)} includeYesterday />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '连续上涨词', w.volume)}
                   onView={() => openDetail(w.keyword, '连续上涨词')}>
@@ -2484,7 +2497,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'newWords') {
       const base_new = filterByRadarDate(allNewWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
-        .filter(w => newWordBadgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === newWordBadgeFilter)
+        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_new = sortCol && sortDir ? [...base_new].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.count??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0
@@ -2510,6 +2523,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有共新增词</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={getBadge(w.first_date, w.last_date, yesterday)}
@@ -2531,14 +2545,17 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (rightTab === 'wordLib') {
       if (wordLibLoading) return <Spinner />
       const datedWordLibWords = filterByRadarDate(wordLibWords, radarDate)
+        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       const sorted_wl = sortCol && sortDir ? [...datedWordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.longTailCount??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.longTailCount??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
+          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
+          || (b.longTailCount ?? 0) - (a.longTailCount ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : datedWordLibWords
       const filtered_wl = wordLibSearch ? sorted_wl.filter(w => w.keyword.includes(wordLibSearch)) : sorted_wl
-      if (sorted_wl.length === 0) return <div className="text-center py-10 text-gray-400 text-sm">暂无词库数据</div>
+      if (wordLibWords.length === 0) return <div className="text-center py-10 text-gray-400 text-sm">暂无词库数据</div>
       const slice = filtered_wl.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
@@ -2553,6 +2570,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有匹配的词库数据</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge={getBadge(w.first_date, w.last_date, yesterday)}
@@ -3141,7 +3159,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(''); setSortCol('date'); setSortDir('desc') }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(''); setBadgeFilter('all'); setSortCol('date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}
@@ -3159,15 +3177,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
                       </select>
                     </label>
-                    {rightTab === 'newWords' && (
+                    {(['cross', 'rank', 'streak', 'newWords', 'wordLib'] as RightTab[]).includes(rightTab) && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-400">
                         类型
                         <div className="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
                           {([['all', '全部'], ['new', '新增'], ['updated', '更新']] as const).map(([value, label]) => (
                             <button key={value} type="button"
-                              aria-pressed={newWordBadgeFilter === value}
-                              onClick={() => { setNewWordBadgeFilter(value); setTabPage(current => ({ ...current, newWords: 0 })) }}
-                              className={`px-2.5 py-1 text-xs transition-colors ${newWordBadgeFilter === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                              aria-pressed={badgeFilter === value}
+                              onClick={() => { setBadgeFilter(value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
+                              className={`px-2.5 py-1 text-xs transition-colors ${badgeFilter === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                               {label}
                             </button>
                           ))}
