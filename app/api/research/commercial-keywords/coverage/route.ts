@@ -31,10 +31,8 @@ interface CoverageRow {
   searchVolume: number
 }
 
-// 研究中心"商业词"tab 的核心接口——每个概念分组下的每个别名都逐个挖下拉词，
-// 再把"全部别名+全部下拉词"拿去查现有排名数据里谁拿到了。同步一次性返回，
-// 不落库（每次现查，保证新鲜度，避免另建缓存表）。2026-08-28 新增，2026-08-28
-// 当天补了"同一概念多个别名"分组支持（见 ../route.ts 顶部注释）。
+// 研究中心"商业词"tab 的核心接口。正式排名只查询用户已经维护或审核加入的
+// 别名；百度联想词单独作为辅助资料返回，绝不能混进正式覆盖结果。
 export async function POST(req: Request) {
   const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
@@ -46,7 +44,13 @@ export async function POST(req: Request) {
 
   // 词组详情页只查当前这一个组的覆盖（比查全部快很多），不传 groupName 时
   // 保留原来的全量模式（代码留着，前端目前只会走带 groupName 的路径）。
-  const { groupName: scopeGroup } = await req.json().catch(() => ({})) as { groupName?: string }
+  const {
+    groupName: scopeGroup,
+    includeSuggestions = false,
+    suggestionsOnly = false,
+  } = await req.json().catch(() => ({})) as {
+    groupName?: string; includeSuggestions?: boolean; suggestionsOnly?: boolean
+  }
 
   let seedQuery = service.from('commercial_keywords').select('keyword, group_name').order('created_at', { ascending: true })
   if (scopeGroup && scopeGroup.trim()) seedQuery = seedQuery.eq('group_name', scopeGroup.trim())
@@ -65,29 +69,24 @@ export async function POST(req: Request) {
 
   // 1. 每个别名都单独挖一次下拉词——组内不同别名搜索习惯可能不一样，各自的
   // 下拉词都有价值；别名之间间隔200ms，避免短时间集中打百度建议接口
-  const keywordToGroup = new Map<string, string>()
-  for (const [group, members] of Array.from(groupToMembers.entries())) {
-    for (const m of members) keywordToGroup.set(m, group)
-  }
-
   const groupResults: GroupResult[] = []
-  const allKeywordsSet = new Set<string>(allMemberKeywords)
   for (const [group, members] of Array.from(groupToMembers.entries())) {
     const expansionsSet = new Set<string>()
-    for (const member of members) {
-      const expansions = await fetchBaiduSuggestionsUnfiltered(member)
-      for (const e of expansions) {
-        if (!allMemberKeywords.includes(e)) expansionsSet.add(e)
+    if (includeSuggestions) {
+      for (const member of members) {
+        const expansions = await fetchBaiduSuggestionsUnfiltered(member)
+        for (const e of expansions) {
+          if (!allMemberKeywords.includes(e)) expansionsSet.add(e)
+        }
+        await delay(200)
       }
-      await delay(200)
-    }
-    for (const e of Array.from(expansionsSet)) {
-      allKeywordsSet.add(e)
-      if (!keywordToGroup.has(e)) keywordToGroup.set(e, group)
     }
     groupResults.push({ groupName: group, members, expansions: Array.from(expansionsSet) })
   }
-  const allKeywords = Array.from(allKeywordsSet)
+  if (suggestionsOnly) {
+    return NextResponse.json({ groupResults })
+  }
+  const allKeywords = allMemberKeywords
 
   // 2. 关键词全集去重后，分批查 site_keyword_ranks（只有"排名"模式站点有
   // rank_position/title，"涨跌"模式站点没有这些细节，本来就查不到）
@@ -144,8 +143,8 @@ export async function POST(req: Request) {
     const site = siteMap.get(r.site_id)
     return {
       keyword: r.keyword,
-      isExpansion: !allMemberKeywords.includes(r.keyword),
-      groupName: keywordToGroup.get(r.keyword) ?? r.keyword,
+      isExpansion: false,
+      groupName: allSeeds.find(seed => seed.keyword === r.keyword)?.group_name ?? r.keyword,
       domain: site?.domain ?? '(未知站点)',
       siteName: site?.name ?? '',
       isOwnSite: site ? ownDomains.has(site.domain) : false,

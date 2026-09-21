@@ -384,6 +384,11 @@ interface Discovery {
   platform: string | null; rank_position: number | null; best_rank_position: number | null
   site_domains: string[] | null; seen_count: number
   first_seen_at: string; last_seen_at: string; status: string
+  evidence?: DiscoveryEvidenceRow[]
+}
+interface DiscoveryEvidenceRow {
+  domain: string; siteName: string; title: string | null; url: string | null
+  platform: string; rankPosition: number | null; statDate: string
 }
 
 type CommercialSubView = 'list' | 'detail' | 'discoveries'
@@ -736,8 +741,43 @@ function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   )
 }
 
-// 词组详情：取代原来独立的"排名覆盖"tab。进入即自动查（只查这一个组的别名，
-// 比原来"一次查全部组"快很多），百度联想降级成默认折叠的辅助区。
+function DiscoveryEvidence({ discovery }: { discovery: Discovery }) {
+  const [open, setOpen] = useState(false)
+  const evidence = discovery.evidence ?? []
+  return (
+    <div className="mt-2">
+      <button type="button" onClick={() => setOpen(value => !value)}
+        className="text-xs font-medium text-blue-600 hover:text-blue-700">
+        {open ? '收起判断依据' : `查看判断依据（${evidence.length || 1} 条标题）`}
+      </button>
+      {open && (
+        <div className="mt-2 overflow-hidden rounded-lg border border-gray-100 bg-gray-50/70 divide-y divide-gray-100">
+          {evidence.length > 0 ? evidence.map((item, index) => (
+            <div key={`${item.domain}|${item.platform}|${item.title}|${index}`} className="px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-gray-400 flex-wrap">
+                <span className="font-medium text-gray-600">{item.domain}</span>
+                {item.siteName && <span>{item.siteName}</span>}
+                <span>{item.platform}</span>
+                <span>排名 {item.rankPosition ?? '—'}</span>
+                <span>{item.statDate}</span>
+              </div>
+              <p className="mt-1 text-gray-600 break-words">
+                {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-blue-600 hover:underline">{item.title ?? '打开排名页面'}</a> : item.title ?? '没有标题'}
+              </p>
+            </div>
+          )) : (
+            <div className="px-3 py-2 text-xs text-gray-500">
+              <span className="font-medium">{discovery.domain ?? '未知站点'}</span>
+              <p className="mt-1 break-words">{discovery.title ?? '历史计数已保留，但近 30 天没有可展示的标题'}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 词组详情以正式别名和真实排名为主，百度联想只放在页面底部作为辅助参考。
 function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGroupRenamed, onGroupDeleted, onViewAllDiscoveries }: {
   groupName: string; members: CommercialKeyword[]
   onBack: () => void; onKeywordsChanged: () => void; onGroupRenamed: (newName: string) => void
@@ -747,6 +787,8 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false)
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(groupName)
@@ -761,6 +803,9 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
 
   const [groupDiscoveries, setGroupDiscoveries] = useState<Discovery[]>([])
   const [addingDiscoveryId, setAddingDiscoveryId] = useState<string | null>(null)
+  const [reviewingDiscoveryId, setReviewingDiscoveryId] = useState<string | null>(null)
+  const [reviewAlias, setReviewAlias] = useState('')
+  const [reviewGroup, setReviewGroup] = useState(groupName)
 
   function runCoverage() {
     setLoading(true); setError(''); setResult(null)
@@ -773,11 +818,37 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
     }).catch(() => setError('查询失败（网络异常），请重试'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { runCoverage(); setRenameValue(groupName) }, [groupName]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setShowSuggestions(false)
+    setSuggestionsLoaded(false)
+    runCoverage()
+    setRenameValue(groupName)
+  }, [groupName]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}&pageSize=5`)
       .then(r => r.json()).then(d => setGroupDiscoveries(d.discoveries ?? []))
   }, [groupName])
+
+  async function toggleSuggestions() {
+    const nextOpen = !showSuggestions
+    setShowSuggestions(nextOpen)
+    if (!nextOpen || suggestionsLoaded || suggestionsLoading) return
+    setSuggestionsLoading(true)
+    try {
+      const response = await fetch('/api/research/commercial-keywords/coverage', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupName, includeSuggestions: true, suggestionsOnly: true }),
+      })
+      const data = await response.json()
+      if (!response.ok) { setAddAliasError(data.error || '百度联想查询失败'); return }
+      setResult(current => current ? { ...current, groupResults: data.groupResults ?? [] } : current)
+      setSuggestionsLoaded(true)
+    } catch {
+      setAddAliasError('百度联想查询失败（网络异常）')
+    } finally {
+      setSuggestionsLoading(false)
+    }
+  }
 
   async function confirmRename() {
     if (!renameValue.trim() || renameValue.trim() === groupName) { setRenaming(false); return }
@@ -832,7 +903,13 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
     onGroupDeleted()
   }
 
-  async function addDiscoveryToGroup(discovery: Discovery) {
+  function openDiscoveryReview(discovery: Discovery) {
+    setReviewingDiscoveryId(discovery.id)
+    setReviewAlias(discovery.source_keyword)
+    setReviewGroup(groupName)
+  }
+
+  async function confirmDiscovery(discovery: Discovery) {
     if (addingDiscoveryId) return
     setAddingDiscoveryId(discovery.id)
     setAddAliasError('')
@@ -842,19 +919,36 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
         body: JSON.stringify({
           id: discovery.id,
           action: 'accept',
-          alias: discovery.source_keyword,
-          groupName,
+          alias: reviewAlias.trim(),
+          groupName: reviewGroup.trim(),
         }),
       })
       const data = await res.json()
       if (!res.ok) { setAddAliasError(data.error || '加入词组失败'); return }
       setGroupDiscoveries(current => current.filter(item => item.id !== discovery.id))
+      setReviewingDiscoveryId(null)
       onKeywordsChanged()
       runCoverage()
     } catch {
       setAddAliasError('加入词组失败（网络异常）')
     } finally {
       setAddingDiscoveryId(null)
+    }
+  }
+
+  async function ignoreGroupDiscovery(discovery: Discovery) {
+    if (!window.confirm(`忽略「${discovery.source_keyword}」后，系统以后不会再把它识别为新词。确定继续吗？`)) return
+    setAddAliasError('')
+    try {
+      const res = await fetch('/api/research/commercial-keywords/discoveries', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: discovery.id, action: 'ignore' }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAddAliasError(data.error || '忽略失败'); return }
+      setGroupDiscoveries(current => current.filter(item => item.id !== discovery.id))
+    } catch {
+      setAddAliasError('忽略失败（网络异常）')
     }
   }
 
@@ -879,6 +973,9 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
     clampedCoveragePage * PAGE_SIZE,
     (clampedCoveragePage + 1) * PAGE_SIZE,
   )
+  const coveredAliasCount = new Set((result?.coverage ?? []).map(item => item.keyword)).size
+  const coveredSiteCount = new Set((result?.coverage ?? []).map(item => item.domain)).size
+  const suggestionCount = result?.groupResults.reduce((sum, item) => sum + item.expansions.length, 0) ?? 0
 
   return (
     <div className="space-y-4">
@@ -921,33 +1018,26 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
         <p className="text-sm text-red-600">{error}</p>
       ) : result && (
         <>
-          <button onClick={() => setShowSuggestions(o => !o)}
-            className="w-full bg-white rounded-xl border border-gray-200 px-5 py-3 flex items-center justify-between text-left hover:bg-gray-50/60 transition-colors">
-            <span className="text-sm text-gray-600">辅助发现 · 百度联想 —— 本组共发现 {result.groupResults.reduce((a, g) => a + g.expansions.length, 0)} 个联想词</span>
-            <span className="text-xs text-gray-400">{showSuggestions ? '收起 ▲' : '展开 ▼'}</span>
-          </button>
-          {showSuggestions && (
-            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 -mt-2">
-              <p className="text-xs text-gray-400">该数据源对部分敏感/受限话题词经常无结果，仅供参考，不如下方真实排名数据可靠。</p>
-              {result.groupResults.map(g => (
-                <div key={g.groupName}>
-                  {g.expansions.length === 0 ? (
-                    <p className="text-xs text-gray-400">没有挖到下拉词</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {g.expansions.map(word => (
-                        <span key={word} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-100">{word}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            {[
+              ['正式别名', `${members.length} 个`],
+              ['已有排名', `${coveredAliasCount} 个别名`],
+              ['覆盖站点', `${coveredSiteCount} 个`],
+              ['待审核新词', `${groupDiscoveries.length} 个`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <p className="text-xs text-gray-400">{label}</p>
+                <p className="mt-1 text-base font-semibold text-gray-800">{value}</p>
+              </div>
+            ))}
+          </div>
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between flex-wrap gap-2">
-              <span className="text-sm font-semibold text-gray-700">排名覆盖 · {filteredCoverage.length} 条</span>
+              <div>
+                <p className="text-sm font-semibold text-gray-700">正式词排名</p>
+                <p className="mt-0.5 text-xs text-gray-400">只显示这个词组已经确认的别名，不包含百度联想词</p>
+              </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <select aria-label="选择选项" value={filterOwn} onChange={e => { setFilterOwn(e.target.value as typeof filterOwn); setCoveragePage(0) }} className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600">
                   <option value="all">全部站点</option><option value="own">自己</option><option value="ref">竞品</option>
@@ -983,7 +1073,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
                   <tbody className="divide-y divide-gray-50">
                     {pagedCoverage.map(c => (
                       <tr key={`${c.keyword}|${c.domain}|${c.platform}|${c.url ?? ''}`} className="text-gray-700">
-                        <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span>{c.isExpansion && <span className="text-[10px] text-blue-500 ml-1">下拉</span>}</td>
+                        <td className="px-4 py-2 max-w-[160px]"><span className="block truncate" title={c.keyword}>{c.keyword}</span></td>
                         <td className="px-4 py-2 text-xs whitespace-nowrap">
                           {c.domain}
                           <span className={`ml-1 px-1 py-0.5 rounded text-[10px] ${c.isOwnSite ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400'}`}>{c.isOwnSite ? '自己' : '竞品'}</span>
@@ -1012,23 +1102,75 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
       )}
 
       {groupDiscoveries.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2">
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-700">这个组的新词发现</span>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">待判断的新词</p>
+              <p className="mt-0.5 text-xs text-gray-400">先查看命中标题，再决定修正名称、调整归属或永久忽略</p>
+            </div>
             <button onClick={onViewAllDiscoveries} className="text-xs text-gray-400 hover:text-gray-700">查看全部 →</button>
           </div>
           {groupDiscoveries.map(d => (
-            <div key={d.id} className="flex items-center justify-between gap-3 text-xs text-gray-500">
-              <p className="min-w-0 truncate">
-                <span className="font-medium text-gray-700">{d.source_keyword}</span> · {d.site_domains?.length ?? 0}个站点 · 出现{d.seen_count}次 · 最佳排名{d.best_rank_position ?? '—'}
-              </p>
-              <button type="button" disabled={addingDiscoveryId === d.id}
-                onClick={() => addDiscoveryToGroup(d)}
-                className="flex-shrink-0 rounded-lg bg-green-500 px-2.5 py-1 font-medium text-white hover:bg-green-600 disabled:opacity-50">
-                {addingDiscoveryId === d.id ? '加入中…' : '加入该词组'}
-              </button>
+            <div key={d.id} className="rounded-lg border border-gray-100 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 text-xs text-gray-500">
+                  <p><span className="text-sm font-semibold text-gray-800">{d.source_keyword}</span> <span className="ml-1 text-gray-400">标题命中“{d.matched_alias}”</span></p>
+                  <p className="mt-1">已记录 {d.site_domains?.length ?? 0} 个站点 · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'}</p>
+                  <DiscoveryEvidence discovery={d} />
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  <button type="button" onClick={() => openDiscoveryReview(d)}
+                    className="rounded-lg bg-green-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-600">审核加入</button>
+                  <button type="button" onClick={() => ignoreGroupDiscovery(d)}
+                    className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-500 hover:border-red-200 hover:text-red-500">忽略</button>
+                </div>
+              </div>
+              {reviewingDiscoveryId === d.id && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+                  <label className="text-xs text-gray-400">加入名称</label>
+                  <input value={reviewAlias} onChange={event => setReviewAlias(event.target.value)}
+                    className="w-40 rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                  <label className="text-xs text-gray-400">归属词组</label>
+                  <input value={reviewGroup} onChange={event => setReviewGroup(event.target.value)}
+                    className="w-32 rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                  <button type="button" disabled={addingDiscoveryId === d.id || !reviewAlias.trim() || !reviewGroup.trim()}
+                    onClick={() => confirmDiscovery(d)}
+                    className="rounded-lg bg-green-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-600 disabled:opacity-50">
+                    {addingDiscoveryId === d.id ? '保存中…' : '确认加入'}
+                  </button>
+                  <button type="button" onClick={() => setReviewingDiscoveryId(null)} className="text-xs text-gray-400 hover:text-gray-600">取消</button>
+                </div>
+              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {result && (
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <button type="button" onClick={toggleSuggestions}
+            className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-gray-50/60">
+            <div>
+              <p className="text-sm font-medium text-gray-600">辅助参考：百度联想</p>
+              <p className="mt-0.5 text-xs text-gray-400">
+                {suggestionsLoaded ? `${suggestionCount} 个未审核联想词，不会进入上方正式排名` : '按需查询，不影响上方正式排名的加载速度'}
+              </p>
+            </div>
+            <span className="text-xs text-gray-400">{suggestionsLoading ? '查询中…' : showSuggestions ? '收起 ▲' : '查看 ▼'}</span>
+          </button>
+          {showSuggestions && (
+            <div className="border-t border-gray-100 px-5 py-4">
+              {suggestionsLoading ? <Spinner /> : suggestionCount === 0 ? (
+                <p className="text-xs text-gray-400">没有查询到相关联想词</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {result.groupResults.flatMap(item => item.expansions).map(word => (
+                    <span key={word} className="rounded-full border border-gray-100 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-500">{word}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1112,7 +1254,10 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-400">抓排名标题时（rank-title步骤，16个"排名"模式站点）顺手检查标题里有没有出现已知别名文字，命中了但关键词本身还不认识，就是新词候选——每天抓取慢慢攒出来的，不是一次性挖干净。</p>
+      <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+        <p className="text-sm font-medium text-gray-700">逐条确认后再加入词组</p>
+        <p className="mt-1 text-xs text-gray-500">系统只负责找出可能相关的词。请先查看站点标题，再修正加入名称和归属词组；不相关的词可以永久忽略。</p>
+      </div>
 
       <div className="flex items-center gap-1.5">
         {(['pending', 'accepted'] as const).map(s => (
@@ -1139,18 +1284,14 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
                     <span className="text-xs text-gray-400">→ 推测属于「{d.group_name}」（标题含"{d.matched_alias}"）</span>
                   </div>
                   <p className="text-xs text-gray-400 mt-1">
-                    {d.site_domains?.length ?? 0} 个站点 · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'} · 最新命中 {d.domain ?? '—'}（{d.last_seen_at.slice(0, 10)}）
+                    已记录 {d.site_domains?.length ?? 0} 个站点 · 出现 {d.seen_count} 次 · 最佳排名 {d.best_rank_position ?? '—'} · 最新命中 {d.domain ?? '—'}（{d.last_seen_at.slice(0, 10)}）
                   </p>
-                  {d.title && (
-                    <p className="text-xs text-gray-500 mt-1 truncate" title={d.title}>
-                      {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{d.title}</a> : d.title}
-                    </p>
-                  )}
+                  <DiscoveryEvidence discovery={d} />
                 </div>
                 {status !== 'accepted' && (
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button onClick={() => openAcceptForm(d)}
-                      className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">加入该词组</button>
+                      className="px-2.5 py-1 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">审核加入</button>
                     {status === 'pending' && (
                       <button onClick={() => ignoreDiscovery(d.id)}
                         className="px-2.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg hover:text-red-500 hover:border-red-200 transition-colors">忽略</button>
@@ -1164,7 +1305,7 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
                   <input aria-label="输入内容" value={acceptAlias} onChange={e => setAcceptAlias(e.target.value)}
                     placeholder="要加入的别名文字"
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-40" />
-                  <span className="text-xs text-gray-400">归到组</span>
+                  <span className="text-xs text-gray-400">归属词组</span>
                   <input aria-label="输入内容" value={acceptGroup} onChange={e => setAcceptGroup(e.target.value)}
                     className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 w-32" />
                   <button onClick={() => confirmAccept(d.id)} disabled={!acceptAlias.trim() || !acceptGroup.trim()}

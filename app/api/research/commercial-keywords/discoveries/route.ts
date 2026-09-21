@@ -59,7 +59,69 @@ export async function GET(req: Request) {
   const { data, error, count } = await query
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
-  return NextResponse.json({ discoveries: data ?? [], total: count ?? 0, page, pageSize })
+  const discoveries = (data ?? []) as Record<string, unknown>[]
+  if (discoveries.length === 0) {
+    return NextResponse.json({ discoveries: [], total: count ?? 0, page, pageSize })
+  }
+
+  // Show the actual titles behind "N 个站点" so reviewers can judge whether
+  // a candidate is really an alias instead of trusting an opaque count.
+  type EvidenceRow = {
+    site_id: string; keyword: string; title: string | null; url: string | null
+    platform: string; rank_position: number | null; stat_date: string
+  }
+  const sourceKeywords = [...new Set(discoveries.map(row => String(row.source_keyword ?? '')).filter(Boolean))]
+  const since = new Date(Date.now() + 8 * 3600000 - 30 * 86400000).toISOString().slice(0, 10)
+  let evidenceRows: EvidenceRow[] = []
+  try {
+    evidenceRows = await fetchAllRows<EvidenceRow>((evidenceFrom, evidenceTo) => service
+      .from('site_keyword_ranks')
+      .select('site_id, keyword, title, url, platform, rank_position, stat_date')
+      .in('keyword', sourceKeywords)
+      .gte('stat_date', since)
+      .not('title', 'is', null)
+      .order('stat_date', { ascending: false })
+      .order('rank_position', { ascending: true, nullsFirst: false })
+      .range(evidenceFrom, evidenceTo))
+  } catch (evidenceError) {
+    console.error('Unable to load commercial keyword discovery evidence:', evidenceError)
+  }
+
+  const siteIds = [...new Set(evidenceRows.map(row => row.site_id))]
+  const siteMap = new Map<string, { domain: string; name: string }>()
+  if (siteIds.length > 0) {
+    const { data: sites } = await service.from('sites').select('id, domain, name').in('id', siteIds)
+    for (const site of (sites ?? []) as { id: string; domain: string; name: string }[]) {
+      siteMap.set(site.id, { domain: site.domain, name: site.name })
+    }
+  }
+
+  const enriched = discoveries.map(discovery => {
+    const sourceKeyword = String(discovery.source_keyword ?? '')
+    const matchedAlias = String(discovery.matched_alias ?? '').toLowerCase()
+    const seen = new Set<string>()
+    const evidence = evidenceRows
+      .filter(row => row.keyword === sourceKeyword && row.title?.toLowerCase().includes(matchedAlias))
+      .filter(row => {
+        const key = `${row.site_id}|${row.platform}|${row.title}|${row.url ?? ''}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .slice(0, 12)
+      .map(row => ({
+        domain: siteMap.get(row.site_id)?.domain ?? '未知站点',
+        siteName: siteMap.get(row.site_id)?.name ?? '',
+        title: row.title,
+        url: row.url,
+        platform: row.platform,
+        rankPosition: row.rank_position,
+        statDate: row.stat_date,
+      }))
+    return { ...discovery, evidence }
+  })
+
+  return NextResponse.json({ discoveries: enriched, total: count ?? 0, page, pageSize })
 }
 
 export async function PATCH(req: Request) {
