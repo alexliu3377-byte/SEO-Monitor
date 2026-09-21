@@ -32,7 +32,7 @@
 ## 后续建议
 
 1. 为 Vercel 建立独立 Preview 测试环境，使用测试 Supabase 项目或脱敏数据库。
-2. Strix 第一次只测试 Preview 域名和测试账号，并明确排除删除账号、删除站点、触发批量抓取和 Supabase 管理接口。
-3. 先测试认证绕过、越权、IDOR、CSRF、XSS、SSRF，不进行高并发或拒绝服务测试。
-4. 登录限流目前主要依靠 Cloudflare Turnstile，应用内存计数在 Serverless 多实例下不是全局计数。若以后开放给更多外部用户，应增加 Vercel/Cloudflare WAF 限流或数据库级限流。
+2. 主动渗透工具目前保持停用；若以后重新评估，只能测试 Preview 域名和测试账号，并排除删除账号、删除站点、触发批量抓取和 Supabase 管理接口。
+3. 人工审查继续优先检查认证绕过、越权、IDOR、CSRF、XSS、SSRF，不进行高并发或拒绝服务测试。
+4. 登录限流已改为 Supabase 数据库全局计数，按 IP 与 IP＋用户名双层限制；数据库只保存 HMAC 摘要。若以后开放给更多外部用户，仍建议再增加 Vercel/Cloudflare WAF 边缘限流。
 5. 每次增加高权限 API 时，继续同时检查服务端角色和资源归属，不能只依赖左侧菜单隐藏。

@@ -1,30 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-
-const attempts = new Map<string, { count: number; resetAt: number }>()
-const WINDOW_MS = 10 * 60 * 1000
-const MAX_ATTEMPTS = 10
+import { clearSuccessfulLoginLimit, consumeLoginRateLimit } from '@/lib/login-rate-limit'
 
 function clientIp(req: Request) {
   return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown'
-}
-
-function isRateLimited(key: string) {
-  const now = Date.now()
-  if (attempts.size > 5_000) {
-    for (const [candidate, value] of attempts) {
-      if (value.resetAt <= now) attempts.delete(candidate)
-    }
-    while (attempts.size > 5_000) attempts.delete(attempts.keys().next().value as string)
-  }
-  const current = attempts.get(key)
-  if (!current || current.resetAt <= now) {
-    attempts.set(key, { count: 1, resetAt: now + WINDOW_MS })
-    return false
-  }
-  current.count += 1
-  return current.count > MAX_ATTEMPTS
 }
 
 async function verifyTurnstile(token: string | undefined, ip: string) {
@@ -59,8 +39,23 @@ export async function POST(req: Request) {
   }
 
   const ip = clientIp(req)
-  const rateLimitKey = `${ip}:${normalizedUsername.toLowerCase()}`
-  if (isRateLimited(rateLimitKey)) return NextResponse.json({ error: 'Too many attempts' }, { status: 429 })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = createServiceClient() as any
+  try {
+    const limit = await consumeLoginRateLimit(service, ip, normalizedUsername)
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: '登录尝试过多，请稍后再试' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.max(1, limit.retryAfterSeconds)) },
+        }
+      )
+    }
+  } catch (error) {
+    console.error('Unable to apply login rate limit:', error)
+    return NextResponse.json({ error: '登录保护服务暂时不可用，请稍后再试' }, { status: 503 })
+  }
   try {
     if (!await verifyTurnstile(turnstileToken, ip)) {
       return NextResponse.json({ error: 'Human verification failed' }, { status: 400 })
@@ -68,9 +63,6 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: 'Verification service unavailable' }, { status: 503 })
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = createServiceClient() as any
 
   const { data: profile, error: profileError } = await service
     .from('user_profiles')
@@ -114,6 +106,12 @@ export async function POST(req: Request) {
   const { error: sessionError } = await sessionClient.auth.setSession(signInData.session)
   if (sessionError) return NextResponse.json({ error: 'Unable to establish session' }, { status: 500 })
 
-  attempts.delete(rateLimitKey)
+  try {
+    await clearSuccessfulLoginLimit(service, ip, normalizedUsername)
+  } catch (error) {
+    // The session is already valid. Keep login available while retaining the
+    // conservative IP-wide counter, and surface cleanup failures in logs.
+    console.error('Unable to clear successful login rate limit:', error)
+  }
   return NextResponse.json({ ok: true })
 }
