@@ -13,7 +13,9 @@ const nextConfig = {
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
       { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
       { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+      { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
       { key: 'X-DNS-Prefetch-Control', value: 'off' },
+      { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
       {
         key: 'Content-Security-Policy',
         value: [
@@ -39,7 +41,16 @@ const nextConfig = {
         value: 'max-age=63072000; includeSubDomains; preload',
       })
     }
-    return [{ source: '/:path*', headers: securityHeaders }]
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+          { key: 'Pragma', value: 'no-cache' },
+        ],
+      },
+      { source: '/:path*', headers: securityHeaders },
+    ]
   },
   async redirects() {
     return [

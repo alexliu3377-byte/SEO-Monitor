@@ -15,10 +15,16 @@ on:
         required: false
         default: '7'
 
+permissions:
+  contents: read
+
 jobs:
   backfill:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      SITE_INPUT: ${{ github.event.inputs.site }}
+      DAYS_INPUT: ${{ github.event.inputs.days }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -31,18 +37,19 @@ jobs:
         run: npm ci
 
       - name: Validate site input
-        env:
-          SITE_INPUT: ${{ github.event.inputs.site }}
         run: |
           if ! [[ "$SITE_INPUT" =~ ^[a-zA-Z0-9.-]{1,253}$ ]]; then
             echo "::error::域名格式不对：$SITE_INPUT"
+            exit 1
+          fi
+          if ! [[ "$DAYS_INPUT" =~ ^[0-9]+$ ]] || [ "$DAYS_INPUT" -lt 1 ] || [ "$DAYS_INPUT" -gt 30 ]; then
+            echo "::error::补抓天数必须是 1 到 30"
             exit 1
           fi
 
       - name: Look up site config
         id: siteinfo
         env:
-          SITE_INPUT: ${{ github.event.inputs.site }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
@@ -76,13 +83,13 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/crawl.ts --step=weight --site=${{ github.event.inputs.site }}
+        run: npx tsx scripts/crawl.ts --step=weight --site="$SITE_INPUT"
 
       - name: 补新增关键词
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/crawl.ts --step=keywords --site=${{ github.event.inputs.site }}
+        run: npx tsx scripts/crawl.ts --step=keywords --site="$SITE_INPUT"
 
       - name: 补涨跌历史（rank）
         if: steps.siteinfo.outputs.has_rank_data == 'true'
@@ -90,11 +97,11 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          DAYS="${{ github.event.inputs.days }}"
+          DAYS="$DAYS_INPUT"
           for i in $(seq 0 $((DAYS-1))); do
             D=$(date -u -d "+8 hours -$i days" +%F)
             echo "── 补抓涨跌 $D ──"
-            npx tsx scripts/crawl.ts --step=rank --site=${{ github.event.inputs.site }} --date=$D
+            npx tsx scripts/crawl.ts --step=rank --site="$SITE_INPUT" --date="$D"
           done
 
       - name: 补排名历史（rank-title）
@@ -103,11 +110,11 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          DAYS="${{ github.event.inputs.days }}"
+          DAYS="$DAYS_INPUT"
           for i in $(seq 0 $((DAYS-1))); do
             D=$(date -u -d "+8 hours -$i days" +%F)
             echo "── 补抓排名 $D ──"
-            npx tsx scripts/crawl-rank.ts --site=${{ github.event.inputs.site }} --date=$D
+            npx tsx scripts/crawl-rank.ts --site="$SITE_INPUT" --date="$D"
           done
 
       - name: 两种模式都没开

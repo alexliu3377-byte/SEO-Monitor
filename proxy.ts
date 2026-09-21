@@ -3,6 +3,24 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { legacyContentRedirect } from './lib/system-routes'
 
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function isTrustedBrowserMutation(request: NextRequest): boolean {
+  if (!MUTATING_METHODS.has(request.method.toUpperCase())) return true
+
+  // Modern browsers send Sec-Fetch-Site even when a request shape does not
+  // require a CORS preflight. Reject cross-site cookie-authenticated writes.
+  if (request.headers.get('sec-fetch-site') === 'cross-site') return false
+
+  const origin = request.headers.get('origin')
+  if (!origin) return true // Non-browser/service requests authenticate separately.
+  try {
+    return new URL(origin).origin === request.nextUrl.origin
+  } catch {
+    return false
+  }
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -40,6 +58,9 @@ export async function proxy(request: NextRequest) {
 
   if (!user && isApi && !isPublicApi) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (user && isApi && !isTrustedBrowserMutation(request)) {
+    return NextResponse.json({ error: 'Cross-site request blocked' }, { status: 403 })
   }
   if (!user && !isApi && !pathname.startsWith('/login')) {
     const loginUrl = request.nextUrl.clone()
