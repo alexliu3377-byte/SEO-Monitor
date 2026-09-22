@@ -210,7 +210,7 @@ test('trend collection queries are trimmed, deduplicated and platform limited', 
   )
   assert.equal(normalizeTrendQueries('douyin', []), null)
   assert.equal(normalizeTrendQueries('douyin', ['一']), null)
-  assert.equal(normalizeTrendQueries('douyin', ['词一', '词二', '词三', '词四', '词五']), null)
+  assert.equal(normalizeTrendQueries('douyin', Array.from({ length: 101 }, (_, index) => `词${index + 1}`)), null)
 })
 
 test('trend score rewards fresh cross-platform growth without SEO volume', () => {

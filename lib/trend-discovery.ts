@@ -5,8 +5,8 @@ export const TREND_QUERY_PLATFORMS = ['xiaohongshu', 'douyin'] as const
 export type TrendQueryPlatform = typeof TREND_QUERY_PLATFORMS[number]
 
 export const TREND_QUERY_LIMITS: Record<TrendQueryPlatform, number> = {
-  xiaohongshu: 8,
-  douyin: 4,
+  xiaohongshu: 100,
+  douyin: 100,
 }
 
 export const TREND_STAGES = ['new', 'warming', 'hot', 'persistent', 'cooling'] as const

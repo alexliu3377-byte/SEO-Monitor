@@ -60,7 +60,7 @@ export async function PUT(request: Request) {
   const xiaohongshu = normalizeTrendQueries('xiaohongshu', platforms?.xiaohongshu)
   const douyin = normalizeTrendQueries('douyin', platforms?.douyin)
   if (!xiaohongshu || !douyin) {
-    return NextResponse.json({ error: '每个采集词需为 2–40 个字符；小红书最多 8 个，抖音最多 4 个' }, { status: 400 })
+    return NextResponse.json({ error: '每个采集词需为 2–40 个字符；每个平台最多 100 个' }, { status: 400 })
   }
 
   const { error } = await service.rpc('replace_trend_collection_queries', {

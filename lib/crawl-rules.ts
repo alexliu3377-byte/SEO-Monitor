@@ -244,14 +244,14 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'trend-discovery',
     title: '趋势发现（内部试行）',
-    badge: '本机 Playwright · 第一阶段手动运行',
+    badge: '独立 GitHub 调度 · 专用电脑低频执行',
     items: [
-      { label: '触发方式', text: '第一阶段在项目负责人的 Windows 电脑手动执行 npm run trend:collect；先每天运行1次观察一周，确认账号与页面结构稳定后，最多提高到每天4次。后续才迁移到专用电脑和多节点，不由 Vercel 执行浏览器采集' },
+      { label: '触发方式', text: '独立私有仓库 trend-collector-worker 每30分钟派发一次 GitHub Actions；任务只投递给带 trend-collector 标签的新电脑 self-hosted Runner，并用 workflow concurrency 保证同一时刻只运行一轮。每轮先随机等待0–15分钟，再向主系统领取最多一个到期词；没有到期任务就正常结束，不由 Vercel 或主仓库执行浏览器采集' },
       { label: '平台范围', text: 'v3.0.0 第一阶段先接小红书和抖音网页搜索首屏，小黑盒配置保留但默认关闭，等前两者稳定后再单独适配；每个平台使用隔离的本地 Chrome profile，由使用者人工登录' },
-      { label: '采集词设置', text: '只有项目负责人可在“趋势发现”页面维护搜索入口词，小红书最多8个、抖音最多4个，每个词2–40字符；设置保存在 trend_collection_queries。采集器每轮开始前通过带采集密钥的 collector-config 接口读取最新设置，网站暂时不可用时才使用 config/trend-collector.json 的本机备用词' },
+      { label: '采集词与任务队列', text: '只有项目负责人可在“趋势发现”页面维护搜索入口词，每个平台最多100个、每个词2–40字符；设置保存在 trend_collection_queries。独立 Worker 通过带采集密钥的 claim 接口原子领取最久未执行的一个词，数据库使用90分钟租约避免多节点重复领取，同一个词领取后至少间隔12小时才再次到期；词量增长时会自动拉长轮换周期，不需要增加 Windows 计划任务' },
       { label: '采集范围', text: '只保存公开结果卡片中的标题、简短文字、标签、发布时间（页面有才保存）、互动数字和官方内容链接；链接写入前删除 query/hash，避免保存搜索参数或会话型参数。不下载图片/视频，不抓评论与个人主页，不把 Cookie、密码或浏览器资料上传到系统' },
       { label: '平台读取方式', text: '小红书从搜索结果中的官方内容链接读取卡片文字；抖音新版搜索卡片不再输出 /video/ 链接，因此在已登录浏览器加载搜索页时，被动读取页面自身返回的公开搜索结果响应，取得内容编号、标题、发布时间与互动数字，再生成官方视频链接。不会逐条打开视频，也不会额外调用隐藏接口' },
-      { label: '限流与失败', text: '每轮临时随机排列平台和查询词，但仍保持单个顺序执行，不并发集中请求；小红书最多8个主题、抖音最多4个主题，每个查询最多12条结果，查询之间至少等待8秒。2026-09-09 首轮实测抖音连续到第8个主题时出现访问频繁，因此主动减半。出现登录、验证码、安全验证或访问频繁时立即停止该平台并记录 blocked，不自动绕过验证、不做高频重试、不使用代理池' },
+      { label: '限流与失败', text: '每轮只处理一个平台的一个搜索词，每个查询最多12条首屏结果；领取端控制同词至少间隔12小时，并在半小时调度窗口内增加随机延迟。出现登录、验证码、安全验证或访问频繁时立即停止并记录 blocked，不自动绕过验证、不做高频重试、不使用代理池' },
       { label: '去重规则', text: '原始内容按 platform + external_id 唯一；同一轮快照按 signal_id + run_id 唯一；候选词按标准化文字唯一；词与来源按 signal_id + term_id 唯一。重复采集只更新最后出现时间、最新指标及查询词集合' },
       { label: '评分口径', text: 'refresh_trend_discovery_terms() 只用首次/最后出现时间、近24小时与前24小时来源数、跨平台数、总来源数和持续天数计算0-100趋势分及可信度，并分为刚出现/升温中/热门/持续出现/降温。百度搜索量、爱站排名不参与发现分数，后续只作为SEO验证层' },
       { label: '写入表', text: 'trend_collection_queries（搜索入口词）、trend_collector_nodes（节点健康）、trend_collection_runs（每轮结果）、trend_signals（公开内容摘要）、trend_signal_snapshots（互动数字快照）、trend_terms（候选词与人工审核状态）、trend_signal_terms（词与来源关系）；全部开启RLS并仅由服务端 service role 访问' },

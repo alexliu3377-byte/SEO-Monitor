@@ -514,7 +514,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                             setSettingsSaved(false)
                           }}
                           rows={9}
-                          maxLength={500}
+                          maxLength={5000}
                           placeholder={platformName === 'xiaohongshu' ? '新手游\n宝藏APP\n效率工具' : '新游戏\n宝藏游戏\n新APP'}
                           className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm leading-7 text-slate-800 outline-none transition placeholder:text-slate-300 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                         />
