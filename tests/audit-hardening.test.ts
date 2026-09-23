@@ -40,6 +40,7 @@ import {
   normalizeTrendTerm,
 } from '../lib/trend-discovery'
 import { isCrawlStep, normalizeCrawlDomain } from '../lib/github-actions'
+import { allowsServiceAuthPath } from '../lib/service-api-access'
 
 const blockedUrls = [
   'file:///etc/passwd',
@@ -73,6 +74,14 @@ test('manual crawl dispatch accepts only valid domains and supported steps', () 
   assert.equal(normalizeCrawlDomain('example.com:8443'), null)
   assert.equal(isCrawlStep('weight'), true)
   assert.equal(isCrawlStep('unknown-step'), false)
+})
+
+test('trend collector service routes bypass browser login but unrelated APIs do not', () => {
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim'), true)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/ingest'), true)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/collector-config'), true)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim/history'), true)
+  assert.equal(allowsServiceAuthPath('/api/admin/users'), false)
 })
 
 test('task-group members use canonical profile names', async () => {

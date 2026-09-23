@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { legacyContentRedirect } from './lib/system-routes'
+import { allowsServiceAuthPath } from './lib/service-api-access'
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -46,14 +47,7 @@ export async function proxy(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
   const isApi = pathname.startsWith('/api/')
-  const allowsServiceAuth = [
-    '/api/cron',
-    '/api/environment/daily-snapshot',
-    '/api/hot-radar/refresh',
-    '/api/tracking-cache/refresh',
-    '/api/trend-discovery/ingest',
-    '/api/trend-discovery/collector-config',
-  ].some(path => pathname === path || pathname.startsWith(`${path}/`))
+  const allowsServiceAuth = allowsServiceAuthPath(pathname)
   const isPublicApi = pathname.startsWith('/api/auth/') || allowsServiceAuth
 
   if (!user && isApi && !isPublicApi) {
