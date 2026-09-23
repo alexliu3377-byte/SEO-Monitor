@@ -131,8 +131,9 @@ function profileDirectory(platform: TrendPlatform) {
 }
 
 async function launchPlatformBrowser(platform: TrendPlatform): Promise<BrowserContext> {
+  const platformChannel = process.env[`TREND_${platform.toUpperCase()}_BROWSER_CHANNEL`]?.trim()
   return chromium.launchPersistentContext(profileDirectory(platform), {
-    channel: process.env.TREND_BROWSER_CHANNEL || 'chrome',
+    channel: platformChannel || process.env.TREND_BROWSER_CHANNEL || 'chrome',
     headless: process.env.TREND_HEADLESS === 'true',
     viewport: { width: 1440, height: 960 },
     locale: 'zh-CN',
