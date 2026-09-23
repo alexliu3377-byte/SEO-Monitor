@@ -148,6 +148,20 @@ function searchUrl(platform: TrendPlatform, query: string): string {
   throw new Error('小黑盒采集器仍在第二阶段，当前不会运行')
 }
 
+async function navigateForCollection(page: Page, url: string) {
+  try {
+    // These SPA search pages can keep DOMContentLoaded pending even after the
+    // response and visible UI are ready. Waiting for the navigation commit and
+    // then allowing a fixed render window is more reliable for unattended runs.
+    await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
+  } catch (error) {
+    const currentUrl = page.url()
+    if (!currentUrl.startsWith(new URL(url).origin)) throw error
+    console.warn(`页面导航超时但已进入目标网站，继续检查已渲染内容：${currentUrl}`)
+  }
+  await page.waitForTimeout(8_000)
+}
+
 function compactNumber(value: string): number | null {
   const normalized = value.trim().toLowerCase().replace(/,/g, '')
   const match = normalized.match(/(\d+(?:\.\d+)?)\s*([万w]?)/)
@@ -289,8 +303,7 @@ async function collectDouyinQuery(page: Page, query: string, maxResults: number)
     { timeout: 20_000 },
   ).catch(() => null as PlaywrightResponse | null)
 
-  await page.goto(searchUrl('douyin', query), { waitUntil: 'domcontentloaded', timeout: 45_000 })
-  await page.waitForTimeout(5_000)
+  await navigateForCollection(page, searchUrl('douyin', query))
   await detectBlockedPage(page)
   const response = await apiResponse
   if (!response) return []
@@ -302,8 +315,7 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
   if (platform === 'douyin') return collectDouyinQuery(page, query, maxResults)
   const selector = RESULT_LINK_SELECTORS[platform]
   if (!selector) return []
-  await page.goto(searchUrl(platform, query), { waitUntil: 'domcontentloaded', timeout: 45_000 })
-  await page.waitForTimeout(5_000)
+  await navigateForCollection(page, searchUrl(platform, query))
   await detectBlockedPage(page)
 
   const links = page.locator(selector)
@@ -434,6 +446,7 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
     signals: [...signals.values()],
   })
   console.log(`[${PLATFORM_NAME[platform]}] 已上报：${status}，${signals.size} 条信号，${String(result.terms ?? 0)} 个候选词`)
+  return status
 }
 
 const PLATFORM_NAME: Record<TrendPlatform, string> = {
@@ -453,7 +466,11 @@ async function main() {
   }
   await loadRemoteQueries(config)
   const platforms = shuffledForRun(parsePlatformArgument(config))
-  for (const platform of platforms) await collectPlatform(config, platform)
+  const statuses: Array<'completed' | 'failed' | 'blocked'> = []
+  for (const platform of platforms) statuses.push(await collectPlatform(config, platform))
+  if (statuses.some(status => status !== 'completed')) {
+    throw new Error('至少一个趋势平台采集失败；失败详情已上报到主系统')
+  }
 }
 
 main().catch(error => {
