@@ -131,9 +131,12 @@ function profileDirectory(platform: TrendPlatform) {
 }
 
 async function launchPlatformBrowser(platform: TrendPlatform): Promise<BrowserContext> {
+  const directory = profileDirectory(platform)
   const platformChannel = process.env[`TREND_${platform.toUpperCase()}_BROWSER_CHANNEL`]?.trim()
-  return chromium.launchPersistentContext(profileDirectory(platform), {
-    channel: platformChannel || process.env.TREND_BROWSER_CHANNEL || 'chrome',
+  const channel = platformChannel || process.env.TREND_BROWSER_CHANNEL || 'chrome'
+  console.log(`[${PLATFORM_NAME[platform]}] 浏览器：${channel}；资料目录：${directory}`)
+  return chromium.launchPersistentContext(directory, {
+    channel,
     headless: process.env.TREND_HEADLESS === 'true',
     viewport: { width: 1440, height: 960 },
     locale: 'zh-CN',
@@ -150,14 +153,29 @@ function searchUrl(platform: TrendPlatform, query: string): string {
 }
 
 async function navigateForCollection(page: Page, url: string) {
+  const target = new URL(url)
   try {
     // These SPA search pages can keep DOMContentLoaded pending even after the
     // response and visible UI are ready. Waiting for the navigation commit and
     // then allowing a fixed render window is more reliable for unattended runs.
-    await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
+    if (target.hostname === 'www.xiaohongshu.com') {
+      const session = await page.context().newCDPSession(page)
+      try {
+        const result = await session.send('Page.navigate', { url })
+        if (result.errorText) throw new Error(result.errorText)
+        await page.waitForURL(current => current.origin === target.origin, {
+          waitUntil: 'commit',
+          timeout: 45_000,
+        })
+      } finally {
+        await session.detach().catch(() => undefined)
+      }
+    } else {
+      await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
+    }
   } catch (error) {
     const currentUrl = page.url()
-    if (!currentUrl.startsWith(new URL(url).origin)) {
+    if (!currentUrl.startsWith(target.origin)) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`无法进入目标网站；浏览器停留在 ${currentUrl}。直接导航错误：${reason}`)
     }
