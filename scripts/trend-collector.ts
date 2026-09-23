@@ -149,28 +149,20 @@ function searchUrl(platform: TrendPlatform, query: string): string {
 }
 
 async function navigateForCollection(page: Page, url: string) {
-  let directNavigationError: unknown
   try {
     // These SPA search pages can keep DOMContentLoaded pending even after the
     // response and visible UI are ready. Waiting for the navigation commit and
     // then allowing a fixed render window is more reliable for unattended runs.
     await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
   } catch (error) {
-    directNavigationError = error
-    if (page.url() === 'about:blank') {
-      console.warn('直接导航停留在空白页，改用页面内导航重试')
-      await page.evaluate(target => window.location.assign(target), url).catch(() => undefined)
-      await page.waitForTimeout(20_000)
-    }
-
     const currentUrl = page.url()
     if (!currentUrl.startsWith(new URL(url).origin)) {
-      const reason = directNavigationError instanceof Error ? directNavigationError.message : String(directNavigationError)
+      const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`无法进入目标网站；浏览器停留在 ${currentUrl}。直接导航错误：${reason}`)
     }
     console.warn(`直接导航未正常完成但已进入目标网站，继续检查内容：${currentUrl}`)
   }
-  await page.waitForTimeout(8_000)
+  await page.waitForTimeout(15_000)
 }
 
 function compactNumber(value: string): number | null {
@@ -311,7 +303,7 @@ function parseDouyinSearchPayload(
 async function collectDouyinQuery(page: Page, query: string, maxResults: number): Promise<CollectedSignal[]> {
   const apiResponse = page.waitForResponse(
     response => response.url().includes('/aweme/v1/web/general/search/single/') && response.status() === 200,
-    { timeout: 20_000 },
+    { timeout: 45_000 },
   ).catch(() => null as PlaywrightResponse | null)
 
   await navigateForCollection(page, searchUrl('douyin', query))
@@ -330,6 +322,8 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
   await detectBlockedPage(page)
 
   const links = page.locator(selector)
+  await links.first().waitFor({ state: 'attached', timeout: 30_000 }).catch(() => undefined)
+  await detectBlockedPage(page)
   const count = Math.min(await links.count(), maxResults * 4)
   const collectedAt = new Date().toISOString()
   const results = new Map<string, CollectedSignal>()
@@ -422,7 +416,9 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
   let context: BrowserContext | null = null
   try {
     context = await launchPlatformBrowser(platform)
-    const page = context.pages()[0] ?? await context.newPage()
+    const startupPages = context.pages()
+    const page = await context.newPage()
+    await Promise.all(startupPages.map(startupPage => startupPage.close().catch(() => undefined)))
     const queries = shuffledForRun(config.platforms[platform].queries)
     console.log(`[${PLATFORM_NAME[platform]}] 本轮随机顺序：${queries.join(' → ')}`)
     for (const query of queries) {
