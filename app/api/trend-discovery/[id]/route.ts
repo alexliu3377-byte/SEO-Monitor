@@ -14,14 +14,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     service.from('trend_terms').select('*').eq('id', id).maybeSingle(),
     service
       .from('trend_signal_terms')
-      .select('observed_at, trend_signals!inner(id, platform, source_url, title, excerpt, tags, query_terms, published_at, first_collected_at, last_collected_at, latest_metrics)')
+      .select('observed_at, trend_signals!inner(id, platform, source_url, title, excerpt, evidence_fingerprint, tags, query_terms, published_at, first_collected_at, last_collected_at, latest_metrics)')
       .eq('term_id', id)
       .order('observed_at', { ascending: false })
-      .limit(30),
+      .limit(150),
   ])
   if (termError || sourceError) return NextResponse.json({ error: '趋势详情读取失败' }, { status: 500 })
   if (!term) return NextResponse.json({ error: '趋势词不存在' }, { status: 404 })
-  return NextResponse.json({ term, sources: links ?? [], canManage: caller.isOwner })
+  const evidence = new Map<string, (typeof links extends (infer T)[] | null ? T : never)>()
+  for (const link of links ?? []) {
+    const signal = Array.isArray(link.trend_signals) ? link.trend_signals[0] : link.trend_signals
+    if (!signal) continue
+    const key = `${signal.platform}:${signal.evidence_fingerprint}`
+    if (!evidence.has(key)) evidence.set(key, link)
+    if (evidence.size >= 30) break
+  }
+  return NextResponse.json({ term, sources: [...evidence.values()], canManage: caller.isOwner })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {

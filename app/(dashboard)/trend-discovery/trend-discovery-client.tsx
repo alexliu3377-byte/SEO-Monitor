@@ -448,7 +448,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                         <div className="flex flex-wrap gap-1.5">
                           {term.platforms.map(item => <span key={item} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{PLATFORM_LABELS[item]}</span>)}
                         </div>
-                        <p className="mt-1.5 text-[11px] text-slate-400">{term.signal_count} 条独立内容</p>
+                        <p className="mt-1.5 text-[11px] text-slate-400">{term.signal_count} 份独立资料</p>
                       </td>
                       <td className="px-4 py-4 text-sm text-slate-600">
                         {formatDate(term.first_seen_at, true)}
@@ -560,7 +560,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                 {[
                   ['趋势分', selected.trend_score],
                   ['可信度', `${selected.confidence_score}%`],
-                  ['独立内容', selected.signal_count],
+                  ['独立资料', selected.signal_count],
                   ['近24小时', selected.recent_signal_count],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-xl bg-slate-50 px-4 py-3">

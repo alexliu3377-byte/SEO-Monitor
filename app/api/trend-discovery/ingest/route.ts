@@ -83,7 +83,17 @@ export async function POST(request: Request) {
       existing.candidateTerms = [...new Set([...existing.candidateTerms, ...signal.candidateTerms])].slice(0, 20)
     }
   }
-  const validSignals = [...signalMap.values()]
+  const evidenceMap = new Map<string, NonNullable<typeof parsedSignals[number]>>()
+  for (const signal of signalMap.values()) {
+    const evidenceKey = `${signal.title.toLocaleLowerCase('zh-CN')}\n${(signal.excerpt ?? '').toLocaleLowerCase('zh-CN')}`
+    const existing = evidenceMap.get(evidenceKey)
+    if (!existing) evidenceMap.set(evidenceKey, signal)
+    else {
+      existing.tags = [...new Set([...existing.tags, ...signal.tags])].slice(0, 20)
+      existing.candidateTerms = [...new Set([...existing.candidateTerms, ...signal.candidateTerms])].slice(0, 20)
+    }
+  }
+  const validSignals = [...evidenceMap.values()]
 
   const service = createServiceClient() as any
   const nodeStatus = runStatus === 'completed' ? 'online' : runStatus === 'blocked' ? 'blocked' : 'error'
