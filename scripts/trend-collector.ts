@@ -149,15 +149,26 @@ function searchUrl(platform: TrendPlatform, query: string): string {
 }
 
 async function navigateForCollection(page: Page, url: string) {
+  let directNavigationError: unknown
   try {
     // These SPA search pages can keep DOMContentLoaded pending even after the
     // response and visible UI are ready. Waiting for the navigation commit and
     // then allowing a fixed render window is more reliable for unattended runs.
     await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
   } catch (error) {
+    directNavigationError = error
+    if (page.url() === 'about:blank') {
+      console.warn('直接导航停留在空白页，改用页面内导航重试')
+      await page.evaluate(target => window.location.assign(target), url).catch(() => undefined)
+      await page.waitForTimeout(20_000)
+    }
+
     const currentUrl = page.url()
-    if (!currentUrl.startsWith(new URL(url).origin)) throw error
-    console.warn(`页面导航超时但已进入目标网站，继续检查已渲染内容：${currentUrl}`)
+    if (!currentUrl.startsWith(new URL(url).origin)) {
+      const reason = directNavigationError instanceof Error ? directNavigationError.message : String(directNavigationError)
+      throw new Error(`无法进入目标网站；浏览器停留在 ${currentUrl}。直接导航错误：${reason}`)
+    }
+    console.warn(`直接导航未正常完成但已进入目标网站，继续检查内容：${currentUrl}`)
   }
   await page.waitForTimeout(8_000)
 }
