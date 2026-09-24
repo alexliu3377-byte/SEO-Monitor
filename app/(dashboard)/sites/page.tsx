@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import SiteTable from '@/components/site-table'
 import AddSiteModal from '@/components/add-site-modal'
+import RankDataImportModal from '@/components/rank-data-import-modal'
 
 interface Site {
   id: string
@@ -43,6 +44,7 @@ export default function SitesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [showRankImport, setShowRankImport] = useState(false)
   const [editSite, setEditSite] = useState<Site | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filterSite, setFilterSite] = useState('')
@@ -234,15 +236,21 @@ export default function SitesPage() {
           <h1 className="text-2xl font-bold text-gray-900">网站管理</h1>
           <p className="text-gray-400 text-sm mt-0.5">管理所有监控站点的抓取配置</p>
         </div>
-        <button
-          onClick={() => { setEditSite(null); setShowModal(true) }}
-          className="btn-primary"
-        >
-          <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          新增网站
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => setShowRankImport(true)} disabled={loading || sites.length === 0} className="btn-secondary min-h-11 px-4 disabled:opacity-40">
+            <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5.5 5.5 0 0116.9 6H17a5 5 0 011 9.9M12 12v9m0-9l-3 3m3-3l3 3" /></svg>
+            补录排名 Excel
+          </button>
+          <button
+            onClick={() => { setEditSite(null); setShowModal(true) }}
+            className="btn-primary"
+          >
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            新增网站
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -326,6 +334,13 @@ export default function SitesPage() {
           site={editSite}
           onClose={handleModalClose}
           onSaved={handleSaved}
+        />
+      )}
+
+      {showRankImport && (
+        <RankDataImportModal
+          sites={sites.map(site => ({ id: site.id, domain: site.domain, name: site.name }))}
+          onClose={() => setShowRankImport(false)}
         />
       )}
 
