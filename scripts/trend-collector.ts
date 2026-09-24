@@ -398,95 +398,116 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
     }
   }
 
-  const raw = await page.evaluate(({ seedQuery }) => {
-    type Candidate = { term: string; sourceKind: 'related_search' | 'everyone_search'; position: number }
-    const candidates: Candidate[] = []
-    const seen = new Set<string>()
-    const excluded = new Set([
-      '全部', '综合', '推荐', '排行榜', '筛选', '多列', '单列', '搜索', '问问ai',
-      '笔记', '用户', '视频', '直播', '问问点', '清空', '关闭',
-    ])
+  type RawSuggestion = { term: string; sourceKind: 'related_search' | 'everyone_search' }
+  const autocomplete = await page.evaluate(({ seedQuery }) => {
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
-    const visible = (element: Element) => {
+    const input = document.activeElement instanceof HTMLInputElement ? document.activeElement : null
+    if (!input) return [] as string[]
+    const inputRect = input.getBoundingClientRect()
+    const results = new Set<string>()
+    for (const element of document.querySelectorAll('body *')) {
       const style = window.getComputedStyle(element)
       const rect = element.getBoundingClientRect()
-      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0
-        && rect.width > 4 && rect.height > 4
-    }
-    const add = (value: string, sourceKind: Candidate['sourceKind']) => {
-      const term = clean(value).replace(/^[#·•\-–—]+|[#·•\-–—]+$/g, '').trim()
-      const normalized = term.toLocaleLowerCase('zh-CN')
-      if (term.length < 2 || term.length > 40 || normalized === seedQuery.toLocaleLowerCase('zh-CN')) return
-      if (excluded.has(normalized) || /^\d+$/.test(term)) return
-      const key = `${sourceKind}\n${normalized}`
-      if (seen.has(key)) return
-      seen.add(key)
-      candidates.push({ term, sourceKind, position: candidates.length + 1 })
-    }
-    const leafTexts = (root: Element) => {
-      const values: string[] = []
-      for (const element of root.querySelectorAll('a, button, li, [role="option"], [role="tab"], span, p, div')) {
-        if (!visible(element)) continue
-        const text = clean((element as HTMLElement).innerText || element.textContent)
-        if (!text || text.length > 40) continue
-        const childRepeatsText = [...element.children].some(child => clean((child as HTMLElement).innerText || child.textContent) === text)
-        if (!childRepeatsText) values.push(text)
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 4 || rect.height < 4) continue
+      if (rect.top < inputRect.bottom - 4 || rect.bottom > inputRect.bottom + 520) continue
+      if (rect.right < inputRect.left || rect.left > inputRect.right) continue
+      if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
+      const pointX = Math.min(window.innerWidth - 1, Math.max(0, rect.left + Math.min(rect.width / 2, 30)))
+      const pointY = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2))
+      const topmost = document.elementFromPoint(pointX, pointY)
+      if (!topmost || !(element === topmost || element.contains(topmost) || topmost.contains(element))) continue
+      let candidate: Element = element
+      for (let depth = 0; candidate.parentElement && depth < 3; depth += 1) {
+        const parent = candidate.parentElement
+        const parentRect = parent.getBoundingClientRect()
+        const parentText = clean((parent as HTMLElement).innerText || parent.textContent)
+        if (parentRect.height > 64 || parentText.length > 40 || parentText.includes('\n')) break
+        candidate = parent
       }
-      return values
-    }
-
-    const activeInput = document.activeElement instanceof HTMLInputElement ? document.activeElement : null
-    if (activeInput) {
-      const inputRect = activeInput.getBoundingClientRect()
-      let container: Element | null = activeInput.parentElement
-      for (let depth = 0; container && depth < 7; depth += 1, container = container.parentElement) {
-        const rect = container.getBoundingClientRect()
-        if (rect.width >= inputRect.width * 0.8 && rect.height >= inputRect.height * 3 && rect.height <= 720) {
-          for (const value of leafTexts(container)) add(value, 'related_search')
-          break
-        }
+      const text = clean((candidate as HTMLElement).innerText || candidate.textContent)
+      if (text.length >= 2 && text.length <= 40 && text.toLocaleLowerCase('zh-CN').includes(seedQuery.toLocaleLowerCase('zh-CN'))) {
+        results.add(text)
       }
     }
-
-    for (const heading of document.querySelectorAll('body *')) {
-      if (!visible(heading)) continue
-      const headingText = clean((heading as HTMLElement).innerText || heading.textContent)
-      if (headingText !== '大家都在搜' && headingText !== '相关搜索') continue
-      const sourceKind: Candidate['sourceKind'] = headingText === '大家都在搜' ? 'everyone_search' : 'related_search'
-      let container: Element | null = heading.parentElement
-      for (let depth = 0; container && depth < 5; depth += 1, container = container.parentElement) {
-        const rect = container.getBoundingClientRect()
-        const values = leafTexts(container).filter(value => value !== headingText)
-        if (rect.height >= 70 && rect.height <= 650 && values.length >= 2) {
-          for (const value of values) add(value, sourceKind)
-          break
-        }
-      }
-    }
-
-    const inputRect = activeInput?.getBoundingClientRect()
-    const topLimit = inputRect ? Math.max(230, inputRect.bottom + 180) : 230
-    for (const element of document.querySelectorAll('a, button, [role="tab"]')) {
-      if (!visible(element)) continue
-      const rect = element.getBoundingClientRect()
-      if (rect.top < 70 || rect.bottom > topLimit) continue
-      const text = clean((element as HTMLElement).innerText || element.textContent)
-      if (text && !text.includes('\n')) add(text, 'related_search')
-    }
-    return candidates.slice(0, 50)
-  }, { seedQuery: query }).catch(() => [] as Array<{ term: string; sourceKind: 'related_search' | 'everyone_search'; position: number }>)
-
+    return [...results]
+  }, { seedQuery: query }).catch(() => [] as string[])
   await page.keyboard.press('Escape').catch(() => undefined)
+  await page.waitForTimeout(300)
+
+  const topicChips = await page.evaluate(() => {
+    const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+    const excluded = new Set(['全部', '综合', '推荐', '排行榜', '筛选', '多列', '单列', '搜索', '问问ai', '笔记', '用户', '视频', '直播', '问问点'])
+    const results = new Set<string>()
+    for (const element of document.querySelectorAll('a, button, li, span, div, [role="tab"]')) {
+      if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
+      const rect = element.getBoundingClientRect()
+      const style = window.getComputedStyle(element)
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 12 || rect.height < 12) continue
+      if (rect.top < 65 || rect.bottom > 245 || rect.width > 220 || rect.height > 64) continue
+      const text = clean((element as HTMLElement).innerText || element.textContent)
+      const normalized = text.toLocaleLowerCase('zh-CN')
+      if (text.length >= 2 && text.length <= 20 && !text.includes('\n') && !excluded.has(normalized)) results.add(text)
+    }
+    return [...results]
+  }).catch(() => [] as string[])
+
+  const sectionSuggestions: RawSuggestion[] = []
+  const originalScrollY = await page.evaluate(() => window.scrollY).catch(() => 0)
+  for (let step = 0; step < 5; step += 1) {
+    await page.evaluate(index => window.scrollTo({ top: Math.round(index * window.innerHeight * 0.7), behavior: 'instant' }), step)
+    await page.waitForTimeout(350)
+    const found = await page.evaluate(() => {
+      const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+      const rows: Array<{ term: string; heading: string }> = []
+      for (const heading of document.querySelectorAll('body *')) {
+        const headingText = clean((heading as HTMLElement).innerText || heading.textContent)
+        if (headingText !== '大家都在搜' && headingText !== '相关搜索') continue
+        const headingRect = heading.getBoundingClientRect()
+        if (headingRect.bottom < 0 || headingRect.top > window.innerHeight) continue
+        let container: Element | null = heading.parentElement
+        for (let depth = 0; container && depth < 6; depth += 1, container = container.parentElement) {
+          const rect = container.getBoundingClientRect()
+          if (rect.height < 70 || rect.height > 650 || rect.width < 120) continue
+          const values = new Set<string>()
+          for (const element of container.querySelectorAll('a, button, li, span, p, div')) {
+            if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
+            const text = clean((element as HTMLElement).innerText || element.textContent)
+            if (text && text !== headingText && text.length >= 2 && text.length <= 40 && !text.includes('\n')) values.add(text)
+          }
+          if (values.size >= 1) {
+            for (const term of values) rows.push({ term, heading: headingText })
+            break
+          }
+        }
+      }
+      return rows
+    }).catch(() => [] as Array<{ term: string; heading: string }>)
+    for (const item of found) sectionSuggestions.push({
+      term: item.term,
+      sourceKind: item.heading === '大家都在搜' ? 'everyone_search' : 'related_search',
+    })
+  }
+  await page.evaluate(scrollY => window.scrollTo({ top: scrollY, behavior: 'instant' }), originalScrollY).catch(() => undefined)
+
+  const raw: RawSuggestion[] = [
+    ...autocomplete.map(term => ({ term, sourceKind: 'related_search' as const })),
+    ...topicChips.map(term => ({ term, sourceKind: 'related_search' as const })),
+    ...sectionSuggestions,
+  ]
   const collectedAt = new Date().toISOString()
-  return raw.flatMap(item => {
+  const seen = new Set<string>()
+  return raw.flatMap((item, index) => {
     const normalized = normalizeTrendTerm(item.term)
-    return normalized ? [{
+    const key = `${item.sourceKind}\n${normalized}`
+    if (!normalized || seen.has(key)) return []
+    seen.add(key)
+    return [{
       term: item.term,
       sourceKind: item.sourceKind,
       seedQuery: query,
-      position: item.position,
+      position: index + 1,
       collectedAt,
-    }] : []
+    }]
   })
 }
 
