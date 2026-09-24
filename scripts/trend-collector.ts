@@ -398,11 +398,14 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
 
 async function collectSearchSuggestions(page: Page, query: string): Promise<CollectedSuggestion[]> {
   const inputs = page.locator('input')
+  let visibleSearchInputFound = false
   for (let index = 0; index < await inputs.count(); index += 1) {
     const input = inputs.nth(index)
     const value = await input.inputValue().catch(() => '')
     const placeholder = await input.getAttribute('placeholder').catch(() => '')
-    if (value === query || placeholder?.includes('搜索')) {
+    const visible = await input.isVisible().catch(() => false)
+    if (visible && (value === query || placeholder?.includes('搜索'))) {
+      visibleSearchInputFound = true
       await input.click().catch(() => undefined)
       // Clicking an already populated Douyin/Xiaohongshu search box does not
       // consistently reopen autocomplete. Re-entering the same value emits
@@ -417,9 +420,13 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   type RawSuggestion = { term: string; sourceKind: 'related_search' | 'everyone_search' }
   const autocomplete = await page.evaluate(({ seedQuery }) => {
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
-    const input = [...document.querySelectorAll('input')].find(element => (
-      element.value === seedQuery || element.placeholder.includes('搜索')
-    )) ?? (document.activeElement instanceof HTMLInputElement ? document.activeElement : null)
+    const input = [...document.querySelectorAll('input')].find(element => {
+      const rect = element.getBoundingClientRect()
+      const style = window.getComputedStyle(element)
+      return rect.width > 4 && rect.height > 4
+        && style.display !== 'none' && style.visibility !== 'hidden'
+        && (element.value === seedQuery || element.placeholder.includes('搜索'))
+    }) ?? (document.activeElement instanceof HTMLInputElement ? document.activeElement : null)
     if (!input) return [] as string[]
     const inputRect = input.getBoundingClientRect()
     const results = new Set<string>()
@@ -512,6 +519,7 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
     ...topicChips.map(term => ({ term, sourceKind: 'related_search' as const })),
     ...sectionSuggestions,
   ]
+  console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
   const collectedAt = new Date().toISOString()
   const seen = new Set<string>()
   return raw.flatMap((item, index) => {
