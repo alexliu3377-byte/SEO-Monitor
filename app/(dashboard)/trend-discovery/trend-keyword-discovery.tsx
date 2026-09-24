@@ -45,6 +45,7 @@ export default function TrendKeywordDiscovery() {
   const [canManage, setCanManage] = useState(false)
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
   const pageSize = 20
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -60,6 +61,7 @@ export default function TrendKeywordDiscovery() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '新词线索读取失败')
       setSuggestions(data.suggestions ?? [])
+      setSelectedIds(new Set())
       setCounts(data.counts ?? { pending: 0, added: 0, ignored: 0 })
       setTotal(data.total ?? 0)
       setCanManage(Boolean(data.canManage))
@@ -85,22 +87,43 @@ export default function TrendKeywordDiscovery() {
   }, [searchInput])
 
   async function updateSuggestion(item: Suggestion, action: 'add' | 'ignore' | 'restore') {
-    setSavingId(item.id)
+    await updateSuggestions([item.id], action, action === 'add' ? item.platforms : undefined)
+  }
+
+  async function updateSuggestions(ids: string[], action: 'add' | 'ignore' | 'restore', platforms?: TrendQueryPlatform[]) {
+    if (ids.length === 0) return
+    setSavingId(ids.length === 1 ? ids[0] : 'bulk')
     setError('')
     try {
       const response = await fetch('/api/trend-discovery/suggestions', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id, action, platforms: item.platforms }),
+        body: JSON.stringify({ ids, action, platforms }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '新词处理失败')
+      setSelectedIds(new Set())
       await loadSuggestions()
     } catch (saveError) {
       setError((saveError as Error).message)
     } finally {
       setSavingId('')
     }
+  }
+
+  function toggleSuggestion(id: string) {
+    setSelectedIds(current => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllSuggestions() {
+    setSelectedIds(suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))
+      ? new Set()
+      : new Set(suggestions.map(item => item.id)))
   }
 
   return (
@@ -111,8 +134,8 @@ export default function TrendKeywordDiscovery() {
             <h2 className="text-lg font-bold text-slate-900">搜索平台正在推荐的新词</h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">来自“相关搜索”和“大家都在搜”。这些只是采集线索，不参与趋势评分；加入采集后抓到真实内容才会进入趋势词。</p>
           </div>
-          <div className="flex flex-none items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            <span className="h-2 w-2 rounded-full bg-amber-400" /> 等待接入平台提取规则
+          <div className="flex flex-none items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" /> 平台推荐词自动采集中
           </div>
         </div>
       </div>
@@ -142,22 +165,34 @@ export default function TrendKeywordDiscovery() {
 
       {error && <div className="m-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 sm:m-6">{error}</div>}
 
+      {canManage && (
+        <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 sm:px-6">
+          <span className="text-xs text-slate-500">已选择 <strong className="text-slate-800">{selectedIds.size}</strong> 个新词</span>
+          <div className="flex items-center gap-2">
+            {status !== 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'ignore')} className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 disabled:opacity-40">批量忽略</button>}
+            {status === 'pending' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'add')} className="h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">批量加入采集</button>}
+            {status === 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'restore')} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40">批量恢复</button>}
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
-        <table className="min-w-[960px] w-full table-fixed">
+        <table className="min-w-[1080px] w-full table-fixed">
           <thead className="bg-slate-50/80 text-left text-xs font-medium text-slate-500">
-            <tr><th className="w-52 px-5 py-3">新词</th><th className="w-44 px-4 py-3">发现位置</th><th className="px-4 py-3">由哪些搜索发现</th><th className="w-32 px-4 py-3">独立入口</th><th className="w-36 px-4 py-3">最近发现</th><th className="w-44 px-4 py-3 text-right">处理</th></tr>
+            <tr><th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))} onChange={toggleAllSuggestions} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="w-56 px-3 py-2.5">候选新词</th><th className="w-52 px-3 py-2.5">发现位置</th><th className="px-3 py-2.5">由哪些搜索发现</th><th className="w-24 px-3 py-2.5">入口</th><th className="w-32 px-3 py-2.5">最近发现</th><th className="w-48 px-4 py-2.5 text-right">操作</th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading ? Array.from({ length: 5 }).map((_, index) => <tr key={index} className="animate-pulse"><td colSpan={6} className="px-5 py-5"><div className="h-4 w-full rounded bg-slate-100" /></td></tr>) : suggestions.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-20 text-center"><p className="text-sm font-medium text-slate-700">目前没有{status === 'pending' ? '待处理的' : status === 'added' ? '已加入的' : '已忽略的'}新词</p><p className="mt-1 text-xs text-slate-400">接入平台提取规则后，搜索推荐会自动出现在这里。</p></td></tr>
+            {loading ? Array.from({ length: 5 }).map((_, index) => <tr key={index} className="animate-pulse"><td colSpan={7} className="px-4 py-3"><div className="h-4 w-full rounded bg-slate-100" /></td></tr>) : suggestions.length === 0 ? (
+              <tr><td colSpan={7} className="px-5 py-20 text-center"><p className="text-sm font-medium text-slate-700">目前没有{status === 'pending' ? '待处理的' : status === 'added' ? '已加入的' : '已忽略的'}新词</p><p className="mt-1 text-xs text-slate-400">采集到新的平台推荐词后会自动出现在这里。</p></td></tr>
             ) : suggestions.map(item => (
-              <tr key={item.id} className="hover:bg-emerald-50/30">
-                <td className="px-5 py-4"><p className="truncate text-sm font-semibold text-slate-900">{item.displayTerm}</p><p className="mt-1 text-[11px] text-slate-400">首次 {formatDate(item.firstSeenAt)}</p></td>
-                <td className="px-4 py-4"><div className="flex flex-wrap gap-1.5">{item.platforms.map(value => <span key={value} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{PLATFORM_LABELS[value]}</span>)}</div><p className="mt-1.5 text-[11px] text-slate-400">{item.sourceKinds.includes('everyone_search') ? '大家都在搜' : '相关搜索'}</p></td>
-                <td className="px-4 py-4"><div className="flex flex-wrap gap-1.5">{item.seedQueries.map(value => <span key={value} className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600">{value}</span>)}</div></td>
-                <td className="px-4 py-4 text-sm text-slate-700">{item.observationCount} 个</td>
-                <td className="px-4 py-4 text-sm text-slate-600">{formatDate(item.lastSeenAt)}</td>
-                <td className="px-4 py-4"><div className="flex justify-end gap-2">{canManage && status === 'pending' && <><button disabled={savingId === item.id} onClick={() => updateSuggestion(item, 'ignore')} className="h-9 rounded-lg px-3 text-sm text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">忽略</button><button disabled={savingId === item.id} onClick={() => updateSuggestion(item, 'add')} className="h-9 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">加入采集词</button></>}{canManage && status === 'ignored' && <button disabled={savingId === item.id} onClick={() => updateSuggestion(item, 'restore')} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="text-xs text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
+              <tr key={item.id} className={`hover:bg-emerald-50/30 ${selectedIds.has(item.id) ? 'bg-emerald-50/50' : ''}`}>
+                <td className="px-4 py-2.5"><input type="checkbox" aria-label={`选择${item.displayTerm}`} checked={selectedIds.has(item.id)} onChange={() => toggleSuggestion(item.id)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></td>
+                <td className="px-3 py-2.5"><p className="truncate text-sm font-semibold text-slate-900">{item.displayTerm}</p></td>
+                <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">{item.platforms.map(value => <span key={value} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{PLATFORM_LABELS[value]}</span>)}<span className="truncate text-xs text-slate-400">{item.sourceKinds.includes('everyone_search') ? '大家都在搜' : '相关搜索'}</span></div></td>
+                <td className="truncate px-3 py-2.5 text-xs text-slate-600" title={item.seedQueries.join('、')}>{item.seedQueries.join('、') || '—'}</td>
+                <td className="px-3 py-2.5 text-xs text-slate-700">{item.observationCount} 个</td>
+                <td className="px-3 py-2.5 text-xs text-slate-600">{formatDate(item.lastSeenAt)}</td>
+                <td className="px-4 py-2.5"><div className="flex justify-end gap-1">{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-md px-2.5 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">忽略</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-md bg-emerald-600 px-2.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">加入采集</button></>}{canManage && status === 'ignored' && <button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'restore')} className="h-8 rounded-md border border-slate-200 px-2.5 text-xs text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="truncate text-xs text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
               </tr>
             ))}
           </tbody>

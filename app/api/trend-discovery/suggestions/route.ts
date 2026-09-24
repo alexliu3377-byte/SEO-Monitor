@@ -90,57 +90,61 @@ export async function PATCH(request: Request) {
   if (!caller.isOwner) return NextResponse.json({ error: '只有项目负责人可以处理新词线索' }, { status: 403 })
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
-  const id = cleanTrendText(body?.id, 40)
+  const singleId = cleanTrendText(body?.id, 40)
+  const ids = [...new Set(Array.isArray(body?.ids)
+    ? body.ids.filter((value): value is string => typeof value === 'string')
+    : singleId ? [singleId] : [])]
   const action = body?.action
-  if (!UUID_PATTERN.test(id) || !['add', 'ignore', 'restore'].includes(String(action))) {
+  if (ids.length < 1 || ids.length > 100 || ids.some(id => !UUID_PATTERN.test(id)) || !['add', 'ignore', 'restore'].includes(String(action))) {
     return NextResponse.json({ error: '新词处理请求无效' }, { status: 400 })
   }
 
-  const { data: term, error: termError } = await service
+  const { data: terms, error: termError } = await service
     .from('trend_search_terms')
     .select('id, display_term, review_status, added_platforms, trend_search_observations(platform)')
-    .eq('id', id)
-    .maybeSingle()
-  if (termError || !term) return NextResponse.json({ error: '找不到这条新词线索' }, { status: 404 })
+    .in('id', ids)
+  if (termError || !terms || terms.length !== ids.length) return NextResponse.json({ error: '找不到部分新词线索' }, { status: 404 })
 
   if (action === 'ignore' || action === 'restore') {
     const { error } = await service.from('trend_search_terms').update({
       review_status: action === 'ignore' ? 'ignored' : 'pending',
       reviewed_by: caller.id,
       reviewed_at: new Date().toISOString(),
-    }).eq('id', id)
+    }).in('id', ids)
     if (error) return NextResponse.json({ error: '新词状态保存失败' }, { status: 500 })
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, updated: ids.length })
   }
 
   const requested = Array.isArray(body?.platforms) ? body.platforms : []
-  const observed = (term.trend_search_observations ?? []).map((row: any) => row.platform)
-  const platforms = [...new Set((requested.length > 0 ? requested : observed)
-    .filter((value: unknown): value is TrendQueryPlatform => isTrendQueryPlatform(value)))]
-  if (platforms.length === 0) return NextResponse.json({ error: '请选择要加入的采集平台' }, { status: 400 })
+  for (const term of terms) {
+    const observed = (term.trend_search_observations ?? []).map((row: any) => row.platform)
+    const platforms = [...new Set((requested.length > 0 ? requested : observed)
+      .filter((value: unknown): value is TrendQueryPlatform => isTrendQueryPlatform(value)))]
+    if (platforms.length === 0) return NextResponse.json({ error: `“${term.display_term}”没有可加入的采集平台` }, { status: 400 })
 
-  for (const targetPlatform of platforms) {
-    const { error } = await service.rpc('add_trend_collection_query', {
-      p_platform: targetPlatform,
-      p_query: term.display_term,
-      p_actor: caller.id,
-    })
-    if (error) {
-      const missing = isMissingMigration(error)
-      return NextResponse.json(
-        { error: missing ? '新词发现数据库迁移尚未运行' : `${targetPlatform === 'xiaohongshu' ? '小红书' : '抖音'}采集词加入失败` },
-        { status: missing ? 503 : 500 },
-      )
+    for (const targetPlatform of platforms) {
+      const { error } = await service.rpc('add_trend_collection_query', {
+        p_platform: targetPlatform,
+        p_query: term.display_term,
+        p_actor: caller.id,
+      })
+      if (error) {
+        const missing = isMissingMigration(error)
+        return NextResponse.json(
+          { error: missing ? '新词发现数据库迁移尚未运行' : `“${term.display_term}”加入${targetPlatform === 'xiaohongshu' ? '小红书' : '抖音'}失败` },
+          { status: missing ? 503 : 500 },
+        )
+      }
     }
-  }
 
-  const addedPlatforms = [...new Set([...(term.added_platforms ?? []), ...platforms])]
-  const { error: updateError } = await service.from('trend_search_terms').update({
-    review_status: 'added',
-    added_platforms: addedPlatforms,
-    reviewed_by: caller.id,
-    reviewed_at: new Date().toISOString(),
-  }).eq('id', id)
-  if (updateError) return NextResponse.json({ error: '新词状态保存失败' }, { status: 500 })
-  return NextResponse.json({ ok: true, addedPlatforms })
+    const addedPlatforms = [...new Set([...(term.added_platforms ?? []), ...platforms])]
+    const { error: updateError } = await service.from('trend_search_terms').update({
+      review_status: 'added',
+      added_platforms: addedPlatforms,
+      reviewed_by: caller.id,
+      reviewed_at: new Date().toISOString(),
+    }).eq('id', term.id)
+    if (updateError) return NextResponse.json({ error: `“${term.display_term}”状态保存失败` }, { status: 500 })
+  }
+  return NextResponse.json({ ok: true, updated: terms.length })
 }

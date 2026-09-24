@@ -154,6 +154,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   const [sources, setSources] = useState<TrendSource[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [selectedTermIds, setSelectedTermIds] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -178,6 +179,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '趋势资料读取失败')
       setTerms(data.terms ?? [])
+      setSelectedTermIds(new Set())
       setSummary(data.summary ?? { new: 0, warming: 0, hot: 0, persistent: 0, tracked: 0 })
       setNodes(data.nodes ?? [])
       setTotal(data.total ?? 0)
@@ -223,23 +225,45 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
 
   async function updateReviewStatus(reviewStatus: TrendReviewStatus) {
     if (!selected) return
+    await updateTermStatuses([selected.id], reviewStatus)
+  }
+
+  async function updateTermStatuses(ids: string[], reviewStatus: TrendReviewStatus) {
+    if (ids.length === 0) return
     setSaving(true)
+    setError('')
     try {
-      const response = await fetch(`/api/trend-discovery/${selected.id}`, {
+      const response = await fetch('/api/trend-discovery/review', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewStatus }),
+        body: JSON.stringify({ ids, reviewStatus }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || '候选词处理失败')
-      setSelected(current => current ? { ...current, review_status: reviewStatus } : current)
+      setSelected(current => current && ids.includes(current.id) ? { ...current, review_status: reviewStatus } : current)
+      setSelectedTermIds(new Set())
       await loadTerms()
-      if (reviewStatus === 'dismissed') setSelected(null)
+      if (reviewStatus === 'dismissed' && selected && ids.includes(selected.id)) setSelected(null)
     } catch (saveError) {
       setError((saveError as Error).message)
     } finally {
       setSaving(false)
     }
+  }
+
+  function toggleTerm(id: string) {
+    setSelectedTermIds(current => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllTerms() {
+    setSelectedTermIds(terms.length > 0 && terms.every(term => selectedTermIds.has(term.id))
+      ? new Set()
+      : new Set(terms.map(term => term.id)))
   }
 
   async function openSettings() {
@@ -398,33 +422,39 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             </div>
           )}
 
+          {canManage && (
+            <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 sm:px-6">
+              <span className="text-xs text-slate-500">已选择 <strong className="text-slate-800">{selectedTermIds.size}</strong> 个候选词</span>
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={saving || selectedTermIds.size === 0} onClick={() => updateTermStatuses([...selectedTermIds], 'dismissed')} className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">批量忽略</button>
+                <button type="button" disabled={saving || selectedTermIds.size === 0} onClick={() => updateTermStatuses([...selectedTermIds], 'tracked')} className="h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">批量已布局</button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
-            <table className="min-w-[900px] w-full table-fixed">
+            <table className="min-w-[1080px] w-full table-fixed">
               <thead className="bg-slate-50/80">
                 <tr className="text-left text-xs font-medium text-slate-500">
-                  <th className="w-24 px-5 py-3">趋势分</th>
-                  <th className="px-4 py-3">候选新词</th>
-                  <th className="w-36 px-4 py-3">阶段</th>
-                  <th className="w-40 px-4 py-3">来源信号</th>
-                  <th className="w-32 px-4 py-3">首次发现</th>
-                  <th className="w-24 px-4 py-3 text-right">详情</th>
+                  <th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={terms.length > 0 && terms.every(term => selectedTermIds.has(term.id))} onChange={toggleAllTerms} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th>
+                  <th className="px-3 py-2.5">候选新词</th>
+                  <th className="w-20 px-3 py-2.5">趋势分</th>
+                  <th className="w-28 px-3 py-2.5">阶段</th>
+                  <th className="w-52 px-3 py-2.5">来源信号</th>
+                  <th className="w-28 px-3 py-2.5">首次发现</th>
+                  <th className="w-56 px-4 py-2.5 text-right">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   Array.from({ length: 6 }).map((_, index) => (
                     <tr key={index} className="animate-pulse">
-                      <td className="px-5 py-5"><div className="h-8 w-10 rounded bg-slate-100" /></td>
-                      <td className="px-4 py-5"><div className="h-4 w-48 rounded bg-slate-100" /><div className="mt-2 h-3 w-32 rounded bg-slate-100" /></td>
-                      <td className="px-4 py-5"><div className="h-7 w-20 rounded-full bg-slate-100" /></td>
-                      <td className="px-4 py-5"><div className="h-4 w-24 rounded bg-slate-100" /></td>
-                      <td className="px-4 py-5"><div className="h-4 w-16 rounded bg-slate-100" /></td>
-                      <td className="px-4 py-5"><div className="h-9 w-14 rounded bg-slate-100" /></td>
+                      <td colSpan={7} className="px-4 py-3"><div className="h-4 w-full rounded bg-slate-100" /></td>
                     </tr>
                   ))
                 ) : terms.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-20 text-center">
+                    <td colSpan={7} className="px-5 py-20 text-center">
                       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M3 17 9 11l4 4 8-9M15 6h6v6" /></svg>
                       </div>
@@ -435,34 +465,32 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                 ) : terms.map(term => {
                   const stage = STAGE_META[term.trend_stage]
                   return (
-                    <tr key={term.id} className="group hover:bg-emerald-50/30">
-                      <td className="px-5 py-4">
-                        <span className={`text-xl font-bold tabular-nums ${term.trend_score >= 70 ? 'text-rose-600' : term.trend_score >= 45 ? 'text-orange-600' : 'text-slate-700'}`}>{term.trend_score}</span>
+                    <tr key={term.id} className={`group hover:bg-emerald-50/30 ${selectedTermIds.has(term.id) ? 'bg-emerald-50/50' : ''}`}>
+                      <td className="px-4 py-2.5"><input type="checkbox" aria-label={`选择${term.display_term}`} checked={selectedTermIds.has(term.id)} onChange={() => toggleTerm(term.id)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></td>
+                      <td className="px-3 py-2.5">
+                        <button type="button" onClick={() => openDetail(term)} className="block max-w-full truncate text-left text-sm font-semibold text-slate-900 group-hover:text-emerald-700">{term.display_term}</button>
                       </td>
-                      <td className="px-4 py-4">
-                        <button type="button" onClick={() => openDetail(term)} className="block max-w-full text-left">
-                          <span className="block truncate text-sm font-semibold text-slate-900 group-hover:text-emerald-700">{term.display_term}</span>
-                          <span className="mt-1 block truncate text-xs text-slate-400">
-                            近24小时 {term.recent_signal_count} 条
-                            {term.growth_percent !== null && term.growth_percent > 0 ? ` · 较前一天 +${Math.round(term.growth_percent)}%` : ''}
-                            {term.review_status === 'tracked' ? ' · 已加入布局观察' : ''}
-                          </span>
-                        </button>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-sm font-bold tabular-nums ${term.trend_score >= 70 ? 'text-rose-600' : term.trend_score >= 45 ? 'text-orange-600' : 'text-slate-700'}`}>{term.trend_score}</span>
                       </td>
-                      <td className="px-4 py-4">
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${stage.className}`}>{stage.label}</span>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${stage.className}`}>{stage.label}</span>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-wrap gap-1.5">
-                          {term.platforms.map(item => <span key={item} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{PLATFORM_LABELS[item]}</span>)}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                          {term.platforms.map(item => <span key={item} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{PLATFORM_LABELS[item]}</span>)}
+                          <span className="text-xs text-slate-400">{term.signal_count} 份</span>
                         </div>
-                        <p className="mt-1.5 text-[11px] text-slate-400">{term.signal_count} 份独立资料</p>
                       </td>
-                      <td className="px-4 py-4 text-sm text-slate-600">
+                      <td className="px-3 py-2.5 text-xs text-slate-600">
                         {formatDate(term.first_seen_at, true)}
                       </td>
-                      <td className="px-4 py-4 text-right">
-                        <button type="button" onClick={() => openDetail(term)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700">查看</button>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center justify-end gap-1">
+                          <button type="button" onClick={() => openDetail(term)} className="h-8 rounded-md px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100">查看</button>
+                          {canManage && <button type="button" disabled={saving || term.review_status === 'tracked'} onClick={() => updateTermStatuses([term.id], 'tracked')} className="h-8 rounded-md px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:text-slate-400 disabled:opacity-60">{term.review_status === 'tracked' ? '已布局' : '标为已布局'}</button>}
+                          {canManage && <button type="button" disabled={saving} onClick={() => updateTermStatuses([term.id], 'dismissed')} className="h-8 rounded-md px-2.5 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">忽略</button>}
+                        </div>
                       </td>
                     </tr>
                   )
