@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { cleanTrendText, parseTrendSignalInput } from '@/lib/trend-discovery'
+import { cleanTrendText, isTrendQueryPlatform, parseTrendSignalInput, parseTrendSuggestionInput } from '@/lib/trend-discovery'
 import { authorizeTrendCollector, parseCollectorPlatform } from '@/lib/trend-discovery-server'
 import { createServiceClient } from '@/lib/supabase-server'
 
@@ -73,6 +73,26 @@ export async function POST(request: Request) {
   ))) {
     return jsonError('趋势信号采集时间不在本轮运行范围内', 400)
   }
+  const rawSuggestions = Array.isArray(body.suggestions) ? body.suggestions : []
+  if (rawSuggestions.length > 100) return jsonError('单次最多接收 100 条新词线索', 400)
+  if (rawSuggestions.length > 0 && !isTrendQueryPlatform(platform)) {
+    return jsonError('当前平台不能提交搜索推荐词', 400)
+  }
+  const parsedSuggestions = rawSuggestions.map(value => parseTrendSuggestionInput(value))
+  if (parsedSuggestions.some(suggestion => !suggestion)) return jsonError('新词线索中包含无效内容', 400)
+  if (parsedSuggestions.some(suggestion => suggestion && (
+    Date.parse(suggestion.collectedAt) < allowedCollectedStart
+    || Date.parse(suggestion.collectedAt) > allowedCollectedEnd
+  ))) {
+    return jsonError('新词线索采集时间不在本轮运行范围内', 400)
+  }
+  const suggestionMap = new Map<string, NonNullable<typeof parsedSuggestions[number]>>()
+  for (const suggestion of parsedSuggestions) {
+    if (!suggestion) continue
+    const key = `${suggestion.normalizedTerm}\n${suggestion.sourceKind}\n${suggestion.seedQuery.toLocaleLowerCase('zh-CN')}`
+    if (!suggestionMap.has(key)) suggestionMap.set(key, suggestion)
+  }
+  const validSuggestions = [...suggestionMap.values()]
   const signalMap = new Map<string, NonNullable<typeof parsedSignals[number]>>()
   for (const signal of parsedSignals) {
     if (!signal) continue
@@ -129,10 +149,72 @@ export async function POST(request: Request) {
     error_message: errorMessage,
   }, { onConflict: 'id' })
   if (runError) return jsonError('采集运行记录写入失败', 500)
+
+  if (validSuggestions.length > 0) {
+    const normalizedTerms = [...new Set(validSuggestions.map(item => item.normalizedTerm))]
+    const { data: existingTerms, error: existingSuggestionError } = await service
+      .from('trend_search_terms')
+      .select('normalized_term, first_seen_at, last_seen_at')
+      .in('normalized_term', normalizedTerms)
+    if (existingSuggestionError) {
+      const missing = existingSuggestionError.code === '42P01' || existingSuggestionError.code === 'PGRST205'
+      return jsonError(missing ? '新词发现数据库迁移尚未运行' : '已有新词线索读取失败', missing ? 503 : 500)
+    }
+    const existingSuggestionMap = new Map((existingTerms ?? []).map((row: any) => [row.normalized_term, row]))
+    const groupedSuggestions = new Map<string, { displayTerm: string; firstSeenAt: string; lastSeenAt: string }>()
+    for (const suggestion of validSuggestions) {
+      const current = groupedSuggestions.get(suggestion.normalizedTerm)
+      if (!current) groupedSuggestions.set(suggestion.normalizedTerm, {
+        displayTerm: suggestion.term,
+        firstSeenAt: suggestion.collectedAt,
+        lastSeenAt: suggestion.collectedAt,
+      })
+      else {
+        if (suggestion.collectedAt < current.firstSeenAt) current.firstSeenAt = suggestion.collectedAt
+        if (suggestion.collectedAt > current.lastSeenAt) current.lastSeenAt = suggestion.collectedAt
+      }
+    }
+    const suggestionRows = [...groupedSuggestions].map(([normalizedTerm, grouped]) => {
+      const existing = existingSuggestionMap.get(normalizedTerm) as any
+      return {
+        normalized_term: normalizedTerm,
+        display_term: grouped.displayTerm,
+        first_seen_at: existing?.first_seen_at && existing.first_seen_at < grouped.firstSeenAt ? existing.first_seen_at : grouped.firstSeenAt,
+        last_seen_at: existing?.last_seen_at && existing.last_seen_at > grouped.lastSeenAt ? existing.last_seen_at : grouped.lastSeenAt,
+      }
+    })
+    const { data: storedSuggestionTerms, error: storeSuggestionError } = await service
+      .from('trend_search_terms')
+      .upsert(suggestionRows, { onConflict: 'normalized_term' })
+      .select('id, normalized_term')
+    if (storeSuggestionError) return jsonError('新词线索写入失败', 500)
+    const suggestionIds = new Map<string, string>((storedSuggestionTerms ?? []).map((row: any) => [row.normalized_term, row.id] as [string, string]))
+    const observationRows = validSuggestions.flatMap(suggestion => {
+      const termId = suggestionIds.get(suggestion.normalizedTerm)
+      return termId ? [{
+        term_id: termId,
+        platform,
+        source_kind: suggestion.sourceKind,
+        seed_query: suggestion.seedQuery,
+        position: suggestion.position,
+        observed_on: suggestion.collectedAt.slice(0, 10),
+        first_seen_at: suggestion.collectedAt,
+        last_seen_at: suggestion.collectedAt,
+      }] : []
+    })
+    const { error: observationError } = await service
+      .from('trend_search_observations')
+      .upsert(observationRows, {
+        onConflict: 'term_id,platform,source_kind,seed_query,observed_on',
+        ignoreDuplicates: true,
+      })
+    if (observationError) return jsonError('新词来源记录失败', 500)
+  }
+
   if (validSignals.length === 0) {
     const { error: cleanupError } = await service.rpc('cleanup_trend_discovery_data')
     if (cleanupError) return jsonError('趋势资料维护失败', 500)
-    return NextResponse.json({ accepted: 0, terms: 0, runId })
+    return NextResponse.json({ accepted: 0, terms: 0, suggestions: validSuggestions.length, runId })
   }
 
   const externalIds = [...new Set(validSignals.map(signal => signal.externalId))]
@@ -234,5 +316,5 @@ export async function POST(request: Request) {
 
   const { error: cleanupError } = await service.rpc('cleanup_trend_discovery_data')
   if (cleanupError) return jsonError('趋势分数更新或资料维护失败', 500)
-  return NextResponse.json({ accepted: validSignals.length, terms: termSeenAt.size, runId })
+  return NextResponse.json({ accepted: validSignals.length, terms: termSeenAt.size, suggestions: validSuggestions.length, runId })
 }

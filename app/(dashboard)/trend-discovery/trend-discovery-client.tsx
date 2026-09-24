@@ -8,6 +8,7 @@ import {
   type TrendReviewStatus,
   type TrendStage,
 } from '@/lib/trend-discovery'
+import TrendKeywordDiscovery from './trend-keyword-discovery'
 
 type Role = 'normal' | 'admin' | 'super'
 
@@ -136,6 +137,7 @@ function NodeStatus({ node }: { node: CollectorNode }) {
 }
 
 export default function TrendDiscoveryClient({ initialRole }: { initialRole: Role }) {
+  const [workspaceTab, setWorkspaceTab] = useState<'trends' | 'keywords'>('trends')
   const [activeTab, setActiveTab] = useState('all')
   const [platform, setPlatform] = useState('')
   const [searchInput, setSearchInput] = useState('')
@@ -323,6 +325,12 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
       </header>
 
       <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-8">
+        <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <button type="button" onClick={() => setWorkspaceTab('trends')} className={`h-10 rounded-lg px-4 text-sm font-semibold transition ${workspaceTab === 'trends' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>趋势词</button>
+          <button type="button" onClick={() => setWorkspaceTab('keywords')} className={`h-10 rounded-lg px-4 text-sm font-semibold transition ${workspaceTab === 'keywords' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>新词发现</button>
+        </div>
+
+        {workspaceTab === 'trends' ? <>
         {initialRole === 'super' && (
           <section className="mb-5">
             <div className="mb-2 flex items-center justify-between">
@@ -474,6 +482,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             </div>
           )}
         </section>
+        </> : <TrendKeywordDiscovery />}
       </main>
 
       {settingsOpen && (

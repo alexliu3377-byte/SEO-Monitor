@@ -38,6 +38,7 @@ import {
   normalizeTrendQueries,
   normalizeTrendSourceUrl,
   normalizeTrendTerm,
+  parseTrendSuggestionInput,
 } from '../lib/trend-discovery'
 import { isCrawlStep, normalizeCrawlDomain } from '../lib/github-actions'
 import { allowsServiceAuthPath } from '../lib/service-api-access'
@@ -220,6 +221,35 @@ test('trend collection queries are trimmed, deduplicated and platform limited', 
   assert.equal(normalizeTrendQueries('douyin', []), null)
   assert.equal(normalizeTrendQueries('douyin', ['一']), null)
   assert.equal(normalizeTrendQueries('douyin', Array.from({ length: 101 }, (_, index) => `词${index + 1}`)), null)
+})
+
+test('trend search suggestions accept only useful typed discovery leads', () => {
+  assert.deepEqual(parseTrendSuggestionInput({
+    term: ' 灵犀助手 ',
+    sourceKind: 'related_search',
+    seedQuery: '效率工具',
+    position: 2,
+    collectedAt: '2026-09-23T10:00:00.000Z',
+  }), {
+    term: '灵犀助手',
+    normalizedTerm: '灵犀助手',
+    sourceKind: 'related_search',
+    seedQuery: '效率工具',
+    position: 2,
+    collectedAt: '2026-09-23T10:00:00.000Z',
+  })
+  assert.equal(parseTrendSuggestionInput({
+    term: '游戏',
+    sourceKind: 'related_search',
+    seedQuery: '新手游',
+    collectedAt: '2026-09-23T10:00:00.000Z',
+  }), null)
+  assert.equal(parseTrendSuggestionInput({
+    term: '灵犀助手',
+    sourceKind: 'unknown',
+    seedQuery: '效率工具',
+    collectedAt: '2026-09-23T10:00:00.000Z',
+  }), null)
 })
 
 test('trend score rewards fresh cross-platform growth without SEO volume', () => {

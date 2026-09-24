@@ -10,6 +10,7 @@ import {
   isTrendPlatform,
   normalizeTrendQueries,
   normalizeTrendSourceUrl,
+  normalizeTrendTerm,
   type TrendMetrics,
   type TrendPlatform,
 } from '../lib/trend-discovery'
@@ -33,6 +34,14 @@ type CollectedSignal = {
   publishedAt: string | null
   collectedAt: string
   metrics: TrendMetrics
+}
+
+type CollectedSuggestion = {
+  term: string
+  sourceKind: 'related_search' | 'everyone_search'
+  seedQuery: string
+  position: number | null
+  collectedAt: string
 }
 
 const HOME_URLS: Record<TrendPlatform, string> = {
@@ -376,6 +385,111 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
   return [...results.values()]
 }
 
+async function collectSearchSuggestions(page: Page, query: string): Promise<CollectedSuggestion[]> {
+  const inputs = page.locator('input')
+  for (let index = 0; index < await inputs.count(); index += 1) {
+    const input = inputs.nth(index)
+    const value = await input.inputValue().catch(() => '')
+    const placeholder = await input.getAttribute('placeholder').catch(() => '')
+    if (value === query || placeholder?.includes('搜索')) {
+      await input.click().catch(() => undefined)
+      await page.waitForTimeout(800)
+      break
+    }
+  }
+
+  const raw = await page.evaluate(({ seedQuery }) => {
+    type Candidate = { term: string; sourceKind: 'related_search' | 'everyone_search'; position: number }
+    const candidates: Candidate[] = []
+    const seen = new Set<string>()
+    const excluded = new Set([
+      '全部', '综合', '推荐', '排行榜', '筛选', '多列', '单列', '搜索', '问问ai',
+      '笔记', '用户', '视频', '直播', '问问点', '清空', '关闭',
+    ])
+    const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+    const visible = (element: Element) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0
+        && rect.width > 4 && rect.height > 4
+    }
+    const add = (value: string, sourceKind: Candidate['sourceKind']) => {
+      const term = clean(value).replace(/^[#·•\-–—]+|[#·•\-–—]+$/g, '').trim()
+      const normalized = term.toLocaleLowerCase('zh-CN')
+      if (term.length < 2 || term.length > 40 || normalized === seedQuery.toLocaleLowerCase('zh-CN')) return
+      if (excluded.has(normalized) || /^\d+$/.test(term)) return
+      const key = `${sourceKind}\n${normalized}`
+      if (seen.has(key)) return
+      seen.add(key)
+      candidates.push({ term, sourceKind, position: candidates.length + 1 })
+    }
+    const leafTexts = (root: Element) => {
+      const values: string[] = []
+      for (const element of root.querySelectorAll('a, button, li, [role="option"], [role="tab"], span, p, div')) {
+        if (!visible(element)) continue
+        const text = clean((element as HTMLElement).innerText || element.textContent)
+        if (!text || text.length > 40) continue
+        const childRepeatsText = [...element.children].some(child => clean((child as HTMLElement).innerText || child.textContent) === text)
+        if (!childRepeatsText) values.push(text)
+      }
+      return values
+    }
+
+    const activeInput = document.activeElement instanceof HTMLInputElement ? document.activeElement : null
+    if (activeInput) {
+      const inputRect = activeInput.getBoundingClientRect()
+      let container: Element | null = activeInput.parentElement
+      for (let depth = 0; container && depth < 7; depth += 1, container = container.parentElement) {
+        const rect = container.getBoundingClientRect()
+        if (rect.width >= inputRect.width * 0.8 && rect.height >= inputRect.height * 3 && rect.height <= 720) {
+          for (const value of leafTexts(container)) add(value, 'related_search')
+          break
+        }
+      }
+    }
+
+    for (const heading of document.querySelectorAll('body *')) {
+      if (!visible(heading)) continue
+      const headingText = clean((heading as HTMLElement).innerText || heading.textContent)
+      if (headingText !== '大家都在搜' && headingText !== '相关搜索') continue
+      const sourceKind: Candidate['sourceKind'] = headingText === '大家都在搜' ? 'everyone_search' : 'related_search'
+      let container: Element | null = heading.parentElement
+      for (let depth = 0; container && depth < 5; depth += 1, container = container.parentElement) {
+        const rect = container.getBoundingClientRect()
+        const values = leafTexts(container).filter(value => value !== headingText)
+        if (rect.height >= 70 && rect.height <= 650 && values.length >= 2) {
+          for (const value of values) add(value, sourceKind)
+          break
+        }
+      }
+    }
+
+    const inputRect = activeInput?.getBoundingClientRect()
+    const topLimit = inputRect ? Math.max(230, inputRect.bottom + 180) : 230
+    for (const element of document.querySelectorAll('a, button, [role="tab"]')) {
+      if (!visible(element)) continue
+      const rect = element.getBoundingClientRect()
+      if (rect.top < 70 || rect.bottom > topLimit) continue
+      const text = clean((element as HTMLElement).innerText || element.textContent)
+      if (text && !text.includes('\n')) add(text, 'related_search')
+    }
+    return candidates.slice(0, 50)
+  }, { seedQuery: query }).catch(() => [] as Array<{ term: string; sourceKind: 'related_search' | 'everyone_search'; position: number }>)
+
+  await page.keyboard.press('Escape').catch(() => undefined)
+  const collectedAt = new Date().toISOString()
+  return raw.flatMap(item => {
+    const normalized = normalizeTrendTerm(item.term)
+    return normalized ? [{
+      term: item.term,
+      sourceKind: item.sourceKind,
+      seedQuery: query,
+      position: item.position,
+      collectedAt,
+    }] : []
+  })
+}
+
 async function sendRun(config: CollectorConfig, platform: TrendPlatform, report: {
   id: string
   status: 'completed' | 'failed' | 'blocked'
@@ -384,6 +498,7 @@ async function sendRun(config: CollectorConfig, platform: TrendPlatform, report:
   errorCode?: string
   errorMessage?: string
   signals: CollectedSignal[]
+  suggestions: CollectedSuggestion[]
 }) {
   const ingestUrl = process.env.TREND_INGEST_URL?.trim()
   const secret = process.env.TREND_INGEST_SECRET?.trim()
@@ -405,6 +520,7 @@ async function sendRun(config: CollectorConfig, platform: TrendPlatform, report:
         errorMessage: report.errorMessage,
       },
       signals: report.signals,
+      suggestions: report.suggestions,
     }),
   })
   const data = await response.json().catch(() => ({})) as Record<string, unknown>
@@ -429,6 +545,7 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
   const startedAt = new Date().toISOString()
   const runId = randomUUID()
   const signals = new Map<string, CollectedSignal>()
+  const suggestions = new Map<string, CollectedSuggestion>()
   let status: 'completed' | 'failed' | 'blocked' = 'completed'
   let errorCode: string | undefined
   let errorMessage: string | undefined
@@ -452,6 +569,12 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
         }
       }
       console.log(`[${PLATFORM_NAME[platform]}] ${query}：取得 ${rows.length} 条有效公开信号`)
+      const discovered = await collectSearchSuggestions(page, query)
+      for (const suggestion of discovered) {
+        const key = `${suggestion.sourceKind}\n${suggestion.term.toLocaleLowerCase('zh-CN')}\n${query.toLocaleLowerCase('zh-CN')}`
+        if (!suggestions.has(key)) suggestions.set(key, suggestion)
+      }
+      console.log(`[${PLATFORM_NAME[platform]}] ${query}：发现 ${discovered.length} 个搜索推荐词`)
       await page.waitForTimeout(config.delayBetweenQueriesMs)
     }
   } catch (error) {
@@ -470,8 +593,9 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
     errorCode,
     errorMessage,
     signals: [...signals.values()],
+    suggestions: [...suggestions.values()],
   })
-  console.log(`[${PLATFORM_NAME[platform]}] 已上报：${status}，${signals.size} 条信号，${String(result.terms ?? 0)} 个候选词`)
+  console.log(`[${PLATFORM_NAME[platform]}] 已上报：${status}，${signals.size} 条信号，${String(result.terms ?? 0)} 个候选词，${String(result.suggestions ?? 0)} 个搜索推荐词`)
   return status
 }
 

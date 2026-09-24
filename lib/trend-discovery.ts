@@ -33,6 +33,18 @@ export type TrendSignalInput = {
   metrics: TrendMetrics
 }
 
+export const TREND_SUGGESTION_SOURCE_KINDS = ['related_search', 'everyone_search'] as const
+export type TrendSuggestionSourceKind = typeof TREND_SUGGESTION_SOURCE_KINDS[number]
+
+export type TrendSuggestionInput = {
+  term: string
+  normalizedTerm: string
+  sourceKind: TrendSuggestionSourceKind
+  seedQuery: string
+  position: number | null
+  collectedAt: string
+}
+
 const PLATFORM_HOSTS: Record<TrendPlatform, readonly string[]> = {
   xiaohongshu: ['xiaohongshu.com', 'xhslink.com'],
   douyin: ['douyin.com'],
@@ -53,6 +65,10 @@ export function isTrendPlatform(value: unknown): value is TrendPlatform {
 
 export function isTrendQueryPlatform(value: unknown): value is TrendQueryPlatform {
   return typeof value === 'string' && (TREND_QUERY_PLATFORMS as readonly string[]).includes(value)
+}
+
+export function isTrendSuggestionSourceKind(value: unknown): value is TrendSuggestionSourceKind {
+  return typeof value === 'string' && (TREND_SUGGESTION_SOURCE_KINDS as readonly string[]).includes(value)
 }
 
 export function normalizeTrendQueries(platform: TrendQueryPlatform, value: unknown): string[] | null {
@@ -239,4 +255,21 @@ export function parseTrendSignalInput(platform: TrendPlatform, value: unknown): 
     collectedAt: new Date(collectedAt).toISOString(),
     metrics: cleanTrendMetrics(raw.metrics),
   }
+}
+
+export function parseTrendSuggestionInput(value: unknown): TrendSuggestionInput | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const term = cleanTrendText(raw.term, 40)
+  const normalizedTerm = normalizeTrendTerm(term)
+  const seedQuery = cleanTrendText(raw.seedQuery, 40)
+  const sourceKind = raw.sourceKind
+  const collectedAt = cleanTrendText(raw.collectedAt, 40)
+  const rawPosition = raw.position
+  const position = typeof rawPosition === 'number' && Number.isInteger(rawPosition) && rawPosition >= 1 && rawPosition <= 100
+    ? rawPosition
+    : null
+  if (!normalizedTerm || seedQuery.length < 2 || !isTrendSuggestionSourceKind(sourceKind)) return null
+  if (!Number.isFinite(Date.parse(collectedAt))) return null
+  return { term, normalizedTerm, sourceKind, seedQuery, position, collectedAt: new Date(collectedAt).toISOString() }
 }
