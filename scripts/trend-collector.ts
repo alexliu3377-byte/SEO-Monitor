@@ -397,6 +397,20 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
 }
 
 async function collectSearchSuggestions(page: Page, query: string): Promise<CollectedSuggestion[]> {
+  const suggestionResponses: PlaywrightResponse[] = []
+  const suggestionResponsePaths = new Set<string>()
+  const responseListener = (response: PlaywrightResponse) => {
+    try {
+      const responseUrl = new URL(response.url())
+      if (response.status() === 200 && /suggest|recommend|associate|autocomplete|\bsug\b/i.test(responseUrl.pathname)) {
+        suggestionResponses.push(response)
+        suggestionResponsePaths.add(responseUrl.pathname)
+      }
+    } catch {
+      // Ignore malformed third-party response URLs.
+    }
+  }
+  page.on('response', responseListener)
   const inputs = page.locator('input')
   let visibleSearchInputFound = false
   for (let index = 0; index < await inputs.count(); index += 1) {
@@ -410,11 +424,38 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
       // Clicking an already populated Douyin/Xiaohongshu search box does not
       // consistently reopen autocomplete. Re-entering the same value emits
       // the input events the sites use to request and render suggestions.
-      await input.fill('').catch(() => undefined)
-      await input.fill(query).catch(() => undefined)
-      await page.waitForTimeout(1_500)
+      await input.press('Control+A').catch(() => undefined)
+      await input.press('Backspace').catch(() => undefined)
+      await input.pressSequentially(query, { delay: 90 }).catch(() => undefined)
+      await page.waitForTimeout(2_000)
       break
     }
+  }
+  page.off('response', responseListener)
+
+  const networkSuggestions = new Set<string>()
+  const normalizedSeed = query.toLocaleLowerCase('zh-CN')
+  for (const response of suggestionResponses.slice(-10)) {
+    const payload = await response.json().catch(() => null)
+    const visit = (value: unknown, key = '', depth = 0) => {
+      if (depth > 8 || value === null || value === undefined) return
+      if (typeof value === 'string') {
+        if (!/(?:word|query|keyword|text|name|content|title|suggest)/i.test(key)) return
+        const text = cleanTrendText(value, 80)
+        if (text.length >= 2 && text.length <= 40 && text.toLocaleLowerCase('zh-CN').includes(normalizedSeed)) {
+          networkSuggestions.add(text)
+        }
+        return
+      }
+      if (Array.isArray(value)) {
+        for (const child of value) visit(child, key, depth + 1)
+        return
+      }
+      if (typeof value === 'object') {
+        for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) visit(child, childKey, depth + 1)
+      }
+    }
+    visit(payload)
   }
 
   type RawSuggestion = { term: string; sourceKind: 'related_search' | 'everyone_search' }
@@ -511,11 +552,15 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   }).catch(() => undefined)
 
   const raw: RawSuggestion[] = [
+    ...[...networkSuggestions].map(term => ({ term, sourceKind: 'related_search' as const })),
     ...autocomplete.map(term => ({ term, sourceKind: 'related_search' as const })),
     ...topicChips.map(term => ({ term, sourceKind: 'related_search' as const })),
     ...sectionSuggestions,
   ]
-  console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
+  console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，推荐接口=${networkSuggestions.size}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
+  if (raw.length === 0 && suggestionResponsePaths.size > 0) {
+    console.log(`已看到推荐接口但没有解析出词：${[...suggestionResponsePaths].join('，')}`)
+  }
   const collectedAt = new Date().toISOString()
   const seen = new Set<string>()
   const normalizedQuery = query.toLocaleLowerCase('zh-CN')
