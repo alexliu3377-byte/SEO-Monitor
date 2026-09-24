@@ -46,6 +46,7 @@ export default function TrendKeywordDiscovery() {
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null)
   const [error, setError] = useState('')
   const pageSize = 20
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -169,8 +170,8 @@ export default function TrendKeywordDiscovery() {
         <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 sm:px-6">
           <span className="text-xs text-slate-500">已选择 <strong className="text-slate-800">{selectedIds.size}</strong> 个新词</span>
           <div className="flex items-center gap-2">
-            {status !== 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'ignore')} className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 disabled:opacity-40">批量忽略</button>}
             {status === 'pending' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'add')} className="h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">批量加入采集</button>}
+            {status !== 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'ignore')} className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40">批量忽略</button>}
             {status === 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'restore')} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40">批量恢复</button>}
           </div>
         </div>
@@ -192,7 +193,7 @@ export default function TrendKeywordDiscovery() {
                 <td className="truncate px-3 py-2.5 text-xs text-slate-600" title={item.seedQueries.join('、')}>{item.seedQueries.join('、') || '—'}</td>
                 <td className="px-3 py-2.5 text-xs text-slate-700">{item.observationCount} 个</td>
                 <td className="px-3 py-2.5 text-xs text-slate-600">{formatDate(item.lastSeenAt)}</td>
-                <td className="px-4 py-2.5"><div className="flex justify-end gap-1">{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-md px-2.5 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">忽略</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-md bg-emerald-600 px-2.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">加入采集</button></>}{canManage && status === 'ignored' && <button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'restore')} className="h-8 rounded-md border border-slate-200 px-2.5 text-xs text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="truncate text-xs text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
+                <td className="px-4 py-2.5"><div className="flex justify-end gap-1.5"><button type="button" onClick={() => setSelectedSuggestion(item)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50">查看</button>{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">加入采集</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button></>}{canManage && status === 'ignored' && <button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'restore')} className="h-8 rounded-lg border border-emerald-200 bg-white px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="self-center truncate text-xs font-medium text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
               </tr>
             ))}
           </tbody>
@@ -200,6 +201,30 @@ export default function TrendKeywordDiscovery() {
       </div>
 
       {!loading && totalPages > 1 && <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4 text-sm text-slate-500"><span>共 {total} 个新词</span><div className="flex items-center gap-2"><button disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">上一页</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage(value => Math.min(totalPages, value + 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">下一页</button></div></div>}
+
+      {selectedSuggestion && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="新词详情" onMouseDown={event => { if (event.currentTarget === event.target) setSelectedSuggestion(null) }}>
+          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+              <div><p className="text-xs font-medium text-emerald-700">新词发现</p><h3 className="mt-1 text-lg font-bold text-slate-950">{selectedSuggestion.displayTerm}</h3><p className="mt-1 text-xs text-slate-400">首次发现 {formatDate(selectedSuggestion.firstSeenAt)}</p></div>
+              <button type="button" aria-label="关闭" onClick={() => setSelectedSuggestion(null)} className="h-9 w-9 rounded-lg text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">×</button>
+            </div>
+            <div className="space-y-4 overflow-y-auto bg-slate-50/70 px-5 py-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs text-slate-400">出现入口</p><p className="mt-1 text-lg font-bold text-slate-900">{selectedSuggestion.observationCount}</p></div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs text-slate-400">来源平台</p><p className="mt-1 text-lg font-bold text-slate-900">{selectedSuggestion.platforms.length}</p></div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3 sm:col-span-2"><p className="text-xs text-slate-400">最近发现</p><p className="mt-1 text-sm font-semibold text-slate-900">{formatDate(selectedSuggestion.lastSeenAt)}</p></div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-semibold text-slate-500">发现位置</p>
+                <div className="mt-2 flex flex-wrap gap-2">{selectedSuggestion.platforms.map(value => <span key={value} className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-700">{PLATFORM_LABELS[value]}</span>)}<span className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">{selectedSuggestion.sourceKinds.includes('everyone_search') ? '大家都在搜' : '相关搜索'}</span></div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-500">由这些搜索词发现</p><div className="mt-2 flex flex-wrap gap-2">{selectedSuggestion.seedQueries.map(value => <span key={value} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700">{value}</span>)}</div></div>
+            </div>
+            {canManage && selectedSuggestion.reviewStatus === 'pending' && <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4"><button type="button" disabled={Boolean(savingId)} onClick={async () => { await updateSuggestion(selectedSuggestion, 'add'); setSelectedSuggestion(null) }} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">加入采集</button><button type="button" disabled={Boolean(savingId)} onClick={async () => { await updateSuggestion(selectedSuggestion, 'ignore'); setSelectedSuggestion(null) }} className="h-10 rounded-lg border border-red-200 bg-white px-4 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button></div>}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
