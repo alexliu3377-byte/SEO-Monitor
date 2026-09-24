@@ -104,6 +104,35 @@ function relativeTime(value: string | null) {
   return `${Math.floor(minutes / 1_440)} 天前`
 }
 
+function trendScoreBreakdown(term: TrendTerm) {
+  const firstSeen = new Date(term.first_seen_at).getTime()
+  const lastSeen = new Date(term.last_seen_at).getTime()
+  const ageHours = Math.max(0, (Date.now() - firstSeen) / 3_600_000)
+  const durationDays = Math.max(0, (lastSeen - firstSeen) / 86_400_000)
+  const freshness = ageHours <= 24 ? 20 : ageHours <= 72 ? 12 : ageHours <= 168 ? 6 : 0
+  const crossPlatform = term.platforms.length >= 3 ? 30 : term.platforms.length === 2 ? 22 : 8
+  const momentum = term.previous_signal_count === 0
+    ? term.recent_signal_count >= 5 ? 25 : term.recent_signal_count >= 2 ? 18 : term.recent_signal_count === 1 ? 8 : 0
+    : term.recent_signal_count > term.previous_signal_count
+      ? Math.min(25, 8 + (term.recent_signal_count - term.previous_signal_count) * 4)
+      : 0
+  const evidence = Math.min(15, term.signal_count * 3)
+  const persistence = durationDays >= 7 ? 10 : durationDays >= 3 ? 6 : 0
+  const rawTotal = freshness + crossPlatform + momentum + evidence + persistence
+  return {
+    items: [
+      { label: '新鲜度', points: freshness, detail: ageHours <= 24 ? '首次出现不超过 24 小时' : ageHours <= 72 ? '首次出现不超过 3 天' : ageHours <= 168 ? '首次出现不超过 7 天' : '首次出现已超过 7 天' },
+      { label: '跨平台', points: crossPlatform, detail: `${term.platforms.length} 个平台出现` },
+      { label: '近期动能', points: momentum, detail: `近24小时 ${term.recent_signal_count} 份；前24小时 ${term.previous_signal_count} 份` },
+      { label: '独立资料', points: evidence, detail: `${term.signal_count} 份去重资料，每份 3 分，上限 15 分` },
+      { label: '持续时间', points: persistence, detail: durationDays >= 1 ? `跨越约 ${Math.floor(durationDays)} 天` : '尚未跨日持续' },
+    ],
+    rawTotal,
+    calculatedTotal: Math.min(100, Math.max(0, rawTotal)),
+    confidenceFormula: Math.min(100, term.signal_count * 8 + term.platforms.length * 15),
+  }
+}
+
 function NodeStatus({ node }: { node: CollectorNode }) {
   const meta = node.status === 'online'
     ? { dot: 'bg-emerald-500', label: '运行正常' }
@@ -165,6 +194,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   const selectedTab = useMemo(() => TABS.find(tab => tab.key === activeTab) ?? TABS[0], [activeTab])
   const pageSize = 20
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const selectedScore = selected ? trendScoreBreakdown(selected) : null
 
   const loadTerms = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -438,7 +468,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                 <tr className="text-left text-xs font-medium text-slate-500">
                   <th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={terms.length > 0 && terms.every(term => selectedTermIds.has(term.id))} onChange={toggleAllTerms} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th>
                   <th className="px-3 py-2.5">候选新词</th>
-                  <th className="w-20 px-3 py-2.5">趋势分</th>
+                  <th className="w-20 px-3 py-2.5"><span title="新鲜度 + 跨平台 + 近期动能 + 独立资料 + 持续时间，最高100分" className="cursor-help border-b border-dotted border-slate-400">趋势分</span></th>
                   <th className="w-28 px-3 py-2.5">阶段</th>
                   <th className="w-52 px-3 py-2.5">来源信号</th>
                   <th className="w-28 px-3 py-2.5">首次发现</th>
@@ -606,6 +636,21 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                   </div>
                 ))}
               </div>
+
+              {selectedScore && (
+                <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div><h3 className="text-sm font-semibold text-slate-900">趋势分怎么算</h3><p className="mt-1 text-xs leading-5 text-slate-500">只使用公开社媒信号；SEO 排名和搜索量暂不计入。各项相加后最高为 100 分。</p></div>
+                    <div className="flex-none text-right"><p className="text-xs text-slate-400">当前保存分数</p><p className="text-2xl font-bold text-slate-900">{selected.trend_score}</p></div>
+                  </div>
+                  <div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">
+                    {selectedScore.items.map(item => <div key={item.label} className="flex items-center justify-between gap-4 py-2.5"><div className="min-w-0"><p className="text-sm font-medium text-slate-700">{item.label}</p><p className="truncate text-xs text-slate-400" title={item.detail}>{item.detail}</p></div><span className={`flex-none text-sm font-bold tabular-nums ${item.points > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>+{item.points}</span></div>)}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span className="text-slate-500">项目合计 {selectedScore.rawTotal} 分{selectedScore.rawTotal > 100 ? '，按上限计 100 分' : ''}</span><span className="font-semibold text-slate-700">按当前资料重算：{selectedScore.calculatedTotal} 分</span></div>
+                  {selectedScore.calculatedTotal !== selected.trend_score && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">保存分数来自最近一次采集刷新；新鲜度会随时间变化，下次采集后会按同一规则更新。</p>}
+                  <p className="mt-3 text-xs leading-5 text-slate-400">可信度：独立资料 {selected.signal_count} × 8，加上平台数 {selected.platforms.length} × 15，最高 100；当前按公式为 {selectedScore.confidenceFormula}%。</p>
+                </div>
+              )}
 
               <div className="mt-6 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-800">相关公开内容</h3>
