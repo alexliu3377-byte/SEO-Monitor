@@ -163,31 +163,42 @@ function searchUrl(platform: TrendPlatform, query: string): string {
 
 async function navigateForCollection(page: Page, url: string) {
   const target = new URL(url)
+  let navigationError: unknown
   try {
     // These SPA search pages can keep DOMContentLoaded pending even after the
     // response and visible UI are ready. Waiting for the navigation commit and
     // then allowing a fixed render window is more reliable for unattended runs.
-    if (target.hostname === 'www.xiaohongshu.com') {
+    await page.goto(url, { waitUntil: 'commit', timeout: 25_000 })
+  } catch (error) {
+    navigationError = error
+  }
+
+  // Edge normally handles Xiaohongshu through page.goto. Keep CDP only as a
+  // fallback for machines where the normal navigation never commits.
+  if (!page.url().startsWith(target.origin) && target.hostname === 'www.xiaohongshu.com') {
+    try {
       const session = await page.context().newCDPSession(page)
       try {
         const result = await session.send('Page.navigate', { url })
         if (result.errorText) throw new Error(result.errorText)
         await page.waitForURL(current => current.origin === target.origin, {
           waitUntil: 'commit',
-          timeout: 45_000,
+          timeout: 25_000,
         })
       } finally {
         await session.detach().catch(() => undefined)
       }
-    } else {
-      await page.goto(url, { waitUntil: 'commit', timeout: 45_000 })
+    } catch (error) {
+      navigationError = error
     }
-  } catch (error) {
-    const currentUrl = page.url()
-    if (!currentUrl.startsWith(target.origin)) {
-      const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`无法进入目标网站；浏览器停留在 ${currentUrl}。直接导航错误：${reason}`)
-    }
+  }
+
+  const currentUrl = page.url()
+  if (!currentUrl.startsWith(target.origin)) {
+    const reason = navigationError instanceof Error ? navigationError.message : String(navigationError ?? 'unknown error')
+    throw new Error(`无法进入目标网站；浏览器停留在 ${currentUrl}。导航错误：${reason}`)
+  }
+  if (navigationError) {
     console.warn(`直接导航未正常完成但已进入目标网站，继续检查内容：${currentUrl}`)
   }
   await page.waitForTimeout(15_000)
