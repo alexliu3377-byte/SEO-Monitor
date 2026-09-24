@@ -435,21 +435,8 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
       const rect = element.getBoundingClientRect()
       if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 4 || rect.height < 4) continue
       if (rect.top < inputRect.bottom - 4 || rect.bottom > inputRect.bottom + 520) continue
-      if (rect.right < inputRect.left || rect.left > inputRect.right) continue
-      if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
-      const pointX = Math.min(window.innerWidth - 1, Math.max(0, rect.left + Math.min(rect.width / 2, 30)))
-      const pointY = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2))
-      const topmost = document.elementFromPoint(pointX, pointY)
-      if (!topmost || !(element === topmost || element.contains(topmost) || topmost.contains(element))) continue
-      let candidate: Element = element
-      for (let depth = 0; candidate.parentElement && depth < 3; depth += 1) {
-        const parent = candidate.parentElement
-        const parentRect = parent.getBoundingClientRect()
-        const parentText = clean((parent as HTMLElement).innerText || parent.textContent)
-        if (parentRect.height > 64 || parentText.length > 40 || parentText.includes('\n')) break
-        candidate = parent
-      }
-      const text = clean((candidate as HTMLElement).innerText || candidate.textContent)
+      if (rect.right < inputRect.left - 40 || rect.left > inputRect.right + 40) continue
+      const text = clean((element as HTMLElement).innerText || element.textContent)
       if (text.length >= 2 && text.length <= 40 && text.toLocaleLowerCase('zh-CN').includes(seedQuery.toLocaleLowerCase('zh-CN'))) {
         results.add(text)
       }
@@ -463,23 +450,28 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
     const excluded = new Set(['全部', '综合', '推荐', '排行榜', '筛选', '多列', '单列', '搜索', '问问ai', '笔记', '用户', '视频', '直播', '问问点'])
     const results = new Set<string>()
-    for (const element of document.querySelectorAll('a, button, li, span, div, [role="tab"]')) {
-      if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
+    for (const element of document.querySelectorAll('a, button, li, span, div, p, [role="tab"]')) {
       const rect = element.getBoundingClientRect()
       const style = window.getComputedStyle(element)
       if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 12 || rect.height < 12) continue
-      if (rect.top < 65 || rect.bottom > 245 || rect.width > 220 || rect.height > 64) continue
+      if (rect.top < 55 || rect.bottom > 340 || rect.width > 300 || rect.height > 80) continue
       const text = clean((element as HTMLElement).innerText || element.textContent)
       const normalized = text.toLocaleLowerCase('zh-CN')
-      if (text.length >= 2 && text.length <= 20 && !text.includes('\n') && !excluded.has(normalized)) results.add(text)
+      if (text.length >= 2 && text.length <= 24 && !excluded.has(normalized)) results.add(text)
     }
     return [...results]
   }).catch(() => [] as string[])
 
   const sectionSuggestions: RawSuggestion[] = []
-  const originalScrollY = await page.evaluate(() => window.scrollY).catch(() => 0)
-  for (let step = 0; step < 5; step += 1) {
-    await page.evaluate(index => window.scrollTo({ top: Math.round(index * window.innerHeight * 0.7), behavior: 'instant' }), step)
+  for (let step = 0; step < 6; step += 1) {
+    await page.evaluate(progress => {
+      const candidates = [document.scrollingElement, ...document.querySelectorAll('body *')]
+      for (const candidate of candidates) {
+        if (!(candidate instanceof HTMLElement)) continue
+        if (candidate.scrollHeight <= candidate.clientHeight + 200 || candidate.clientHeight < 250) continue
+        candidate.scrollTop = Math.round((candidate.scrollHeight - candidate.clientHeight) * progress)
+      }
+    }, step / 5)
     await page.waitForTimeout(350)
     const found = await page.evaluate(() => {
       const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
@@ -495,9 +487,8 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
           if (rect.height < 70 || rect.height > 650 || rect.width < 120) continue
           const values = new Set<string>()
           for (const element of container.querySelectorAll('a, button, li, span, p, div')) {
-            if (element.children.length > 0 && !['A', 'BUTTON', 'LI'].includes(element.tagName)) continue
             const text = clean((element as HTMLElement).innerText || element.textContent)
-            if (text && text !== headingText && text.length >= 2 && text.length <= 40 && !text.includes('\n')) values.add(text)
+            if (text && text !== headingText && text.length >= 2 && text.length <= 40) values.add(text)
           }
           if (values.size >= 1) {
             for (const term of values) rows.push({ term, heading: headingText })
@@ -512,7 +503,12 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
       sourceKind: item.heading === '大家都在搜' ? 'everyone_search' : 'related_search',
     })
   }
-  await page.evaluate(scrollY => window.scrollTo({ top: scrollY, behavior: 'instant' }), originalScrollY).catch(() => undefined)
+  await page.evaluate(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    for (const candidate of document.querySelectorAll('body *')) {
+      if (candidate instanceof HTMLElement && candidate.scrollTop > 0) candidate.scrollTop = 0
+    }
+  }).catch(() => undefined)
 
   const raw: RawSuggestion[] = [
     ...autocomplete.map(term => ({ term, sourceKind: 'related_search' as const })),
@@ -522,10 +518,11 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
   const collectedAt = new Date().toISOString()
   const seen = new Set<string>()
+  const normalizedQuery = query.toLocaleLowerCase('zh-CN')
   return raw.flatMap((item, index) => {
     const normalized = normalizeTrendTerm(item.term)
     const key = `${item.sourceKind}\n${normalized}`
-    if (!normalized || seen.has(key)) return []
+    if (!normalized || normalized === normalizedQuery || seen.has(key)) return []
     seen.add(key)
     return [{
       term: item.term,
