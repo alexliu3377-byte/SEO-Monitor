@@ -396,7 +396,7 @@ async function collectQuery(page: Page, platform: TrendPlatform, query: string, 
   return [...results.values()]
 }
 
-async function collectSearchSuggestions(page: Page, query: string): Promise<CollectedSuggestion[]> {
+async function collectSearchSuggestions(page: Page, platform: TrendPlatform, query: string): Promise<CollectedSuggestion[]> {
   const suggestionResponses: PlaywrightResponse[] = []
   const suggestionResponsePaths = new Set<string>()
   const responseListener = (response: PlaywrightResponse) => {
@@ -459,6 +459,50 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   }
 
   type RawSuggestion = { term: string; sourceKind: 'related_search' | 'everyone_search' }
+  const structuredSuggestions = await page.evaluate(({ currentPlatform }) => {
+    const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+    const rows: Array<{ term: string; sourceKind: 'related_search' | 'everyone_search' }> = []
+    const excluded = new Set(['全部', '综合', '推荐', '排行榜', '筛选', '多列', '单列', '搜索', '笔记', '用户', '视频', '直播'])
+    const add = (value: string | null | undefined, sourceKind: 'related_search' | 'everyone_search') => {
+      const term = clean(value)
+      if (term.length >= 2 && term.length <= 40 && !excluded.has(term.toLocaleLowerCase('zh-CN'))) rows.push({ term, sourceKind })
+    }
+
+    if (currentPlatform === 'xiaohongshu') {
+      for (const tab of document.querySelectorAll('.tab-scroll-container button, button.tab, button[aria-details]')) {
+        add((tab as HTMLElement).innerText || tab.textContent, 'related_search')
+      }
+      for (const wrapper of document.querySelectorAll('.query-note-wrapper')) {
+        const heading = clean(wrapper.querySelector('.query-note-header-text')?.textContent)
+        if (heading !== '大家都在搜' && heading !== '相关搜索') continue
+        const list = wrapper.querySelector('.query-note-list')
+        if (!list) continue
+        for (const item of list.children) {
+          add((item as HTMLElement).innerText || item.textContent, heading === '大家都在搜' ? 'everyone_search' : 'related_search')
+        }
+      }
+    } else if (currentPlatform === 'douyin') {
+      const toolbar = document.querySelector('#search-toolbar-container')
+      if (toolbar) {
+        for (const element of toolbar.querySelectorAll('button, [role="tab"], div')) {
+          const rect = element.getBoundingClientRect()
+          const text = clean((element as HTMLElement).innerText || element.textContent)
+          if (rect.height >= 20 && rect.height <= 56 && rect.width <= 180 && text.length <= 20) add(text, 'related_search')
+        }
+      }
+      for (const card of document.querySelectorAll('.search-result-card')) {
+        const heading = [...card.querySelectorAll('p, div, span')].find(element => clean(element.textContent) === '相关搜索')
+        if (!heading) continue
+        for (const element of card.querySelectorAll('div')) {
+          const rect = element.getBoundingClientRect()
+          const text = clean((element as HTMLElement).innerText || element.textContent)
+          if (rect.height >= 40 && rect.height <= 52 && text !== '相关搜索') add(text, 'related_search')
+        }
+      }
+    }
+    return rows
+  }, { currentPlatform: platform }).catch(() => [] as RawSuggestion[])
+
   const autocomplete = await page.evaluate(({ seedQuery }) => {
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
     const input = [...document.querySelectorAll('input')].find(element => {
@@ -552,12 +596,13 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   }).catch(() => undefined)
 
   const raw: RawSuggestion[] = [
+    ...structuredSuggestions,
     ...[...networkSuggestions].map(term => ({ term, sourceKind: 'related_search' as const })),
     ...autocomplete.map(term => ({ term, sourceKind: 'related_search' as const })),
     ...topicChips.map(term => ({ term, sourceKind: 'related_search' as const })),
     ...sectionSuggestions,
   ]
-  console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，推荐接口=${networkSuggestions.size}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
+  console.log(`搜索推荐词诊断：可见搜索框=${visibleSearchInputFound ? '是' : '否'}，页面结构=${structuredSuggestions.length}，推荐接口=${networkSuggestions.size}，下拉=${autocomplete.length}，顶部标签=${topicChips.length}，相关区块=${sectionSuggestions.length}`)
   if (raw.length === 0 && suggestionResponsePaths.size > 0) {
     console.log(`已看到推荐接口但没有解析出词：${[...suggestionResponsePaths].join('，')}`)
   }
@@ -660,7 +705,7 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
         }
       }
       console.log(`[${PLATFORM_NAME[platform]}] ${query}：取得 ${rows.length} 条有效公开信号`)
-      const discovered = await collectSearchSuggestions(page, query)
+      const discovered = await collectSearchSuggestions(page, platform, query)
       for (const suggestion of discovered) {
         const key = `${suggestion.sourceKind}\n${suggestion.term.toLocaleLowerCase('zh-CN')}\n${query.toLocaleLowerCase('zh-CN')}`
         if (!suggestions.has(key)) suggestions.set(key, suggestion)
