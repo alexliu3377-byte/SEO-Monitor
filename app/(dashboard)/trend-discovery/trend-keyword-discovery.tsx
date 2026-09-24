@@ -27,10 +27,12 @@ const STATUS_TABS: Array<{ key: SuggestionStatus; label: string }> = [
 function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Kuala_Lumpur',
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(date)
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`
 }
 
 export default function TrendKeywordDiscovery() {
@@ -180,7 +182,7 @@ export default function TrendKeywordDiscovery() {
       <div className="overflow-x-auto">
         <table className="min-w-[1080px] w-full table-fixed">
           <thead className="bg-slate-50/80 text-left text-xs font-medium text-slate-500">
-            <tr><th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))} onChange={toggleAllSuggestions} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="w-56 px-3 py-2.5">候选新词</th><th className="w-52 px-3 py-2.5">发现位置</th><th className="px-3 py-2.5">由哪些搜索发现</th><th className="w-24 px-3 py-2.5">入口</th><th className="w-32 px-3 py-2.5">最近发现</th><th className="w-48 px-4 py-2.5 text-right">操作</th></tr>
+            <tr><th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))} onChange={toggleAllSuggestions} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="w-56 px-3 py-2.5">候选新词</th><th className="w-52 px-3 py-2.5">发现位置</th><th className="px-3 py-2.5">由哪些搜索发现</th><th className="w-24 px-3 py-2.5">入口</th><th className="w-40 px-3 py-2.5">最近发现</th><th className="w-48 px-4 py-2.5 text-right">操作</th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? Array.from({ length: 5 }).map((_, index) => <tr key={index} className="animate-pulse"><td colSpan={7} className="px-4 py-3"><div className="h-4 w-full rounded bg-slate-100" /></td></tr>) : suggestions.length === 0 ? (
@@ -192,7 +194,7 @@ export default function TrendKeywordDiscovery() {
                 <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">{item.platforms.map(value => <span key={value} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{PLATFORM_LABELS[value]}</span>)}<span className="truncate text-xs text-slate-400">{item.sourceKinds.includes('everyone_search') ? '大家都在搜' : '相关搜索'}</span></div></td>
                 <td className="truncate px-3 py-2.5 text-xs text-slate-600" title={item.seedQueries.join('、')}>{item.seedQueries.join('、') || '—'}</td>
                 <td className="px-3 py-2.5 text-xs text-slate-700">{item.observationCount} 个</td>
-                <td className="px-3 py-2.5 text-xs text-slate-600">{formatDate(item.lastSeenAt)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-slate-600">{formatDate(item.lastSeenAt)}</td>
                 <td className="px-4 py-2.5"><div className="flex justify-end gap-1.5"><button type="button" onClick={() => setSelectedSuggestion(item)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50">查看</button>{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">加入采集</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button></>}{canManage && status === 'ignored' && <button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'restore')} className="h-8 rounded-lg border border-emerald-200 bg-white px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="self-center truncate text-xs font-medium text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
               </tr>
             ))}

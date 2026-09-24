@@ -88,11 +88,14 @@ function formatDate(value: string | null, withTime = false) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Kuala_Lumpur',
-    month: '2-digit', day: '2-digit',
+    year: 'numeric', month: '2-digit', day: '2-digit',
     ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
-  }).format(date)
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? ''
+  const day = `${part('year')}-${part('month')}-${part('day')}`
+  return withTime ? `${day} ${part('hour')}:${part('minute')}` : day
 }
 
 function relativeTime(value: string | null) {
@@ -471,7 +474,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                   <th className="w-20 px-3 py-2.5"><span title="新鲜度 + 跨平台 + 近期动能 + 独立资料 + 持续时间，最高100分" className="cursor-help border-b border-dotted border-slate-400">趋势分</span></th>
                   <th className="w-28 px-3 py-2.5">阶段</th>
                   <th className="w-52 px-3 py-2.5">来源信号</th>
-                  <th className="w-28 px-3 py-2.5">首次发现</th>
+                  <th className="w-40 px-3 py-2.5">首次发现</th>
                   <th className="w-56 px-4 py-2.5 text-right">操作</th>
                 </tr>
               </thead>
@@ -512,7 +515,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                           <span className="text-xs text-slate-400">{term.signal_count} 份</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-slate-600">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-slate-600">
                         {formatDate(term.first_seen_at, true)}
                       </td>
                       <td className="px-4 py-2.5">
