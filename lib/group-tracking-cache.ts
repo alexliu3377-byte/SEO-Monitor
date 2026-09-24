@@ -1,6 +1,7 @@
-import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, type UpdateEffectBreakdown } from '@/lib/outcome-score'
+import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, bareUrl, urlSubdomainVariants, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
+import { buildDeviceRankSnapshots, fetchLatestUrlRanks, type DeviceRankSnapshot } from '@/lib/tracking-rank-lookup'
 import {
   computeSourceEffectiveness, currentMonth, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
@@ -12,6 +13,12 @@ export interface RankMatchWithFlag {
   prev_rank_position: number | null
   volume: number
   isNewRank: boolean
+}
+
+export interface ScoredDeviceRankSnapshot extends DeviceRankSnapshot {
+  rank_change: number | null
+  is_new_rank: boolean
+  score: number
 }
 
 export interface EnrichedTrackRow {
@@ -31,6 +38,8 @@ export interface EnrichedTrackRow {
   score: number
   updateEffectBreakdown: UpdateEffectBreakdown | null
   rank_matches: RankMatchWithFlag[]
+  device_rankings?: ScoredDeviceRankSnapshot[]
+  page_index_score?: number
 }
 
 export interface CachedMemberSummary {
@@ -59,7 +68,7 @@ export interface CachedTrackingMonth {
 }
 
 interface GroupTrackingSummaryPayload {
-  version: 1
+  version: 2
   months: Record<string, CachedTrackingMonth>
 }
 
@@ -166,7 +175,7 @@ async function buildSummaryPayload(
     months.add(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`)
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))
   }
-  const payload: GroupTrackingSummaryPayload = { version: 1, months: {} }
+  const payload: GroupTrackingSummaryPayload = { version: 2, months: {} }
   const memberIds = new Set(members.map(member => member.user_id))
   const actors = [
     ...members,
@@ -246,7 +255,7 @@ export async function loadFastTrackingMonth(
   const cachedAt = computedAt ? Date.parse(computedAt) : NaN
   if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > TRACKING_CACHE_MAX_AGE_MS) return null
   const payload = data?.summary_payload as GroupTrackingSummaryPayload | undefined
-  const monthData = payload?.version === 1 ? payload.months?.[month] : undefined
+  const monthData = payload?.version === 2 ? payload.months?.[month] : undefined
   return monthData ? { data: monthData, computedAt: computedAt! } : null
 }
 
@@ -283,7 +292,9 @@ export async function loadGroupTrackingPayload(service: any, groupId: string): P
   if (cacheError) console.error('Group tracking cache read failed', { groupId, code: cacheError.code })
 
   const cachedAt = cached?.computed_at ? Date.parse(cached.computed_at) : NaN
-  const cacheIsFresh = Array.isArray(cached?.payload) && Number.isFinite(cachedAt) && Date.now() - cachedAt <= TRACKING_CACHE_MAX_AGE_MS
+  const cacheHasDeviceRankings = Array.isArray(cached?.payload)
+    && (cached.payload as Array<{ device_rankings?: unknown }>).every(row => Array.isArray(row.device_rankings))
+  const cacheIsFresh = cacheHasDeviceRankings && Number.isFinite(cachedAt) && Date.now() - cachedAt <= TRACKING_CACHE_MAX_AGE_MS
   let rows = cacheIsFresh ? cached.payload as EnrichedTrackRow[] : await computeGroupTrackingPayload(service, groupId)
   let computedAt = cacheIsFresh ? cached.computed_at as string : new Date().toISOString()
 
@@ -423,19 +434,42 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     .map(r => r.page_url as string)
   const firstRankedDates = await fetchFirstRankedDates(service, urlsNeedingHistory)
 
+  // Read the latest evidence for M and PC independently. The RPC keeps the
+  // latest row for each URL/keyword/platform/direction, so a day outside the
+  // 15-page crawl window does not erase the last confirmed observation.
+  const rankEvidenceByUrl = new Map<string, Awaited<ReturnType<typeof fetchLatestUrlRanks>>>()
+  const trackingUrls = Array.from(new Set(dedupedRows.map(row => row.page_url).filter((url): url is string => !!url)))
+  const allUrlVariants = Array.from(new Set(trackingUrls.flatMap(urlSubdomainVariants)))
+  for (let i = 0; i < allUrlVariants.length; i += 150) {
+    const evidenceRows = await fetchLatestUrlRanks(service, allUrlVariants.slice(i, i + 150))
+    for (const evidence of evidenceRows) {
+      const key = bareUrl(evidence.url)
+      if (!rankEvidenceByUrl.has(key)) rankEvidenceByUrl.set(key, [])
+      rankEvidenceByUrl.get(key)!.push(evidence)
+    }
+  }
+
   return dedupedRows.map(r => {
     const matches = rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? []
     const matchedPositions = matches.map(m => m.rank_position).filter((p): p is number => p != null)
     // Best (lowest = highest-ranking) position across every matched keyword,
     // falling back to the single scalar rank_position for rows predating this
     // table. No rank at all sorts as worst regardless of direction.
-    const bestRankPosition = matchedPositions.length > 0 ? Math.min(...matchedPositions) : r.rank_position
+    const rawDeviceSnapshots = r.page_url
+      ? buildDeviceRankSnapshots(rankEvidenceByUrl.get(bareUrl(r.page_url)) ?? [])
+      : []
+    const devicePositions = rawDeviceSnapshots.map(item => item.rank_position).filter((position): position is number => position != null)
+    const bestRankPosition = devicePositions.length > 0
+      ? Math.min(...devicePositions)
+      : matchedPositions.length > 0 ? Math.min(...matchedPositions) : r.rank_position
     // Sum of volume across every matched keyword, not just the one "best pick".
-    const totalRankVolume = matches.length > 0 ? matches.reduce((s, m) => s + (m.volume || 0), 0) : (r.rank_volume ?? 0)
+    const totalRankVolume = rawDeviceSnapshots.length > 0
+      ? rawDeviceSnapshots.reduce((sum, item) => sum + (item.volume || 0), 0)
+      : matches.length > 0 ? matches.reduce((s, m) => s + (m.volume || 0), 0) : (r.rank_volume ?? 0)
     // A page can't rank in search without being indexed — if site_keyword_ranks
     // found a rank_position, it's indexed even when our own site_indexed_pages
     // crawl hasn't caught it yet (separate crawl, can lag/miss coverage).
-    const isIndexed = r.is_indexed || r.rank_position != null
+    const isIndexed = r.is_indexed || r.rank_position != null || devicePositions.length > 0
     const rankChange = (r.rank_position != null && r.prev_rank_position != null)
       ? r.prev_rank_position - r.rank_position
       : null
@@ -443,6 +477,25 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     // 这一行的URL是不是"真新排名"——只对 prev_rank_position 为null的行有意义。
     const firstRankedDate = r.page_url ? firstRankedDates.get(bareUrl(r.page_url)) : undefined
     const isNewRank = r.prev_rank_position == null && (firstRankedDate == null || firstRankedDate >= r.submit_date)
+
+    const deviceRankings: ScoredDeviceRankSnapshot[] = rawDeviceSnapshots.map(snapshot => {
+      const deviceRankChange = snapshot.rank_position != null && snapshot.prev_rank_position != null
+        ? snapshot.prev_rank_position - snapshot.rank_position
+        : null
+      const deviceIsNewRank = snapshot.prev_rank_position == null && isNewRank
+      const deviceScore = r.operation_type === '更新'
+        ? explainUpdateEffectScore({
+            rankPos: snapshot.rank_position,
+            prevRankPos: snapshot.prev_rank_position,
+            rankVolume: snapshot.volume,
+            isIndexed: false,
+            indexFirstSeen: null,
+            submitDate: r.submit_date,
+            isNewRank: deviceIsNewRank,
+          }).total
+        : computeOutcomeScore(snapshot.rank_position, false, deviceRankChange, snapshot.volume)
+      return { ...snapshot, rank_change: deviceRankChange, is_new_rank: deviceIsNewRank, score: deviceScore }
+    })
 
     let score: number
     let updateEffectBreakdown: UpdateEffectBreakdown | null = null
@@ -454,6 +507,12 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
       score = updateEffectBreakdown.total
     } else {
       score = computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume)
+    }
+    const pageIndexScore = r.operation_type === '更新'
+      ? isIndexed && (r.index_first_seen == null || r.index_first_seen >= r.submit_date) ? 2 : 0
+      : isIndexed ? 1 : 0
+    if (deviceRankings.length > 0) {
+      score = Math.round((deviceRankings.reduce((sum, device) => sum + device.score, 0) + pageIndexScore) * 10) / 10
     }
 
     // 排名列每一个匹配到的排名词，各自判断是不是"真新"（跟行级共用同一个URL
@@ -474,6 +533,9 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
       bestRankPosition, totalRankVolume,
       score, updateEffectBreakdown,
       rank_matches: matchesWithNewFlag,
+      device_rankings: deviceRankings,
+      page_index_score: pageIndexScore,
+      effectiveness: devicePositions.length > 0 ? '获取排名' : r.effectiveness,
     }
   })
 }

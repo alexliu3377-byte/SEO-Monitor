@@ -104,7 +104,7 @@ export function computeOutcomeScore(
 function bareUrl(url: string): string {
   return url.replace(/^(https?:\/\/)?(www\.|m\.)?/i, '').replace(/\/$/, '')
 }
-function urlSubdomainVariants(url: string): string[] {
+export function urlSubdomainVariants(url: string): string[] {
   const bare = bareUrl(url)
   const hosts = [bare, `www.${bare}`, `m.${bare}`]
   const variants = new Set<string>()

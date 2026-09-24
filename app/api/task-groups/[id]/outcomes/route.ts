@@ -61,12 +61,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const cachedRows = Array.isArray((fastPage as { rows?: unknown }).rows)
       ? (fastPage as { rows: EnrichedTrackRow[] }).rows
       : []
-    const names = await resolveUserDisplayNames(service, cachedRows.map(row => row.user_id))
-    const rows = cachedRows.map(row => ({
-      ...row,
-      username: names.get(row.user_id) ?? row.username,
-    }))
-    return NextResponse.json({ ...fastPage, rows, page, pageSize, truncated: false })
+    // Caches written before M/PC evidence was introduced do not contain
+    // device_rankings. Bypass them once so the shared fallback recomputes and
+    // rewrites the cache with independently scored device data.
+    const hasDeviceAwarePayload = cachedRows.length === 0
+      || cachedRows.every(row => Array.isArray(row.device_rankings))
+    if (hasDeviceAwarePayload) {
+      const names = await resolveUserDisplayNames(service, cachedRows.map(row => row.user_id))
+      const rows = cachedRows.map(row => ({
+        ...row,
+        username: names.get(row.user_id) ?? row.username,
+      }))
+      return NextResponse.json({ ...fastPage, rows, page, pageSize, truncated: false })
+    }
   }
 
   // 2026-08-18：这张表原来的"实时查site_tracking_records全量+批量查认领来源/
