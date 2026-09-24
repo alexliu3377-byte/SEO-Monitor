@@ -531,7 +531,7 @@ async function sendRun(config: CollectorConfig, platform: TrendPlatform, report:
 async function setupPlatform(platform: TrendPlatform) {
   const context = await launchPlatformBrowser(platform)
   const page = context.pages()[0] ?? await context.newPage()
-  await page.goto(HOME_URLS[platform], { waitUntil: 'domcontentloaded' })
+  await navigateForCollection(page, HOME_URLS[platform])
   const prompt = createInterface({ input, output })
   try {
     await prompt.question(`请在打开的 ${platform} 浏览器中完成登录，确认首页可正常使用后按 Enter 保存登录状态…`)
