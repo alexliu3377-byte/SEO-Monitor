@@ -9,6 +9,63 @@ function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
 
+interface ClaimSubmissionFields {
+  id: string
+  user_id: string
+  keyword: string
+  status: string
+  operation_type: string | null
+  final_keyword: string | null
+  page_url: string | null
+}
+
+interface PreviousNewSubmission {
+  id: string
+  keyword: string
+  page_url: string | null
+}
+
+function normalizeClaimKeyword(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+}
+
+function normalizeClaimUrl(value: string | null | undefined) {
+  const raw = (value ?? '').trim()
+  if (!raw) return ''
+
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+    const hostname = parsed.hostname.toLocaleLowerCase().replace(/^(?:www\.|m\.)/i, '')
+    const pathname = parsed.pathname.replace(/\/+$/, '')
+    return `${hostname}${pathname}${parsed.search}`
+  } catch {
+    return raw
+      .toLocaleLowerCase()
+      .replace(/^https?:\/\//i, '')
+      .replace(/^(?:www\.|m\.)/i, '')
+      .replace(/\/+$/, '')
+  }
+}
+
+function findRepeatedNewSubmission(
+  claim: Pick<ClaimSubmissionFields, 'id' | 'keyword' | 'page_url'>,
+  history: PreviousNewSubmission[]
+) {
+  const keyword = normalizeClaimKeyword(claim.keyword)
+  const pageUrl = normalizeClaimUrl(claim.page_url)
+  if (!keyword || !pageUrl) return null
+
+  return history.find(row =>
+    row.id !== claim.id
+    && normalizeClaimKeyword(row.keyword) === keyword
+    && normalizeClaimUrl(row.page_url) === pageUrl
+  ) ?? null
+}
+
+function repeatedNewMessage(keyword: string) {
+  return `“${keyword}”使用同一网址已经提交过“新增”，请把本次操作改为“更新”后再提交。`
+}
+
 async function getCallerId(): Promise<string | null> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -96,7 +153,7 @@ export async function POST(
   if (!callerId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: groupId } = await params
-  const { keyword, source, search_volume, operation_type, final_keyword, page_url, source_rule_id, userId: requestedUserId } = await req.json() as {
+  const { keyword, source, search_volume, operation_type, final_keyword, page_url, source_rule_id, claimed_date, userId: requestedUserId } = await req.json() as {
     keyword: string
     source: string
     search_volume?: number
@@ -104,6 +161,7 @@ export async function POST(
     final_keyword?: string
     page_url?: string
     source_rule_id?: string | null
+    claimed_date?: string
     userId?: string
   }
 
@@ -155,7 +213,11 @@ export async function POST(
     if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const claimedDate = getMY()
+  const today = getMY()
+  const claimedDate = claimed_date || today
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(claimedDate) || claimedDate > today) {
+    return NextResponse.json({ error: '任务日期无效，不能选择未来日期' }, { status: 400 })
+  }
 
   // Check if ANY member of the group already claimed this keyword today (not
   // just the caller) — 2026-07-29: previously only checked the caller's own
@@ -187,7 +249,8 @@ export async function POST(
         claimedByName = names.get(existing.user_id) ?? claimedByName
       }
     }
-    return NextResponse.json({ error: `这个词今天已经被${claimedByName}认领了`, claimedBy: claimedByName }, { status: 409 })
+    const dateLabel = claimedDate === today ? '今天' : `${claimedDate.slice(5).replace('-', '/')} 的任务中`
+    return NextResponse.json({ error: `这个词在${dateLabel}已经被${claimedByName}认领了`, claimedBy: claimedByName }, { status: 409 })
   }
 
   // 分发词批次每日名额上限（2026-08-20）——整组当天从同一批分发词里总共只能
@@ -230,7 +293,7 @@ export async function POST(
       page_url: page_url || null,
       source_rule_id: source_rule_id || null,
     })
-    .select('id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, created_at')
+    .select('id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, claimed_date, created_at')
     .single()
 
   if (error?.code === '23505') {
@@ -279,6 +342,48 @@ export async function PATCH(
   }
   const canEditOthers = callerRole === 'super' || callerRole === 'admin'
 
+  let claimQuery = service
+    .from('member_claimed_keywords')
+    .select('id, user_id, keyword, status, operation_type, final_keyword, page_url')
+    .eq('id', claimId)
+    .eq('group_id', groupId)
+  if (!canEditOthers) claimQuery = claimQuery.eq('user_id', callerId)
+
+  const { data: currentClaim, error: currentClaimError } = await claimQuery.maybeSingle() as {
+    data: ClaimSubmissionFields | null
+    error: { message?: string } | null
+  }
+  if (currentClaimError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  if (!currentClaim) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
+
+  const nextClaim: ClaimSubmissionFields = {
+    ...currentClaim,
+    status: status ?? currentClaim.status,
+    operation_type: operation_type !== undefined ? operation_type || null : currentClaim.operation_type,
+    final_keyword: final_keyword !== undefined ? final_keyword || null : currentClaim.final_keyword,
+    page_url: page_url !== undefined ? page_url || null : currentClaim.page_url,
+  }
+
+  if (nextClaim.status === 'submitted') {
+    if (!nextClaim.operation_type || !nextClaim.final_keyword?.trim() || !nextClaim.page_url?.trim()) {
+      return NextResponse.json({ error: '请先填写操作类型、最终关键词和页面网址。', claimIds: [claimId] }, { status: 400 })
+    }
+
+    if (nextClaim.operation_type === '新增') {
+      const history = await fetchAllRows<PreviousNewSubmission>((from, to) => service
+        .from('member_claimed_keywords')
+        .select('id, keyword, page_url')
+        .eq('user_id', nextClaim.user_id)
+        .eq('status', 'submitted')
+        .eq('operation_type', '新增')
+        .order('id', { ascending: true })
+        .range(from, to))
+      if (findRepeatedNewSubmission(nextClaim, history)) {
+        return NextResponse.json({ error: repeatedNewMessage(nextClaim.keyword), claimIds: [claimId] }, { status: 409 })
+      }
+    }
+  }
+
   let query = service
     .from('member_claimed_keywords')
     .update(updateData)
@@ -287,6 +392,9 @@ export async function PATCH(
   if (!canEditOthers) query = query.eq('user_id', callerId)
 
   const { data: updated, error } = await query.select('id').maybeSingle()
+  if (error?.code === '23505' && error.message?.includes('DUPLICATE_NEW_SUBMISSION')) {
+    return NextResponse.json({ error: repeatedNewMessage(nextClaim.keyword), claimIds: [claimId] }, { status: 409 })
+  }
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   if (!updated) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
   return NextResponse.json({ success: true })
@@ -321,6 +429,60 @@ export async function PUT(
     .eq('group_id', groupId).eq('user_id', targetUserId).maybeSingle()
   if (!targetMembership) return NextResponse.json({ error: 'Target user is not a member of this group' }, { status: 400 })
 
+  let pendingQuery = service
+    .from('member_claimed_keywords')
+    .select('id, user_id, keyword, status, operation_type, final_keyword, page_url')
+    .eq('group_id', groupId)
+    .eq('user_id', targetUserId)
+    .eq('status', 'pending')
+    .order('claimed_date', { ascending: true })
+    .order('created_at', { ascending: true })
+  pendingQuery = date === getMY() ? pendingQuery.lte('claimed_date', date) : pendingQuery.eq('claimed_date', date)
+  const { data: pendingData, error: pendingError } = await pendingQuery as {
+    data: ClaimSubmissionFields[] | null
+    error: { message?: string } | null
+  }
+  if (pendingError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  const pendingClaims = pendingData ?? []
+  if (pendingClaims.length === 0) return NextResponse.json({ success: true })
+
+  const incomplete = pendingClaims.filter(claim =>
+    !claim.operation_type || !claim.final_keyword?.trim() || !claim.page_url?.trim()
+  )
+  if (incomplete.length > 0) {
+    return NextResponse.json({
+      error: `还有 ${incomplete.length} 条记录未填写完整，请补齐操作类型、最终关键词和页面网址。`,
+      claimIds: incomplete.map(claim => claim.id),
+    }, { status: 400 })
+  }
+
+  const previousNewSubmissions = await fetchAllRows<PreviousNewSubmission>((from, to) => service
+    .from('member_claimed_keywords')
+    .select('id, keyword, page_url')
+    .eq('user_id', targetUserId)
+    .eq('status', 'submitted')
+    .eq('operation_type', '新增')
+    .order('id', { ascending: true })
+    .range(from, to))
+
+  // Also compare records inside this same bulk submission. If two pending rows
+  // describe the same keyword and URL, only the first can be the initial 新增.
+  const seenNewSubmissions = [...previousNewSubmissions]
+  const repeatedNewClaims: ClaimSubmissionFields[] = []
+  for (const claim of pendingClaims) {
+    if (claim.operation_type !== '新增') continue
+    if (findRepeatedNewSubmission(claim, seenNewSubmissions)) repeatedNewClaims.push(claim)
+    else seenNewSubmissions.push({ id: claim.id, keyword: claim.keyword, page_url: claim.page_url })
+  }
+  if (repeatedNewClaims.length > 0) {
+    return NextResponse.json({
+      error: repeatedNewClaims.length === 1
+        ? repeatedNewMessage(repeatedNewClaims[0].keyword)
+        : `有 ${repeatedNewClaims.length} 条记录使用同一关键词和网址重复选择了“新增”，请改为“更新”后再提交。`,
+      claimIds: repeatedNewClaims.map(claim => claim.id),
+    }, { status: 409 })
+  }
+
   // GET above pulls forward any older still-pending claims when viewing
   // "today" (see the comment there) — the "提交" button has to actually
   // submit those too, or they'd show up but clicking submit would silently
@@ -329,12 +491,15 @@ export async function PUT(
   let query = service
     .from('member_claimed_keywords')
     .update({ status: 'submitted', submitted_at: new Date().toISOString() })
+    .in('id', pendingClaims.map(claim => claim.id))
     .eq('group_id', groupId)
     .eq('user_id', targetUserId)
     .eq('status', 'pending')
-  query = date === getMY() ? query.lte('claimed_date', date) : query.eq('claimed_date', date)
 
   const { error } = await query
+  if (error?.code === '23505' && error.message?.includes('DUPLICATE_NEW_SUBMISSION')) {
+    return NextResponse.json({ error: '有记录使用同一关键词和网址重复选择了“新增”，请改为“更新”后再提交。' }, { status: 409 })
+  }
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   return NextResponse.json({ success: true })
 }

@@ -67,6 +67,25 @@ function normalizeUrl(raw: string): string {
   return raw.trim().replace(/^https?:\/\/(www\.|m\.)?/, '')
 }
 
+function normalizeClaimUrlForComparison(raw: string): string {
+  const value = raw.trim()
+  if (!value) return ''
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`)
+    const hostname = parsed.hostname.toLowerCase().replace(/^(?:www\.|m\.)/i, '')
+    const pathname = parsed.pathname.replace(/\/+$/, '')
+    return `${hostname}${pathname}${parsed.search}`
+  } catch {
+    return value.toLowerCase().replace(/^https?:\/\//i, '').replace(/^(?:www\.|m\.)/i, '').replace(/\/+$/, '')
+  }
+}
+
+function claimSubmissionIdentity(keyword: string, pageUrl: string) {
+  const normalizedKeyword = keyword.trim().replace(/\s+/g, ' ').toLowerCase()
+  const normalizedUrl = normalizeClaimUrlForComparison(pageUrl)
+  return normalizedKeyword && normalizedUrl ? `${normalizedKeyword}\n${normalizedUrl}` : ''
+}
+
 async function apiError(response: Response, fallback: string) {
   const body = await response.json().catch(() => ({})) as { error?: string }
   return body.error || fallback
@@ -75,6 +94,7 @@ async function apiError(response: Response, fallback: string) {
 function buildSubmissionHistory(rows: SubmissionHistoryRow[]) {
   const kwMap = new Map<string, { lastSubmittedAt: string; updateCount: number }>()
   const urlSet = new Set<string>()
+  const newSubmissionKeys = new Set<string>()
   for (const row of rows) {
     const keyword = (row.final_keyword || row.keyword).toLowerCase()
     const submittedAt = row.submitted_at || row.claimed_date
@@ -86,8 +106,12 @@ function buildSubmissionHistory(rows: SubmissionHistoryRow[]) {
       updateCount: existing.updateCount + updateCount,
     })
     if (row.page_url) urlSet.add(normalizeUrl(row.page_url).toLowerCase())
+    if (row.operation_type === '新增' && row.page_url) {
+      const identity = claimSubmissionIdentity(row.keyword, row.page_url)
+      if (identity) newSubmissionKeys.add(identity)
+    }
   }
-  return { kwMap, urlSet }
+  return { kwMap, urlSet, newSubmissionKeys }
 }
 
 // site_keyword_ranks 30天窗口里同一个关键词经常在好几个不同 stat_date 都有
@@ -602,6 +626,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 更新推荐按关键词或URL任一匹配即可，见下面 matchAndRank 用它替换掉原来
   // 只看"今天"claimedKeywords 的那个bug）。
   const [submissionHistoryUrlSet, setSubmissionHistoryUrlSet] = useState<Set<string>>(new Set())
+  const [previousNewSubmissionKeys, setPreviousNewSubmissionKeys] = useState<Set<string>>(new Set())
   const [submissionHistoryKey, setSubmissionHistoryKey] = useState<string | null>(null)
   // 管理员看"今日推荐"的合并视图（跌排/涨排更新）——全组每个组员各自的历史
   // 提交记录+7天冷却豁免/dismiss记录，2026-08-17 加入。跟上面单组员版本
@@ -1018,9 +1043,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           .order('id', { ascending: true })
           .range(from, to)
       )
-      const { kwMap, urlSet } = buildSubmissionHistory(rows)
+      const { kwMap, urlSet, newSubmissionKeys } = buildSubmissionHistory(rows)
       setSubmissionHistoryMap(kwMap)
       setSubmissionHistoryUrlSet(urlSet)
+      setPreviousNewSubmissionKeys(newSubmissionKeys)
       setSubmissionHistoryKey(key)
     } catch (error) {
       setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '提交历史加载失败' })
@@ -1292,7 +1318,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, source, search_volume, operation_type: '新增', source_rule_id: source_rule_id ?? null, userId: targetUserId ?? effectiveViewingId }),
+        body: JSON.stringify({
+          keyword,
+          source,
+          search_volume,
+          operation_type: '新增',
+          source_rule_id: source_rule_id ?? null,
+          claimed_date: selectedDate,
+          userId: targetUserId ?? effectiveViewingId,
+        }),
       })
       if (res.status === 409) {
         // Same keyword+day is reserved group-wide (2026-07-29) — someone (maybe
@@ -1391,7 +1425,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       })
       if (!res.ok) {
         setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, [field]: prevValue } : k))
-        setClaimErrorMsg('保存失败，请重试')
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        setClaimErrorMsg(data.error || '保存失败，请重试')
       }
     } catch {
       setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, [field]: prevValue } : k))
@@ -1410,6 +1445,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       setExpandedClaimIds(new Set([claimId]))
       return
     }
+    const identity = claimSubmissionIdentity(claim.keyword, claim.page_url)
+    const historyIsCurrent = submissionHistoryKey === `${activeGroupId}|${effectiveViewingId}`
+    if (historyIsCurrent && claim.operation_type === '新增' && identity && previousNewSubmissionKeys.has(identity)) {
+      setInvalidClaimIds(prev => new Set([...Array.from(prev), claimId]))
+      setExpandedClaimIds(new Set([claimId]))
+      setClaimErrorMsg(`“${claim.keyword}”使用同一网址已经提交过“新增”，请改为“更新”后再提交。`)
+      return
+    }
     setInvalidClaimIds(prev => { const n = new Set(prev); n.delete(claimId); return n })
     setSubmittingOneId(claimId)
     try {
@@ -1417,8 +1460,18 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ claimId, status: 'submitted' }),
       })
-      if (res.ok) setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, status: 'submitted' } : k))
-      else setClaimErrorMsg('提交失败，请重试')
+      if (res.ok) {
+        setClaimedKeywords(prev => prev.map(k => k.id === claimId ? { ...k, status: 'submitted' } : k))
+        if (claim.operation_type === '新增' && identity) {
+          setPreviousNewSubmissionKeys(prev => new Set([...Array.from(prev), identity]))
+        }
+      } else {
+        const data = await res.json().catch(() => ({})) as { error?: string; claimIds?: string[] }
+        const ids = data.claimIds?.length ? data.claimIds : [claimId]
+        setInvalidClaimIds(prev => new Set([...Array.from(prev), ...ids]))
+        setExpandedClaimIds(prev => new Set([...Array.from(prev), ...ids]))
+        setClaimErrorMsg(data.error || '提交失败，请重试')
+      }
     } catch {
       setClaimErrorMsg('提交失败（网络异常），请重试')
     } finally { setSubmittingOneId(null) }
@@ -1436,6 +1489,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           source: '手动添加',
           search_volume: 0,
           userId: effectiveViewingId,
+          claimed_date: selectedDate,
           operation_type: addOpType,
           final_keyword: addFinalKw.trim() || undefined,
           page_url: normalizeUrl(addUrl) || undefined,
@@ -1465,6 +1519,24 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       setExpandedClaimIds(prev => new Set([...Array.from(prev), ...Array.from(ids)]))
       return
     }
+    const historyIsCurrent = submissionHistoryKey === `${activeGroupId}|${effectiveViewingId}`
+    const seenNew = new Set(historyIsCurrent ? previousNewSubmissionKeys : [])
+    const repeatedNew: ClaimedKeyword[] = []
+    for (const claim of pending) {
+      if (claim.operation_type !== '新增' || !claim.page_url) continue
+      const identity = claimSubmissionIdentity(claim.keyword, claim.page_url)
+      if (identity && seenNew.has(identity)) repeatedNew.push(claim)
+      else if (identity) seenNew.add(identity)
+    }
+    if (repeatedNew.length > 0) {
+      const ids = new Set(repeatedNew.map(claim => claim.id))
+      setInvalidClaimIds(ids)
+      setExpandedClaimIds(prev => new Set([...Array.from(prev), ...Array.from(ids)]))
+      setClaimErrorMsg(repeatedNew.length === 1
+        ? `“${repeatedNew[0].keyword}”使用同一网址已经提交过“新增”，请改为“更新”后再提交。`
+        : `有 ${repeatedNew.length} 条记录使用同一关键词和网址重复选择了“新增”，请改为“更新”后再提交。`)
+      return
+    }
     setInvalidClaimIds(new Set())
 
     setSubmitting(true)
@@ -1474,7 +1546,20 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: selectedDate, userId: effectiveViewingId }),
       })
-      if (res.ok) setClaimedKeywords(prev => prev.map(k => k.status === 'pending' ? { ...k, status: 'submitted' } : k))
+      if (res.ok) {
+        setClaimedKeywords(prev => prev.map(k => k.status === 'pending' ? { ...k, status: 'submitted' } : k))
+        setPreviousNewSubmissionKeys(seenNew)
+      } else {
+        const data = await res.json().catch(() => ({})) as { error?: string; claimIds?: string[] }
+        const ids = new Set(data.claimIds ?? [])
+        if (ids.size > 0) {
+          setInvalidClaimIds(ids)
+          setExpandedClaimIds(prev => new Set([...Array.from(prev), ...Array.from(ids)]))
+        }
+        setClaimErrorMsg(data.error || '提交失败，请重试')
+      }
+    } catch {
+      setClaimErrorMsg('提交失败（网络异常），请重试')
     } finally { setSubmitting(false) }
   }
 
