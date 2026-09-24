@@ -552,7 +552,9 @@ async function sendRun(config: CollectorConfig, platform: TrendPlatform, report:
 async function setupPlatform(platform: TrendPlatform) {
   const context = await launchPlatformBrowser(platform)
   const page = context.pages()[0] ?? await context.newPage()
-  await navigateForCollection(page, HOME_URLS[platform])
+  await page.goto(HOME_URLS[platform], { waitUntil: 'commit', timeout: 15_000 }).catch(() => {
+    console.warn(`自动打开失败，请在浏览器地址栏手动输入：${HOME_URLS[platform]}`)
+  })
   const prompt = createInterface({ input, output })
   try {
     await prompt.question(`请在打开的 ${platform} 浏览器中完成登录，确认首页可正常使用后按 Enter 保存登录状态…`)
