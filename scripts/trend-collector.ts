@@ -393,7 +393,12 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
     const placeholder = await input.getAttribute('placeholder').catch(() => '')
     if (value === query || placeholder?.includes('搜索')) {
       await input.click().catch(() => undefined)
-      await page.waitForTimeout(800)
+      // Clicking an already populated Douyin/Xiaohongshu search box does not
+      // consistently reopen autocomplete. Re-entering the same value emits
+      // the input events the sites use to request and render suggestions.
+      await input.fill('').catch(() => undefined)
+      await input.fill(query).catch(() => undefined)
+      await page.waitForTimeout(1_500)
       break
     }
   }
@@ -401,7 +406,9 @@ async function collectSearchSuggestions(page: Page, query: string): Promise<Coll
   type RawSuggestion = { term: string; sourceKind: 'related_search' | 'everyone_search' }
   const autocomplete = await page.evaluate(({ seedQuery }) => {
     const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
-    const input = document.activeElement instanceof HTMLInputElement ? document.activeElement : null
+    const input = [...document.querySelectorAll('input')].find(element => (
+      element.value === seedQuery || element.placeholder.includes('搜索')
+    )) ?? (document.activeElement instanceof HTMLInputElement ? document.activeElement : null)
     if (!input) return [] as string[]
     const inputRect = input.getBoundingClientRect()
     const results = new Set<string>()
