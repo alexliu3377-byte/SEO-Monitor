@@ -599,8 +599,8 @@ async function collectPlatform(config: CollectorConfig, platform: TrendPlatform)
   try {
     context = await launchPlatformBrowser(platform)
     const startupPages = context.pages()
-    const page = await context.newPage()
-    await Promise.all(startupPages.map(startupPage => startupPage.close().catch(() => undefined)))
+    const page = startupPages[0] ?? await context.newPage()
+    await Promise.all(startupPages.slice(1).map(startupPage => startupPage.close().catch(() => undefined)))
     const queries = shuffledForRun(config.platforms[platform].queries)
     console.log(`[${PLATFORM_NAME[platform]}] 本轮随机顺序：${queries.join(' → ')}`)
     for (const query of queries) {
