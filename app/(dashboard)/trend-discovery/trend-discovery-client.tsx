@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   TREND_QUERY_LIMITS,
   type TrendPlatform,
@@ -58,7 +58,6 @@ type TrendSource = {
   }
 }
 
-type Summary = Record<'new' | 'warming' | 'hot' | 'persistent' | 'tracked', number>
 type TrendQueryDrafts = Record<TrendQueryPlatform, string>
 
 const PLATFORM_LABELS: Record<TrendPlatform, string> = {
@@ -75,13 +74,9 @@ const STAGE_META: Record<TrendStage, { label: string; className: string }> = {
   cooling: { label: '热度放缓', className: 'bg-slate-50 text-slate-600 border-slate-200' },
 }
 
-const TABS: { key: string; label: string; summaryKey?: keyof Summary; stage?: TrendStage; review?: TrendReviewStatus }[] = [
-  { key: 'all', label: '全部候选' },
-  { key: 'new', label: '今日新词', summaryKey: 'new', stage: 'new' },
-  { key: 'warming', label: '快速升温', summaryKey: 'warming', stage: 'warming' },
-  { key: 'hot', label: '正在热门', summaryKey: 'hot', stage: 'hot' },
-  { key: 'persistent', label: '持续出现', summaryKey: 'persistent', stage: 'persistent' },
-  { key: 'tracked', label: '已布局', summaryKey: 'tracked', review: 'tracked' },
+const TABS: { key: 'pending' | 'tracked'; label: string }[] = [
+  { key: 'pending', label: '待处理' },
+  { key: 'tracked', label: '已布局' },
 ]
 
 function formatDate(value: string | null, withTime = false) {
@@ -170,13 +165,13 @@ function NodeStatus({ node }: { node: CollectorNode }) {
 
 export default function TrendDiscoveryClient({ initialRole }: { initialRole: Role }) {
   const [workspaceTab, setWorkspaceTab] = useState<'trends' | 'keywords'>('trends')
-  const [activeTab, setActiveTab] = useState('all')
+  const [activeTab, setActiveTab] = useState<'pending' | 'tracked'>('pending')
+  const [stage, setStage] = useState<TrendStage | ''>('')
   const [platform, setPlatform] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [terms, setTerms] = useState<TrendTerm[]>([])
-  const [summary, setSummary] = useState<Summary>({ new: 0, warming: 0, hot: 0, persistent: 0, tracked: 0 })
   const [nodes, setNodes] = useState<CollectorNode[]>([])
   const [total, setTotal] = useState(0)
   const [canManage, setCanManage] = useState(false)
@@ -194,7 +189,6 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [queryDrafts, setQueryDrafts] = useState<TrendQueryDrafts>({ xiaohongshu: '', douyin: '' })
 
-  const selectedTab = useMemo(() => TABS.find(tab => tab.key === activeTab) ?? TABS[0], [activeTab])
   const pageSize = 20
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const selectedScore = selected ? trendScoreBreakdown(selected) : null
@@ -203,8 +197,8 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
     setLoading(true)
     setError('')
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
-    if (selectedTab.stage) params.set('stage', selectedTab.stage)
-    if (selectedTab.review) params.set('review', selectedTab.review)
+    params.set('review', activeTab)
+    if (stage) params.set('stage', stage)
     if (platform) params.set('platform', platform)
     if (search) params.set('q', search)
     try {
@@ -213,7 +207,6 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
       if (!response.ok) throw new Error(data.error || '趋势资料读取失败')
       setTerms(data.terms ?? [])
       setSelectedTermIds(new Set())
-      setSummary(data.summary ?? { new: 0, warming: 0, hot: 0, persistent: 0, tracked: 0 })
       setNodes(data.nodes ?? [])
       setTotal(data.total ?? 0)
       setCanManage(Boolean(data.canManage))
@@ -222,7 +215,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [page, platform, search, selectedTab])
+  }, [activeTab, page, platform, search, stage])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -417,9 +410,6 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                   className={`relative min-h-12 flex-none whitespace-nowrap text-sm font-medium transition-colors ${activeTab === tab.key ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   {tab.label}
-                  {tab.summaryKey && summary[tab.summaryKey] > 0 && (
-                    <span className="ml-1.5 text-xs text-slate-400">{summary[tab.summaryKey]}</span>
-                  )}
                   {activeTab === tab.key && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-emerald-600" />}
                 </button>
               ))}
@@ -436,16 +426,26 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                 className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
               />
             </div>
-            <select
-              value={platform}
-              onChange={event => { setPlatform(event.target.value); setPage(1) }}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            >
-              <option value="">全部平台</option>
-              <option value="xiaohongshu">小红书</option>
-              <option value="douyin">抖音</option>
-              <option value="xiaoheihe">小黑盒</option>
-            </select>
+            <div className="flex w-full gap-2 sm:w-auto">
+              <select value={stage} onChange={event => { setStage(event.target.value as TrendStage | ''); setPage(1) }} className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 sm:flex-none">
+                <option value="">全部阶段</option>
+                <option value="new">今日新词</option>
+                <option value="warming">快速升温</option>
+                <option value="hot">正在热门</option>
+                <option value="persistent">持续出现</option>
+                <option value="cooling">热度放缓</option>
+              </select>
+              <select
+                value={platform}
+                onChange={event => { setPlatform(event.target.value); setPage(1) }}
+                className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 sm:flex-none"
+              >
+                <option value="">全部平台</option>
+                <option value="xiaohongshu">小红书</option>
+                <option value="douyin">抖音</option>
+                <option value="xiaoheihe">小黑盒</option>
+              </select>
+            </div>
           </div>
 
           {error && (

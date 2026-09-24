@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { TrendQueryPlatform } from '@/lib/trend-discovery'
 
 type SuggestionStatus = 'pending' | 'added' | 'ignored'
+type VisibleSuggestionStatus = Exclude<SuggestionStatus, 'ignored'>
 type Suggestion = {
   id: string
   displayTerm: string
@@ -18,10 +19,9 @@ type Suggestion = {
 }
 
 const PLATFORM_LABELS: Record<TrendQueryPlatform, string> = { xiaohongshu: '小红书', douyin: '抖音' }
-const STATUS_TABS: Array<{ key: SuggestionStatus; label: string }> = [
+const STATUS_TABS: Array<{ key: VisibleSuggestionStatus; label: string }> = [
   { key: 'pending', label: '待处理' },
   { key: 'added', label: '已加入采集' },
-  { key: 'ignored', label: '已忽略' },
 ]
 
 function formatDate(value: string) {
@@ -36,7 +36,7 @@ function formatDate(value: string) {
 }
 
 export default function TrendKeywordDiscovery() {
-  const [status, setStatus] = useState<SuggestionStatus>('pending')
+  const [status, setStatus] = useState<VisibleSuggestionStatus>('pending')
   const [platform, setPlatform] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -89,11 +89,11 @@ export default function TrendKeywordDiscovery() {
     return () => window.clearTimeout(timer)
   }, [searchInput])
 
-  async function updateSuggestion(item: Suggestion, action: 'add' | 'ignore' | 'restore') {
+  async function updateSuggestion(item: Suggestion, action: 'add' | 'ignore') {
     await updateSuggestions([item.id], action, action === 'add' ? item.platforms : undefined)
   }
 
-  async function updateSuggestions(ids: string[], action: 'add' | 'ignore' | 'restore', platforms?: TrendQueryPlatform[]) {
+  async function updateSuggestions(ids: string[], action: 'add' | 'ignore', platforms?: TrendQueryPlatform[]) {
     if (ids.length === 0) return
     setSavingId(ids.length === 1 ? ids[0] : 'bulk')
     setError('')
@@ -147,7 +147,7 @@ export default function TrendKeywordDiscovery() {
         <div className="flex gap-6 overflow-x-auto">
           {STATUS_TABS.map(tab => (
             <button key={tab.key} type="button" onClick={() => { setStatus(tab.key); setPage(1) }} className={`relative min-h-12 flex-none text-sm font-medium ${status === tab.key ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-800'}`}>
-              {tab.label}<span className="ml-1.5 text-xs text-slate-400">{counts[tab.key]}</span>
+              {tab.label}{counts[tab.key] > 0 && <span className="ml-1.5 text-xs text-slate-400">{counts[tab.key]}</span>}
               {status === tab.key && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-emerald-600" />}
             </button>
           ))}
@@ -168,13 +168,12 @@ export default function TrendKeywordDiscovery() {
 
       {error && <div className="m-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 sm:m-6">{error}</div>}
 
-      {canManage && (
+      {canManage && status === 'pending' && (
         <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 sm:px-6">
           <span className="text-xs text-slate-500">已选择 <strong className="text-slate-800">{selectedIds.size}</strong> 个新词</span>
           <div className="flex items-center gap-2">
             {status === 'pending' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'add')} className="h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">批量加入采集</button>}
-            {status !== 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'ignore')} className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40">批量忽略</button>}
-            {status === 'ignored' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'restore')} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40">批量恢复</button>}
+            {status === 'pending' && <button type="button" disabled={Boolean(savingId) || selectedIds.size === 0} onClick={() => updateSuggestions([...selectedIds], 'ignore')} className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40">批量忽略</button>}
           </div>
         </div>
       )}
@@ -182,20 +181,20 @@ export default function TrendKeywordDiscovery() {
       <div className="overflow-x-auto">
         <table className="min-w-[1080px] w-full table-fixed">
           <thead className="bg-slate-50/80 text-left text-xs font-medium text-slate-500">
-            <tr><th className="w-12 px-4 py-2.5"><input type="checkbox" aria-label="全选当前页" checked={suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))} onChange={toggleAllSuggestions} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="w-56 px-3 py-2.5">候选新词</th><th className="w-52 px-3 py-2.5">发现位置</th><th className="px-3 py-2.5">由哪些搜索发现</th><th className="w-24 px-3 py-2.5">入口</th><th className="w-40 px-3 py-2.5">最近发现</th><th className="w-48 px-4 py-2.5 text-right">操作</th></tr>
+            <tr><th className="w-12 px-4 py-2.5">{status === 'pending' && <input type="checkbox" aria-label="全选当前页" checked={suggestions.length > 0 && suggestions.every(item => selectedIds.has(item.id))} onChange={toggleAllSuggestions} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />}</th><th className="w-56 px-3 py-2.5">候选新词</th><th className="w-52 px-3 py-2.5">发现位置</th><th className="px-3 py-2.5">由哪些搜索发现</th><th className="w-24 px-3 py-2.5">入口</th><th className="w-40 px-3 py-2.5">最近发现</th><th className="w-48 px-4 py-2.5 text-right">操作</th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? Array.from({ length: 5 }).map((_, index) => <tr key={index} className="animate-pulse"><td colSpan={7} className="px-4 py-3"><div className="h-4 w-full rounded bg-slate-100" /></td></tr>) : suggestions.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-20 text-center"><p className="text-sm font-medium text-slate-700">目前没有{status === 'pending' ? '待处理的' : status === 'added' ? '已加入的' : '已忽略的'}新词</p><p className="mt-1 text-xs text-slate-400">采集到新的平台推荐词后会自动出现在这里。</p></td></tr>
+              <tr><td colSpan={7} className="px-5 py-20 text-center"><p className="text-sm font-medium text-slate-700">目前没有{status === 'pending' ? '待处理的' : '已加入的'}新词</p><p className="mt-1 text-xs text-slate-400">采集到新的平台推荐词后会自动出现在这里。</p></td></tr>
             ) : suggestions.map(item => (
               <tr key={item.id} className={`hover:bg-emerald-50/30 ${selectedIds.has(item.id) ? 'bg-emerald-50/50' : ''}`}>
-                <td className="px-4 py-2.5"><input type="checkbox" aria-label={`选择${item.displayTerm}`} checked={selectedIds.has(item.id)} onChange={() => toggleSuggestion(item.id)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></td>
+                <td className="px-4 py-2.5">{status === 'pending' && <input type="checkbox" aria-label={`选择${item.displayTerm}`} checked={selectedIds.has(item.id)} onChange={() => toggleSuggestion(item.id)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />}</td>
                 <td className="px-3 py-2.5"><p className="truncate text-sm font-semibold text-slate-900">{item.displayTerm}</p></td>
                 <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">{item.platforms.map(value => <span key={value} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{PLATFORM_LABELS[value]}</span>)}<span className="truncate text-xs text-slate-400">{item.sourceKinds.includes('everyone_search') ? '大家都在搜' : '相关搜索'}</span></div></td>
                 <td className="truncate px-3 py-2.5 text-xs text-slate-600" title={item.seedQueries.join('、')}>{item.seedQueries.join('、') || '—'}</td>
                 <td className="px-3 py-2.5 text-xs text-slate-700">{item.observationCount} 个</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-slate-600">{formatDate(item.lastSeenAt)}</td>
-                <td className="px-4 py-2.5"><div className="flex justify-end gap-1.5"><button type="button" onClick={() => setSelectedSuggestion(item)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50">查看</button>{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">加入采集</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button></>}{canManage && status === 'ignored' && <button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'restore')} className="h-8 rounded-lg border border-emerald-200 bg-white px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">恢复</button>}{status === 'added' && <span className="self-center truncate text-xs font-medium text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
+                <td className="px-4 py-2.5"><div className="flex justify-end gap-1.5"><button type="button" onClick={() => setSelectedSuggestion(item)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50">查看</button>{canManage && status === 'pending' && <><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'add')} className="h-8 rounded-lg bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">加入采集</button><button disabled={Boolean(savingId)} onClick={() => updateSuggestion(item, 'ignore')} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button></>}{status === 'added' && <span className="self-center truncate text-xs font-medium text-emerald-700">已加入 {item.addedPlatforms.map(value => PLATFORM_LABELS[value]).join('、')}</span>}</div></td>
               </tr>
             ))}
           </tbody>
