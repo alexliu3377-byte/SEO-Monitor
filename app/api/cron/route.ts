@@ -1,6 +1,7 @@
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
+import { pruneCompetitorDailyHistory } from '@/lib/competitor-daily-retention'
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -318,7 +319,14 @@ export async function GET(request: Request) {
       })
 
       // Cleanup old data (only on keywords step to avoid running 3x per day)
-      // raw_keywords/rank_changes 永久保留，见 scripts/crawl.ts 里同名清理逻辑上的注释
+      // The GitHub Actions crawler is the primary cleanup path. Keep this
+      // manual/API fallback bounded so one Vercel request cannot spend minutes
+      // draining a large historical backlog.
+      try {
+        await pruneCompetitorDailyHistory(supabase, getMalaysiaDate(-40), 3)
+      } catch (error) {
+        console.error('Competitor daily retention cleanup failed; the next run will retry:', error)
+      }
       await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-30))
       await supabase.from('activity_log').delete().lt('logged_at', new Date(Date.now() - 7 * 86400000).toISOString())
     }

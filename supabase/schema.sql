@@ -137,7 +137,7 @@ AS $$
 $$;
 
 -- 热词雷达：各 tab 关键词日期聚合（在 Supabase SQL Editor 执行）
--- get_keyword_dates_new: raw_keywords 30天自动删，无需日期过滤；content_date NULL 时用 discovered_at 兜底
+-- get_keyword_dates_new: raw_keywords 保留40天；content_date NULL 时用 discovered_at 兜底
 DROP FUNCTION IF EXISTS get_keyword_dates_new(date);
 CREATE OR REPLACE FUNCTION get_keyword_dates_new(p_since date)
 RETURNS TABLE(keyword text, first_date date, last_date date)

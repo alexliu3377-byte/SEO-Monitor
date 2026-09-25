@@ -14,6 +14,7 @@ import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 import { fetchAllRows } from '../lib/supabase-paginate'
 import { fetchLatestUrlRanks } from '../lib/tracking-rank-lookup'
+import { pruneCompetitorDailyHistory } from '../lib/competitor-daily-retention'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -326,13 +327,19 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
     await delay(5000)
   }
 
-  // 清理旧数据（只由 group 0 执行，避免多个 job 同时清理）
-  // raw_keywords/rank_changes 2026-08-05 起改为永久保留，不再清理——同一个关键词
-  // 隔了很久又出现时，能靠历史记录判断是"之前见过的"而不是重新算一次新增
-  // （raw_keywords 的去重就是靠 site_id+content_date+keyword 精确匹配历史记录，
-  // 之前删了30天前的记录导致这个匹配会失效，同词同日期隔了30天又抓到就被误判成
-  // 新增）。
+  // 清理旧数据（只由 group 0 执行，避免多个 job 同时清理）。竞品日收的
+  // 昨日新词与排名波动保留40天，足够周报生成并供月报逐层汇总；报告快照、
+  // keyword_volume 与成效追踪记录不在清理范围。按日期逐批删，避免百万行 DELETE
+  // 锁表或超过 PostgREST statement timeout。
   if (isMainGroup) {
+    try {
+      const retention = await pruneCompetitorDailyHistory(supabase, getMalaysiaDate(-40))
+      console.log(`  40天明细清理：${JSON.stringify(retention.removedDatePartitions)}${retention.complete ? '' : '（仍有积压，下轮继续）'}`)
+    } catch (error) {
+      // Retention is maintenance work. A temporary timeout must not turn an
+      // otherwise successful daily collection into a failed/retry run.
+      console.error(`  40天明细清理失败（下轮重试）：${error instanceof Error ? error.message : error}`)
+    }
     await supabase.from('competitor_kw_stats').delete().lt('stat_date', getMalaysiaDate(-30))
     // activity_log 一直文档写着"7天保留"（lib/crawl-rules.ts 的 RETENTION），但
     // 实际清理代码只写在 app/api/cron/route.ts 里——那个路由只有用户点"重抓"

@@ -28,7 +28,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '去重', text: '与数据库同日期已有词对比去重，批次内也去重；新词写入 raw_keywords' },
       { label: '版本号清洗', text: '启用版本号清洗时：发现 v/V 前缀版本号（如 v2.3.1）时，从该版本号起连同其后所有内容一并删除（如"使命召唤v2.3.1安卓版"→"使命召唤"，"世界1.20.4中文版v1.20.4"→"世界1.20.4中文版"）；不含 v 前缀的纯数字版本号（如1.20.4）和独立"xxx版"词组保留不处理' },
       { label: '写入表', text: 'raw_keywords（新词）/ competitor_kw_stats（app/game分类计数）' },
-      { label: '清理', text: '每日关键词步骤结束后由 group0 执行：仅 competitor_kw_stats 30天（2026-08-05 从10天改成30天：竞品日收的趋势图/工作日周末基线按30天取数，保留期比查询窗口短会导致基线样本不足）。raw_keywords / rank_changes 2026-08-05 起改为永久保留，不再清理（原因见下方"数据保留"表）。activity_log 7天清理 2026-08-11 起也移到这里执行——之前这行代码只写在 app/api/cron/route.ts（只有用户点"重抓"按钮才会跑到），每天真正在跑的 GH Actions 主流程从来没清过，导致 activity_log 文档写着"7天保留"、实际攒了快一个月（真实验证过，一次性清理时删掉了超过4000条超期记录）' },
+      { label: '清理', text: '每日关键词步骤结束后由 group0 执行：竞品日收的 raw_keywords（昨日新词）、rank_changes 与 site_keyword_ranks（排名波动）保留40天，按日期逐批删除，足够周报生成并让月报逐层汇总；keyword_volume、研究报告快照与成效追踪记录不删除。competitor_kw_stats 保留30天（趋势图/工作日周末基线按30天取数）；activity_log 保留7天。' },
       { label: '静默失败风险', text: 'HTML fetch 返回空时不报错，只在 activity_log 标记 empty；选择器配置错误会导致持续为空' },
       { label: '日期解析失败', text: '日期CSS选择器未匹配到内容、或匹配到的文本无法识别为日期时，content_date 仍按 yesterday（爬取目标日）填充写库（不存 NULL，避免影响近期榜单/竞品日收/热词雷达等十几处按 content_date 分组统计的下游功能）；但该站点当次解析失败的条数会统计出来，写进 activity_site_log 的 detail（"⚠N条日期解析失败（按昨日填充，请检查日期CSS选择器）"），在抓取日志页面站点明细里可见，用于定位选择器失效的站点' },
     ],
@@ -302,13 +302,13 @@ export const CRAWL_RULES: RuleSection[] = [
 
 // Data retention periods (for reference in the rules modal)
 export const RETENTION = {
-  raw_keywords: '永久保留（2026-08-05 起，此前30天）',
-  rank_changes: '永久保留（2026-08-05 起，此前30天）',
+  raw_keywords: '40天（竞品日收昨日新词，按 content_date）',
+  rank_changes: '40天（普通排名波动，按 stat_date）',
   competitor_kw_stats: '30天（按 stat_date）',
   weight_history: '永久保留',
   index_snapshots: '永久保留',
   keyword_volume: '永久保留',
-  site_keyword_ranks: '永久保留',
+  site_keyword_ranks: '40天（带标题/URL的M/PC排名波动，按 stat_date）',
   competitor_tracking_records: '永久保留',
   site_tracking_records: '永久保留',
   site_tracking_rank_matches: '永久保留',
