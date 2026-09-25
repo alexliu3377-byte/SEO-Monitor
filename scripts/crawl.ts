@@ -330,7 +330,8 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
   // 清理旧数据（只由 group 0 执行，避免多个 job 同时清理）。竞品日收的
   // 昨日新词与排名波动保留40天，足够周报生成并供月报逐层汇总；报告快照、
   // keyword_volume 与成效追踪记录不在清理范围。按日期逐批删，避免百万行 DELETE
-  // 锁表或超过 PostgREST statement timeout。
+  // 锁表或超过 PostgREST statement timeout。每张表每天最多清5个过期日期，
+  // 首次历史积压会慢慢消化，避免与随后开始的权重/排名任务争抢数据库资源。
   if (isMainGroup) {
     try {
       const retention = await pruneCompetitorDailyHistory(supabase, getMalaysiaDate(-40))

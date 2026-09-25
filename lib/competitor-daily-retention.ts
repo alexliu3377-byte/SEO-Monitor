@@ -22,7 +22,7 @@ export interface CompetitorDailyPruneResult {
 export async function pruneCompetitorDailyHistory(
   service: SupabaseLike,
   cutoff: string,
-  maxDatePartitionsPerTable = 120,
+  maxDatePartitionsPerTable = 5,
 ): Promise<CompetitorDailyPruneResult> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) throw new Error('Invalid competitor daily retention cutoff')
   const removedDatePartitions: Record<string, string[]> = {}
