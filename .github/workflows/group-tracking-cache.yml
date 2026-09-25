@@ -4,6 +4,7 @@ on:
   # Daily execution is chained from retry-crawl.yml after the final retry.
   # Keep this workflow as a manual recovery entry point.
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   setup:

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
+import { dispatchGitHubWorkflow } from '@/lib/github-actions'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
-export const maxDuration = 600
+export const maxDuration = 15
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -29,36 +30,22 @@ export async function POST(request: Request) {
     const { data: site, error: siteError } = await service.from('sites').select('domain').eq('id', siteId).single()
     if (siteError || !site) return NextResponse.json({ error: '站点不存在' }, { status: 404 })
 
-    const secret = process.env.CRON_SECRET
-    if (!secret) return NextResponse.json({ error: '服务未配置 CRON_SECRET' }, { status: 500 })
-    const origin = new URL(request.url).origin
-    let tracking: { refreshed: boolean; skippedReason?: string; result?: unknown } = { refreshed: false }
-
-    // The current tracking pipeline creates one daily snapshot. Historical
-    // workbook imports remain available to reports, but must not be rewritten
-    // as if they were observed today.
-    if (statDate === malaysiaToday()) {
-      const trackingResponse = await fetch(
-        `${origin}/api/cron?step=tracking&site=${encodeURIComponent(site.domain)}`,
-        { headers: { Authorization: `Bearer ${secret}` }, cache: 'no-store' },
-      )
-      const trackingResult = await trackingResponse.json().catch(() => null)
-      if (!trackingResponse.ok) throw new Error(trackingResult?.error || '成效追踪刷新失败')
-      tracking = { refreshed: true, result: trackingResult }
-    } else {
-      tracking = { refreshed: false, skippedReason: '历史日期不重写为今天的竞品成效快照' }
-    }
-
-    const cacheResponse = await fetch(`${origin}/api/tracking-cache/refresh`, {
-      headers: { Authorization: `Bearer ${secret}` },
-      cache: 'no-store',
+    const refreshTracking = statDate === malaysiaToday()
+    const dispatch = await dispatchGitHubWorkflow('rank-import-effectiveness.yml', {
+      site: site.domain,
+      stat_date: statDate,
+      refresh_tracking: String(refreshTracking),
     })
-    const cacheResult = await cacheResponse.json().catch(() => null)
-    if (!cacheResponse.ok || cacheResult?.success !== true) {
-      throw new Error(cacheResult?.error || '成效报告缓存刷新失败')
-    }
+    if (!dispatch.ok) return NextResponse.json({ error: dispatch.error }, { status: dispatch.status })
 
-    return NextResponse.json({ success: true, tracking, cache: cacheResult })
+    return NextResponse.json({
+      success: true,
+      queued: true,
+      refreshTracking,
+      message: refreshTracking
+        ? '已提交 GitHub Actions：先更新当天竞品/组员成效，再重建成效缓存'
+        : '已提交 GitHub Actions：历史日期不生成今天的竞品快照，只重建成效缓存',
+    }, { status: 202 })
   } catch (error) {
     console.error('Imported rank effectiveness refresh failed', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : '刷新失败' }, { status: 500 })

@@ -39,7 +39,9 @@ interface ImportResult extends PreviewResult {
 
 interface RefreshResult {
   success: true
-  tracking: { refreshed: boolean; skippedReason?: string }
+  queued: true
+  refreshTracking: boolean
+  message: string
 }
 
 function malaysiaToday(): string {
@@ -149,8 +151,7 @@ export default function RankDataImportModal({ sites, onClose }: { sites: ImportS
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               已导入 {result.importedRankRows.toLocaleString()} 条排名资料
               {result.importedKeywordVolumeRows > 0 && `，同步 ${result.importedKeywordVolumeRows.toLocaleString()} 个搜索量关键词`}
-              {refreshResult?.tracking.refreshed && '；当天竞品/组员成效已重算，成效缓存已重建'}
-              {refreshResult && !refreshResult.tracking.refreshed && '；历史排名已保留，成效缓存已重建（未改写今天的竞品快照）'}。
+              {refreshResult && `；${refreshResult.message}`}。
             </div>
           )}
 

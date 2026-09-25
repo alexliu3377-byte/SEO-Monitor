@@ -1,0 +1,41 @@
+name: Rank Import Effectiveness Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: 'Imported site domain'
+        required: true
+        type: string
+      stat_date:
+        description: 'Imported data date (YYYY-MM-DD)'
+        required: true
+        type: string
+      refresh_tracking:
+        description: 'Refresh today competitor/member tracking before rebuilding caches'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  tracking:
+    if: ${{ inputs.refresh_tracking }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refresh tracking for ${{ inputs.site }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+          SITE: ${{ inputs.site }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/cron?step=tracking&site=$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["SITE"]))')")
+          echo "$RESPONSE"
+
+  rebuild-caches:
+    if: ${{ always() }}
+    needs: tracking
+    uses: ./.github/workflows/group-tracking-cache.yml
+    secrets: inherit
