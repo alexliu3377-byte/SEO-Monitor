@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useUser } from '@/lib/user-context'
 import SiteAZPicker, { type AZPickerSite } from '@/components/site-az-picker'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
+import AppDialog from '@/components/app-dialog'
 
 // ─── Shared ──────────────────────────────────────────────────────────────
 
@@ -15,54 +16,94 @@ function Spinner() {
   )
 }
 
-type TabKey = 'competitors' | 'diagnostic' | 'commercial' | 'week' | 'month' | 'quarter' | 'year'
+type ResearchSection = 'effectiveness' | 'commercial' | 'reports'
+type EffectivenessView = 'competitors' | 'diagnostic'
+type ReportPeriod = 'week' | 'month' | 'quarter' | 'year'
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'competitors', label: '竞品成效' },
-  { key: 'diagnostic', label: '站点诊断' },
-  { key: 'commercial', label: '商业词' },
-  { key: 'week', label: '研究周报' },
-  { key: 'month', label: '研究月报' },
-  { key: 'quarter', label: '研究季报' },
-  { key: 'year', label: '研究年报' },
+const RESEARCH_SECTIONS: { key: ResearchSection; label: string }[] = [
+  { key: 'effectiveness', label: '成效与诊断' },
+  { key: 'commercial', label: '商业词研究' },
+  { key: 'reports', label: '研究报告' },
+]
+
+const REPORT_PERIODS: { key: ReportPeriod; label: string }[] = [
+  { key: 'week', label: '周报' },
+  { key: 'month', label: '月报' },
+  { key: 'quarter', label: '季报' },
+  { key: 'year', label: '年报' },
 ]
 
 // 2026-08-26 起研究中心对普通组员开放，但只开周报/月报——竞品成效、站点诊断、
 // 季报、年报信息量更大/更偏管理决策，继续只给 super/admin。对应的后端接口
 // （/api/research/reports 及 [id]）也要跟着放宽+按 period_type 二次校验，不能
 // 只在前端藏tab，不然普通组员直接改URL参数还是能拿到季报/年报数据。
-const NORMAL_ALLOWED_TABS: TabKey[] = ['week', 'month']
+const NORMAL_ALLOWED_PERIODS: ReportPeriod[] = ['week', 'month']
 
 export default function ResearchPage() {
   const { role } = useUser()
   const isNormal = role === 'normal'
-  const visibleTabs = isNormal ? TABS.filter(t => NORMAL_ALLOWED_TABS.includes(t.key)) : TABS
+  const visibleSections = isNormal ? RESEARCH_SECTIONS.filter(section => section.key === 'reports') : RESEARCH_SECTIONS
+  const visibleReportPeriods = isNormal
+    ? REPORT_PERIODS.filter(period => NORMAL_ALLOWED_PERIODS.includes(period.key))
+    : REPORT_PERIODS
 
-  const [activeTab, setActiveTab] = useState<TabKey>(isNormal ? 'week' : 'competitors')
+  const [activeSection, setActiveSection] = useState<ResearchSection>(isNormal ? 'reports' : 'effectiveness')
+  const [effectivenessView, setEffectivenessView] = useState<EffectivenessView>('competitors')
+  const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('week')
+
+  useEffect(() => {
+    if (isNormal && activeSection !== 'reports') setActiveSection('reports')
+    if (isNormal && !NORMAL_ALLOWED_PERIODS.includes(reportPeriod)) setReportPeriod('week')
+  }, [activeSection, isNormal, reportPeriod])
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-4">
         <h1 className="text-xl font-bold text-gray-900">研究中心</h1>
-        <p className="text-sm text-gray-400 mt-0.5">竞品成效追踪 + 每周/月/年自动生成的AI研究报告</p>
+        <p className="text-sm text-gray-400 mt-0.5">竞品成效追踪与每周、每月、每季、每年自动生成的 AI 研究报告</p>
       </div>
 
-      <div className="flex border-b border-gray-100 mb-6">
-        {visibleTabs.map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === t.key ? 'text-green-600 border-green-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {visibleSections.length > 1 && (
+        <nav className="mb-6 flex border-b border-gray-200" aria-label="研究中心栏目">
+          {visibleSections.map(section => (
+            <button key={section.key} type="button" onClick={() => setActiveSection(section.key)}
+              className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${activeSection === section.key ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {section.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-      {activeTab === 'competitors' && <CompetitorsTab />}
-      {activeTab === 'diagnostic' && <SiteDiagnosticTab />}
-      {activeTab === 'commercial' && <CommercialKeywordsTab />}
-      {activeTab === 'week' && <ReportTab key="week" periodType="week" />}
-      {activeTab === 'month' && <ReportTab key="month" periodType="month" />}
-      {activeTab === 'quarter' && <ReportTab key="quarter" periodType="quarter" />}
-      {activeTab === 'year' && <ReportTab key="year" periodType="year" />}
+      {activeSection === 'effectiveness' && !isNormal && (
+        <>
+          <div className="mb-5 inline-flex rounded-lg border border-gray-200 bg-white p-1" aria-label="成效与诊断视图">
+            {([
+              { key: 'competitors' as const, label: '竞品成效' },
+              { key: 'diagnostic' as const, label: '站点诊断' },
+            ]).map(view => (
+              <button key={view.key} type="button" onClick={() => setEffectivenessView(view.key)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${effectivenessView === view.key ? 'bg-green-50 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}>
+                {view.label}
+              </button>
+            ))}
+          </div>
+          {effectivenessView === 'competitors' ? <CompetitorsTab /> : <SiteDiagnosticTab />}
+        </>
+      )}
+      {activeSection === 'commercial' && !isNormal && <CommercialKeywordsTab />}
+      {activeSection === 'reports' && (
+        <>
+          <div className="mb-5 flex flex-wrap gap-2" aria-label="报告周期">
+            {visibleReportPeriods.map(period => (
+              <button key={period.key} type="button" onClick={() => setReportPeriod(period.key)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${reportPeriod === period.key ? 'border-green-200 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700'}`}>
+                {period.label}
+              </button>
+            ))}
+          </div>
+          <ReportTab key={reportPeriod} periodType={reportPeriod} />
+        </>
+      )}
     </div>
   )
 }
@@ -652,9 +693,21 @@ function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-800">新增词组</h3>
+    <AppDialog
+      title="新增词组"
+      onClose={onClose}
+      width="max-w-md"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6"
+      footer={(
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+          <button type="button" onClick={save} disabled={saving || !conceptName.trim()} className="btn-primary disabled:opacity-50">
+            {saving ? '保存中…' : '保存词组'}
+          </button>
+        </div>
+      )}
+    >
+      <div className="space-y-4">
         <div className="space-y-1.5">
           <label className="text-xs text-gray-500">概念名称</label>
           <input aria-label="输入内容" value={conceptName} onChange={e => setConceptName(e.target.value)} placeholder="例如：纸飞机"
@@ -677,15 +730,8 @@ function NewGroupModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           </div>
         </div>
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <div className="flex items-center justify-end gap-2 pt-1">
-          <button onClick={onClose} className="px-3 py-1.5 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">取消</button>
-          <button onClick={save} disabled={saving || !conceptName.trim()}
-            className="px-4 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50">
-            {saving ? '保存中…' : '保存词组'}
-          </button>
-        </div>
       </div>
-    </div>
+    </AppDialog>
   )
 }
 
@@ -721,23 +767,28 @@ function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-5 space-y-3" onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-gray-800">批量导入</h3>
-        <p className="text-xs text-gray-400">一行一组，同一组内用顿号/逗号隔开多个别名，单次最多100个词（含别名展开后）。</p>
+    <AppDialog
+      title="批量导入"
+      description="一行一组，同一组内用顿号或逗号隔开多个别名，单次最多 100 个词（含别名展开后）。"
+      onClose={onClose}
+      width="max-w-lg"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6"
+      footer={(
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+          <button type="button" onClick={save} disabled={saving || !pasteText.trim()} className="btn-primary disabled:opacity-50">
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      )}
+    >
+      <div className="space-y-3">
         <textarea aria-label="输入详细内容" value={pasteText} onChange={e => setPasteText(e.target.value)}
           placeholder={'纸飞机、telegram、telegreat、telegraph\nLetstalk'} rows={8}
           className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 resize-none" />
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <div className="flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 text-xs font-medium bg-white text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">取消</button>
-          <button onClick={save} disabled={saving || !pasteText.trim()}
-            className="px-4 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50">
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
       </div>
-    </div>
+    </AppDialog>
   )
 }
 
@@ -1368,20 +1419,26 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
     : sites
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[80vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-gray-800">管理竞品站点</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    <AppDialog
+      title="管理竞品站点"
+      description={'勾选的站点会开启“排名”追踪，每天自动统计新增内容的成效。'}
+      onClose={onClose}
+      width="max-w-xl"
+      bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
+      footer={(
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+          <button type="button" onClick={save} disabled={saving} className="btn-primary disabled:opacity-50">
+            {saving ? '保存中…' : '保存'}
           </button>
         </div>
-        <div className="px-6 py-3 border-b border-gray-100">
+      )}
+    >
+        <div className="border-b border-gray-100 px-5 py-3 sm:px-6">
           <input aria-label="输入内容" type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索域名或站点名…" autoFocus
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-          <p className="text-xs text-gray-400 mt-1.5">勾选的站点会开启"排名"追踪，每天自动统计新增内容的成效</p>
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
         </div>
-        <div className="px-6 py-3 overflow-y-auto flex-1">
+        <div className="flex-1 overflow-y-auto px-5 py-3 sm:px-6">
           {loading ? <Spinner /> : filtered.length === 0 ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的站点</p>
           ) : (
@@ -1396,15 +1453,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
             </div>
           )}
         </div>
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
-          <button onClick={save} disabled={saving}
-            className="px-4 py-2 text-sm font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </AppDialog>
   )
 }
 

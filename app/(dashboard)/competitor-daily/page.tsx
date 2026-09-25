@@ -6,6 +6,7 @@ import { fetchAllRows } from '@/lib/supabase-paginate'
 import { buildGroupMaps, groupSortedRows } from '@/lib/company-groups'
 import { useUser } from '@/lib/user-context'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
+import AppDialog from '@/components/app-dialog'
 import { computeKwStatus } from '@/lib/kw-status'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
@@ -759,12 +760,13 @@ export default function CompetitorDailyPage() {
 
       {/* 昨日新词 Modal */}
       {selectedSite && (
-        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-gray-900">{selectedSite.domain} · 新词</h3>
+        <AppDialog
+          title={`${selectedSite.domain} · 新词`}
+          onClose={() => setSelectedSite(null)}
+          width="max-w-lg"
+          bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
+          headerActions={(
+            <>
                 <input aria-label="选择日期"
                   type="date"
                   value={kwDate}
@@ -772,8 +774,6 @@ export default function CompetitorDailyPage() {
                   onChange={(e) => handleKwDateChange(e.target.value)}
                   className="text-sm border border-gray-200 rounded px-2 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
-              </div>
-              <div className="flex items-center gap-2">
                 {role !== 'normal' && (
                   <button
                     onClick={triggerKwCrawl}
@@ -783,13 +783,9 @@ export default function CompetitorDailyPage() {
                     {kwCrawling ? '提交中…' : '重抓'}
                   </button>
                 )}
-                <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+            </>
+          )}
+        >
             {kwCrawlMsg && (
               <p className={`text-xs px-5 py-1.5 border-b border-gray-100 ${kwCrawlMsg.ok ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
                 {kwCrawlMsg.text}
@@ -834,7 +830,7 @@ export default function CompetitorDailyPage() {
                     <li key={i} className="flex items-start justify-between gap-2 py-1.5 border-b border-gray-50">
                       <span className="text-sm text-gray-900">{kw.keyword}</span>
                       <span className="text-xs text-gray-400 flex-shrink-0">
-                        {(kw.content_date ?? kwDate).slice(5).replace('-', '/')}
+                        {(kw.content_date ?? kwDate).replaceAll('-', '/')}
                       </span>
                     </li>
                   ))}
@@ -849,8 +845,7 @@ export default function CompetitorDailyPage() {
               onPageChange={handleKwPageChange}
               onPageSizeChange={handleKwPageSizeChange}
             />
-          </div>
-        </div>
+        </AppDialog>
       )}
 
       {/* 更新词库 Modal */}
@@ -859,19 +854,13 @@ export default function CompetitorDailyPage() {
         const cleanFrom = cleanPage * pageSize
         const pageClean = cleanedEntries.slice(cleanFrom, cleanFrom + pageSize)
         return (
-          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-                <div>
-                  <h3 className="font-semibold text-gray-900">{cleanSite.domain} · 更新词库</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">近30天持续更新的词条，按出现天数排序</p>
-                </div>
-                <button onClick={() => setCleanSite(null)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+          <AppDialog
+            title={`${cleanSite.domain} · 更新词库`}
+            description="近 30 天持续更新的词条，按出现天数排序。"
+            onClose={() => setCleanSite(null)}
+            width="max-w-lg"
+            bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
+          >
               <div className="flex-1 overflow-y-auto px-5 py-4">
                 {cleanLoading ? (
                   <div className="flex items-center justify-center py-10 text-gray-400 gap-2">
@@ -920,19 +909,19 @@ export default function CompetitorDailyPage() {
                 onPageChange={(p) => setCleanPage(p)}
                 onPageSizeChange={(ps) => { setPageSize(ps); setCleanPage(0) }}
               />
-            </div>
-          </div>
+          </AppDialog>
         )
       })()}
 
       {/* 排名变动 Modal */}
       {rankSite && (
-        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-gray-900">{rankSite.domain} · 排名变动</h3>
+        <AppDialog
+          title={`${rankSite.domain} · 排名变动`}
+          onClose={() => setRankSite(null)}
+          width="max-w-lg"
+          bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
+          headerActions={(
+            <>
                 <input aria-label="选择日期"
                   type="date"
                   value={rankDate}
@@ -940,8 +929,6 @@ export default function CompetitorDailyPage() {
                   onChange={(e) => handleRankDateChange(e.target.value)}
                   className="text-sm border border-gray-200 rounded px-2 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500"
                 />
-              </div>
-              <div className="flex items-center gap-2">
                 {role !== 'normal' && (
                   <button
                     onClick={triggerRankCrawl}
@@ -951,13 +938,9 @@ export default function CompetitorDailyPage() {
                     {rankCrawling ? '提交中…' : '重抓'}
                   </button>
                 )}
-                <button onClick={() => setRankSite(null)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+            </>
+          )}
+        >
             {rankCrawlMsg && (
               <p className={`text-xs px-5 py-1.5 border-b border-gray-100 ${rankCrawlMsg.ok ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>
                 {rankCrawlMsg.text}
@@ -1028,21 +1011,18 @@ export default function CompetitorDailyPage() {
               onPageChange={handleRankPageChange}
               onPageSizeChange={handleRankPageSizeChange}
             />
-          </div>
-        </div>
+        </AppDialog>
       )}
 
       {/* 趋势 Modal */}
       {trendSite && (
-        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTrendSite(null)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-800">{trendSite.domain} · 新增趋势</h3>
-                <p className="text-xs text-gray-400 mt-0.5">近30天每日新增关键词数量</p>
-              </div>
-              <button onClick={() => setTrendSite(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
-            </div>
+        <AppDialog
+          title={`${trendSite.domain} · 新增趋势`}
+          description="近 30 天每日新增关键词数量。"
+          onClose={() => setTrendSite(null)}
+          width="max-w-lg"
+          bodyClassName="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6"
+        >
             <div className="mt-4">
               {trendSite.trend.length < 2 ? (
                 <p className="text-sm text-gray-400 text-center py-8">暂无趋势数据</p>
@@ -1063,8 +1043,7 @@ export default function CompetitorDailyPage() {
               <span>周末均值参考：<span className="font-semibold text-gray-800">{trendSite.weekendBaseline.toLocaleString()}</span></span>
               <span>昨日新增：<span className="font-semibold text-gray-800">{trendSite.yesterday.toLocaleString()}</span></span>
             </div>
-          </div>
-        </div>
+        </AppDialog>
       )}
 
       {/* 不稳定词 Modal */}
@@ -1073,19 +1052,13 @@ export default function CompetitorDailyPage() {
         const unstableFrom = unstablePage * pageSize
         const pageUnstable = unstableData.slice(unstableFrom, unstableFrom + pageSize)
         return (
-          <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-                <div>
-                  <h3 className="font-semibold text-gray-900">{unstableSite.domain} · 不稳定词</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">近30天在涨入和跌出均出现过的词，按波动天数排序</p>
-                </div>
-                <button onClick={() => setUnstableSite(null)} className="text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+          <AppDialog
+            title={`${unstableSite.domain} · 不稳定词`}
+            description="近 30 天在涨入和跌出均出现过的词，按波动天数排序。"
+            onClose={() => setUnstableSite(null)}
+            width="max-w-xl"
+            bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
+          >
               <div className="flex-1 overflow-y-auto">
                 {unstableLoading ? (
                   <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
@@ -1129,8 +1102,7 @@ export default function CompetitorDailyPage() {
                 onPageChange={(p) => setUnstablePage(p)}
                 onPageSizeChange={(ps) => { setPageSize(ps); setUnstablePage(0) }}
               />
-            </div>
-          </div>
+          </AppDialog>
         )
       })()}
     </div>
