@@ -1,5 +1,5 @@
 export type LatestUrlRankRow = {
-  id: string
+  id: string | number
   url: string
   keyword: string
   rank_position: number | null
@@ -86,6 +86,6 @@ export async function fetchLatestUrlRanks(service: any, urls: string[]): Promise
     const aRank = a.rank_position ?? Number.MAX_SAFE_INTEGER
     const bRank = b.rank_position ?? Number.MAX_SAFE_INTEGER
     if (aRank !== bRank) return aRank - bRank
-    return a.id.localeCompare(b.id)
+    return String(a.id).localeCompare(String(b.id))
   })
 }

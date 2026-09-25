@@ -43,37 +43,41 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const memberId = canSeeAll && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(filterMember)
     ? filterMember
     : null
-  const fastPage = await loadFastOutcomesPage(service, {
-    p_group_id: groupId,
-    p_visible_user_id: canSeeAll ? null : userId,
-    p_member_id: memberId,
-    p_operation_type: filterOp,
-    p_keyword: filterKw,
-    p_indexed: filterIndex,
-    p_rank_keyword: filterRankKw,
-    p_effectiveness: filterEffectiveness,
-    p_sort_by: sortBy,
-    p_sort_dir: sortDir,
-    p_offset: page * pageSize,
-    p_limit: pageSize,
-  })
+  let fastPage: Awaited<ReturnType<typeof loadFastOutcomesPage>>
+  try {
+    fastPage = await loadFastOutcomesPage(service, {
+      p_group_id: groupId,
+      p_visible_user_id: canSeeAll ? null : userId,
+      p_member_id: memberId,
+      p_operation_type: filterOp,
+      p_keyword: filterKw,
+      p_indexed: filterIndex,
+      p_rank_keyword: filterRankKw,
+      p_effectiveness: filterEffectiveness,
+      p_sort_by: sortBy,
+      p_sort_dir: sortDir,
+      p_offset: page * pageSize,
+      p_limit: pageSize,
+    })
+  } catch (error) {
+    console.error('Group tracking fast cache read failed', { groupId, error })
+    return NextResponse.json({ error: '成效缓存读取失败，请稍后重试' }, { status: 500 })
+  }
   if (fastPage) {
     const cachedRows = Array.isArray((fastPage as { rows?: unknown }).rows)
       ? (fastPage as { rows: EnrichedTrackRow[] }).rows
       : []
-    // Caches written before M/PC evidence was introduced do not contain
-    // device_rankings. Bypass them once so the shared fallback recomputes and
-    // rewrites the cache with independently scored device data.
-    const hasDeviceAwarePayload = cachedRows.length === 0
-      || cachedRows.every(row => Array.isArray(row.device_rankings))
-    if (hasDeviceAwarePayload) {
-      const names = await resolveUserDisplayNames(service, cachedRows.map(row => row.user_id))
-      const rows = cachedRows.map(row => ({
-        ...row,
-        username: names.get(row.user_id) ?? row.username,
-      }))
-      return NextResponse.json({ ...fastPage, rows, page, pageSize, truncated: false })
-    }
+    // A legacy cache may predate independent M/PC evidence. Keep serving that
+    // usable page until the scheduled cache refresh upgrades it; forcing a
+    // full group recompute during an interactive request can exceed the route
+    // timeout and makes a healthy cache look like a network failure.
+    const names = await resolveUserDisplayNames(service, cachedRows.map(row => row.user_id))
+    const rows = cachedRows.map(row => ({
+      ...row,
+      username: names.get(row.user_id) ?? row.username,
+      device_rankings: Array.isArray(row.device_rankings) ? row.device_rankings : [],
+    }))
+    return NextResponse.json({ ...fastPage, rows, page, pageSize, truncated: false })
   }
 
   // 2026-08-18：这张表原来的"实时查site_tracking_records全量+批量查认领来源/
@@ -82,7 +86,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 进去，见 lib/group-tracking-cache.ts + app/api/tracking-cache/refresh）。
   // 缓存没命中（刚上线还没跑过定时任务、或者这个分组是新建的）才现场算一次
   // 并顺手写回，跟 hot_radar_cache 的兜底逻辑一致。
-  const { rows: allRows, computedAt, fromCache } = await loadGroupTrackingPayload(service, groupId)
+  let trackingPayload: Awaited<ReturnType<typeof loadGroupTrackingPayload>>
+  try {
+    trackingPayload = await loadGroupTrackingPayload(service, groupId)
+  } catch (error) {
+    console.error('Group tracking payload calculation failed', { groupId, error })
+    return NextResponse.json({ error: '成效资料计算失败，后台已记录具体错误' }, { status: 500 })
+  }
+  const { rows: allRows, computedAt, fromCache } = trackingPayload
 
   // 原来 applyTrackFilters 里对 DB 的过滤（user_id/operation_type/submit_date）
   // 现在改成对缓存数组的内存过滤——effectiveness 依然不在这一批里（原因见下

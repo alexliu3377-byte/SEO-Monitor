@@ -37,24 +37,20 @@ const REPORT_PERIODS: { key: ReportPeriod; label: string }[] = [
 // 季报、年报信息量更大/更偏管理决策，继续只给 super/admin。对应的后端接口
 // （/api/research/reports 及 [id]）也要跟着放宽+按 period_type 二次校验，不能
 // 只在前端藏tab，不然普通组员直接改URL参数还是能拿到季报/年报数据。
-const NORMAL_ALLOWED_PERIODS: ReportPeriod[] = ['week', 'month']
-
 export default function ResearchPage() {
   const { role } = useUser()
   const isNormal = role === 'normal'
-  const visibleSections = isNormal ? RESEARCH_SECTIONS.filter(section => section.key === 'reports') : RESEARCH_SECTIONS
-  const visibleReportPeriods = isNormal
-    ? REPORT_PERIODS.filter(period => NORMAL_ALLOWED_PERIODS.includes(period.key))
-    : REPORT_PERIODS
+  const visibleSections = isNormal
+    ? RESEARCH_SECTIONS.filter(section => section.key !== 'effectiveness')
+    : RESEARCH_SECTIONS
 
   const [activeSection, setActiveSection] = useState<ResearchSection>(isNormal ? 'reports' : 'effectiveness')
   const [effectivenessView, setEffectivenessView] = useState<EffectivenessView>('competitors')
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('week')
 
   useEffect(() => {
-    if (isNormal && activeSection !== 'reports') setActiveSection('reports')
-    if (isNormal && !NORMAL_ALLOWED_PERIODS.includes(reportPeriod)) setReportPeriod('week')
-  }, [activeSection, isNormal, reportPeriod])
+    if (isNormal && activeSection === 'effectiveness') setActiveSection('reports')
+  }, [activeSection, isNormal])
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -90,11 +86,11 @@ export default function ResearchPage() {
           {effectivenessView === 'competitors' ? <CompetitorsTab /> : <SiteDiagnosticTab />}
         </>
       )}
-      {activeSection === 'commercial' && !isNormal && <CommercialKeywordsTab />}
+      {activeSection === 'commercial' && <CommercialKeywordsTab />}
       {activeSection === 'reports' && (
         <>
           <div className="mb-5 flex flex-wrap gap-2" aria-label="报告周期">
-            {visibleReportPeriods.map(period => (
+            {REPORT_PERIODS.map(period => (
               <button key={period.key} type="button" onClick={() => setReportPeriod(period.key)}
                 className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${reportPeriod === period.key ? 'border-green-200 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700'}`}>
                 {period.label}
@@ -543,10 +539,10 @@ function CommercialKeywordsTab() {
         </div>
       </div>
 
-      <div className="flex gap-1.5">
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1" aria-label="商业词研究视图">
         {([['list', '词组库'], ['discoveries', '新词发现']] as const).map(([key, label]) => (
-          <button key={key} onClick={() => setSubView(key)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${subView === key || (key === 'list' && subView === 'detail') ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200 hover:text-gray-700'}`}>
+          <button key={key} type="button" onClick={() => setSubView(key)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${subView === key || (key === 'list' && subView === 'detail') ? 'bg-green-50 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}

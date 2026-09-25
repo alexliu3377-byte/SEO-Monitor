@@ -202,7 +202,10 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
       setMessagePage(body.page ?? targetPage)
       setCanReply(Boolean(body.canReply))
       setPriorityDiscussion(Boolean(body.priority))
-      if (targetPage === 1) setItems(previous => previous.map(item => item.id === requestId ? { ...item, has_unread: false } : item))
+      if (targetPage === 1) {
+        setItems(previous => previous.map(item => item.id === requestId ? { ...item, has_unread: false } : item))
+        window.dispatchEvent(new Event('feedback-unread-changed'))
+      }
     } catch (err) {
       setMessageError(err instanceof Error ? err.message : '沟通记录加载失败')
     } finally {

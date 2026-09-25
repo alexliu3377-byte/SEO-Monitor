@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!['super', 'admin', 'normal'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // 词组详情页只查当前这一个组的覆盖（比查全部快很多），不传 groupName 时
   // 保留原来的全量模式（代码留着，前端目前只会走带 groupName 的路径）。

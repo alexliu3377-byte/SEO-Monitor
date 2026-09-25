@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 
-async function requireAdmin() {
+async function requireResearchAccess() {
   const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!['super', 'admin', 'normal'].includes(profile?.role)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   return { user, service }
 }
 
@@ -19,7 +19,7 @@ const VALID_STATUSES = ['pending', 'accepted']
 // 命中证据（见 scripts/crawl-rank.ts 的 upsertDiscovery）。默认只看待审核的，
 // 按"为什么值得看"排序：出现过的站点数多、命中次数多、排名好的排前面。
 export async function GET(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { service } = ctx
 
@@ -125,7 +125,7 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { user, service } = ctx
 

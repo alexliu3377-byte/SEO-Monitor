@@ -194,6 +194,7 @@ export default function Sidebar() {
   const { role } = useUser()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [feedbackUnread, setFeedbackUnread] = useState(0)
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(
     CONTENT_ITEMS
       .filter(item => item.children?.some(child => pathname === child.href || pathname.startsWith(`${child.href}/`)))
@@ -224,6 +225,35 @@ export default function Sidebar() {
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
+
+  useEffect(() => {
+    if (pathname.startsWith('/app-updates')) {
+      setFeedbackUnread(0)
+      return
+    }
+    let cancelled = false
+    async function loadFeedbackUnread() {
+      try {
+        const response = await fetch('/api/feedback?summary=unread', { cache: 'no-store' })
+        if (!response.ok) return
+        const body = await response.json() as { unreadCount?: number }
+        if (!cancelled) setFeedbackUnread(Math.max(0, Number(body.unreadCount) || 0))
+      } catch {
+        // Keep the last known count when a background refresh fails.
+      }
+    }
+    const refresh = () => { void loadFeedbackUnread() }
+    refresh()
+    const interval = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    window.addEventListener('feedback-unread-changed', refresh)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('feedback-unread-changed', refresh)
+    }
+  }, [pathname, role])
 
   useEffect(() => {
     if (!isMobile || !mobileOpen) return
@@ -399,6 +429,7 @@ export default function Sidebar() {
           const isActive = item.href === '/content'
             ? pathname === '/content'
             : pathname.startsWith(item.href)
+          const isFeedbackItem = item.href.endsWith('/feedback')
           return (
             <Link
               key={item.href}
@@ -411,7 +442,15 @@ export default function Sidebar() {
               }`}
             >
               {item.icon}
-              {item.label}
+              <span>{item.label}</span>
+              {isFeedbackItem && feedbackUnread > 0 && (
+                <span
+                  aria-label={`${feedbackUnread} 条新反馈信息`}
+                  className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold leading-none text-slate-950"
+                >
+                  {feedbackUnread > 99 ? '99+' : feedbackUnread}
+                </span>
+              )}
             </Link>
           )
         })}

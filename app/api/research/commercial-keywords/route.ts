@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
-async function requireAdmin() {
+async function requireResearchAccess() {
   const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!['super', 'admin', 'normal'].includes(profile?.role)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   return { user, service }
 }
 
@@ -26,7 +26,7 @@ function parseLine(line: string): string[] {
 // 变体，那部分现查现用不落库，见 coverage/route.ts）。同一个 group_name 下的
 // 几个词是同一个商业概念的不同别名，查覆盖时会归拢在一起展示。2026-08-28 新增。
 export async function GET() {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { service } = ctx
 
@@ -40,7 +40,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { user, service } = ctx
 
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
 // "加入词组"表单本来就能手动改归属组名，不影响功能，只是标签显示旧名，
 // 刻意简化不做级联更新）。
 export async function PATCH(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { service } = ctx
 
@@ -111,7 +111,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const ctx = await requireAdmin()
+  const ctx = await requireResearchAccess()
   if (ctx.error) return ctx.error
   const { service } = ctx
 

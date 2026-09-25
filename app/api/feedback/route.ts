@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { cleanText, canManageDevelopmentLog, isDevelopmentRequestStatus } from '@/lib/development-log'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   ACTIVE_FEEDBACK_STATUSES,
   feedbackScopeFor,
@@ -48,6 +49,37 @@ export async function GET(req: Request) {
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const params = new URL(req.url).searchParams
+  if (params.get('summary') === 'unread') {
+    type UnreadCandidate = { id: string; latest_message_at: string; latest_message_author_id: string | null }
+    type ReadState = { request_id: string; last_read_at: string }
+    try {
+      const visibleSubmitterRoles = caller.role === 'super' ? ['normal', 'admin', 'super'] : ['normal', 'admin']
+      const candidates = await fetchAllRows<UnreadCandidate>((from, to) => service
+        .from('development_requests')
+        .select('id, latest_message_at, latest_message_author_id')
+        .in('submitter_role', visibleSubmitterRoles)
+        .not('latest_message_at', 'is', null)
+        .neq('latest_message_author_id', caller.id)
+        .order('id', { ascending: true })
+        .range(from, to))
+      const reads = await fetchAllRows<ReadState>((from, to) => service
+        .from('development_request_message_reads')
+        .select('request_id, last_read_at')
+        .eq('user_id', caller.id)
+        .order('request_id', { ascending: true })
+        .range(from, to))
+      const readAt = new Map(reads.map(read => [read.request_id, read.last_read_at]))
+      const unreadCount = candidates.reduce((count, request) => {
+        const lastReadAt = readAt.get(request.id)
+        return !lastReadAt || lastReadAt < request.latest_message_at ? count + 1 : count
+      }, 0)
+      return NextResponse.json({ unreadCount })
+    } catch (error) {
+      console.error('Unable to load feedback unread count:', error)
+      return NextResponse.json({ error: '反馈提醒读取失败' }, { status: 500 })
+    }
+  }
+
   const scope = feedbackScopeFor(caller.role, params.get('scope'))
   const page = positiveInteger(params.get('page'), 1, 100_000)
   const pageSize = positiveInteger(params.get('pageSize'), 10, 50)
