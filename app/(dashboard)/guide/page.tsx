@@ -1,394 +1,197 @@
 'use client'
 
+import Link from 'next/link'
 import { useUser } from '@/lib/user-context'
 
-function StepBadge({ n }: { n: number }) {
-  return (
-    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center">
-      {n}
-    </span>
-  )
-}
+type GuideLink = { id: string; label: string }
 
-function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1 hover:bg-green-100 transition-colors whitespace-nowrap">
-      {children}
-      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-    </a>
-  )
-}
+const DAILY_NAV: GuideLink[] = [
+  { id: 'daily-tasks', label: '认领与提交' },
+  { id: 'daily-cookie', label: 'Cookie 池' },
+  { id: 'daily-results', label: '查看成效' },
+  { id: 'daily-feedback', label: '反馈提醒' },
+]
 
-const NAV_WORKFLOW: { id: string; label: string }[] = [
-  { id: 'wf-task-groups', label: '任务工作台' },
-  { id: 'wf-cookie-pool', label: 'Cookie 池维护' },
-  { id: 'wf-group-report', label: '成效报告' },
+const TOOL_NAV: GuideLink[] = [
+  { id: 'tool-overview', label: '首页与站点' },
+  { id: 'tool-competitor', label: '竞品日收' },
+  { id: 'tool-trends', label: '趋势与热词' },
+  { id: 'tool-research', label: '研究中心' },
 ]
-const NAV_REFERENCE: { id: string; label: string }[] = [
-  { id: 'ref-home', label: '首页快报' },
-  { id: 'ref-site-intel', label: '站点情报' },
-  { id: 'ref-weight-index', label: '权重/收录监控' },
-  { id: 'ref-competitor-daily', label: '竞品日收' },
-  { id: 'ref-index-pages', label: '收录页面' },
-  { id: 'ref-charts', label: '近期榜单' },
-  { id: 'ref-hot-keywords', label: '热词雷达' },
-  { id: 'ref-research', label: '研究中心' },
-]
-const NAV_ADMIN: { id: string; label: string }[] = [
+
+const ADMIN_NAV: GuideLink[] = [
   { id: 'admin-sites', label: '网站管理' },
-  { id: 'admin-crawl-log', label: '抓取日志' },
-  { id: 'admin-home', label: '首页快报' },
-  { id: 'admin-research', label: '研究中心（其余tab）' },
+  { id: 'admin-jobs', label: '抓取与缓存' },
+  { id: 'admin-permissions', label: '权限说明' },
 ]
 
-function Section({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
-  return <section id={id} className={`scroll-mt-20 ${className}`}>{children}</section>
+function PageLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-transparent px-3 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+      {children}
+      <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" /></svg>
+    </Link>
+  )
+}
+
+function Section({ id, title, description, href, linkLabel, children }: {
+  id: string
+  title: string
+  description?: string
+  href?: string
+  linkLabel?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section id={id} className="scroll-mt-24 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+          {description && <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>}
+        </div>
+        {href && <PageLink href={href}>{linkLabel ?? '打开页面'}</PageLink>}
+      </div>
+      <div className="px-5 py-4 text-sm leading-6 text-slate-600">{children}</div>
+    </section>
+  )
+}
+
+function Step({ number, title, children }: { number: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="grid grid-cols-[28px_1fr] gap-3">
+      <span className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 text-xs font-semibold text-emerald-700">{number}</span>
+      <div><p className="font-medium text-slate-800">{title}</p><p className="mt-0.5 text-slate-600">{children}</p></div>
+    </li>
+  )
+}
+
+function Notice({ tone = 'neutral', title, children }: { tone?: 'neutral' | 'warning' | 'danger'; title: string; children: React.ReactNode }) {
+  const styles = tone === 'danger'
+    ? 'border-red-200 bg-red-50/70 text-red-800'
+    : tone === 'warning'
+      ? 'border-amber-200 bg-amber-50/70 text-amber-800'
+      : 'border-slate-200 bg-slate-50 text-slate-700'
+  return <div className={`rounded-lg border px-4 py-3 text-sm leading-6 ${styles}`}><p className="font-semibold">{title}</p><div className="mt-0.5">{children}</div></div>
+}
+
+function QuickRow({ name, children }: { name: string; children: React.ReactNode }) {
+  return <div className="grid gap-1 border-b border-slate-100 py-2.5 last:border-0 sm:grid-cols-[132px_1fr] sm:gap-4"><p className="font-medium text-slate-800">{name}</p><p>{children}</p></div>
+}
+
+function SideNav({ title, items }: { title: string; items: GuideLink[] }) {
+  return (
+    <div>
+      <p className="mb-1.5 px-2 text-xs font-semibold text-slate-400">{title}</p>
+      <div className="space-y-0.5">
+        {items.map(item => <a key={item.id} href={`#${item.id}`} className="block rounded-md px-2 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900">{item.label}</a>)}
+      </div>
+    </div>
+  )
 }
 
 export default function GuidePage() {
   const { role } = useUser()
-  const canSeeAll = role === 'super' || role === 'admin'
+  const canManage = role === 'super' || role === 'admin'
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="bg-white border-b border-gray-100 px-6 py-4">
-        <h1 className="text-lg font-semibold text-gray-900">使用说明</h1>
-        <p className="text-sm text-gray-400 mt-0.5">新人上手指南——每天要做什么、各个页面是干嘛的</p>
-      </div>
-
-      {/* 锚点导航：吸顶 */}
-      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-100 px-6 py-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-semibold text-green-700 mr-1">工作流程</span>
-          {NAV_WORKFLOW.map(s => (
-            <a key={s.id} href={`#${s.id}`}
-              className="text-xs px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors">
-              {s.label}
-            </a>
-          ))}
+      <header className="border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4">
+          <div><h1 className="text-2xl font-bold tracking-tight text-slate-950">使用说明</h1><p className="mt-1.5 text-sm text-slate-500">先看每日工作流程；需要某项数据时，再查对应页面。</p></div>
+          <p className="text-xs tabular-nums text-slate-400">最后更新：2026/09/25</p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-gray-400 mr-1">参考工具</span>
-          {NAV_REFERENCE.map(s => (
-            <a key={s.id} href={`#${s.id}`}
-              className="text-xs px-2.5 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 transition-colors">
-              {s.label}
-            </a>
-          ))}
-        </div>
-        {canSeeAll && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-violet-700 mr-1">管理员</span>
-            {NAV_ADMIN.map(s => (
-              <a key={s.id} href={`#${s.id}`}
-                className="text-xs px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors">
-                {s.label}
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
+      </header>
 
-      <div className="px-6 py-6 max-w-4xl mx-auto space-y-10">
+      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-8 lg:grid-cols-[190px_minmax(0,1fr)]">
+        <aside className="hidden self-start lg:sticky lg:top-5 lg:block">
+          <nav aria-label="使用说明目录" className="space-y-5 rounded-xl border border-slate-200 bg-white p-3">
+            <SideNav title="每日工作" items={DAILY_NAV} />
+            <SideNav title="页面速查" items={TOOL_NAV} />
+            {canManage && <SideNav title="管理员" items={ADMIN_NAV} />}
+          </nav>
+        </aside>
 
-        {/* ══════════ 核心工作流程 ══════════ */}
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">★</span>
-            <h2 className="text-xl font-bold text-gray-900">核心工作流程</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-5">这一部分是你每天实际要做的事，最重要，建议先看这里。</p>
+        <main className="min-w-0 space-y-8">
+          <nav aria-label="移动端使用说明目录" className="flex gap-2 overflow-x-auto border-b border-slate-200 pb-3 lg:hidden">
+            {[...DAILY_NAV, ...TOOL_NAV, ...(canManage ? ADMIN_NAV : [])].map(item => <a key={item.id} href={`#${item.id}`} className="shrink-0 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">{item.label}</a>)}
+          </nav>
 
-          <div className="space-y-6">
-            {/* 分组任务 */}
-            <Section id="wf-task-groups" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
-                <h3 className="text-base font-bold text-gray-900">任务工作台——查看待办、认领并提交成果</h3>
-                <ExtLink href="/content/task-groups">打开任务工作台</ExtLink>
-              </div>
-              <div className="p-6 space-y-5 text-sm text-gray-700">
-                <p>右侧的每个 tab 都是一种"词的来源"，系统每天会自动挖出这些词，你只要挑感兴趣的认领去做：</p>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                  {[
-                    ['分发词', '管理员手动指定、主动分给大家做的词'],
-                    ['今日推荐', '系统按规则自动推荐的词'],
-                    ['搜索量查询', '自己手动搜关键词库，查搜索量'],
-                    ['搜索量上涨', '最近搜索量在涨的词'],
-                    ['交叉词', '多个竞品站点同时新增/涨排名的词，信号更强'],
-                    ['竞品涨排名', '竞品站点排名在上涨的词'],
-                    ['连续上涨词', '连续多天搜索量走高的词'],
-                    ['共新增词', '多个竞品站点同时新增的词'],
-                    ['更新词库', '持续被搜索、适合拿现有页面去"更新"而不是新增的词根'],
-                    ['跌词更新', '排名下跌了、需要更新页面挽回排名的词'],
-                  ].map(([label, desc]) => (
-                    <div key={label} className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-[74px] text-center">{label}</span>
-                      <span className="text-xs text-gray-500">{desc}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t border-gray-100 pt-4">
-                  <p className="font-medium text-gray-800 mb-3">认领 → 提交 的完整流程：</p>
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <StepBadge n={1} />
-                      <p>在任意 tab 里双击想做的词，认领到左侧"今日任务"列表（同一个词一天内只能被一个人认领，抢到就是你的）。</p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <StepBadge n={2} />
-                      <p>点开左侧列表里的词，展开填写：<b>操作类型</b>（新增/更新）、<b>最终做的词</b>（你实际写的标题/关键词）、<b>页面 URL</b>——三项都填了才能提交。</p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <StepBadge n={3} />
-                      <p>单条填完可以直接点该条的"提交"，或者全部填完后用顶部的批量"提交"一次交完。</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                  <p className="text-amber-700"><b>琥珀色"X/X 待提交"标签</b>：如果某天认领了词但没提交完就下班了，第二天打开会在"今天"的列表最上面自动出现，并带这个标签提醒你——这是以前认领的、还没提交的词。<b>看到这个标签一定要处理掉（补完提交或者点 × 删除），不要不管它</b>，因为没提交的词系统不会去抓排名/收录数据，等于白认领。</p>
-                </div>
-              </div>
-            </Section>
-
-            {/* Cookie 池维护 */}
-            <Section id="wf-cookie-pool" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 bg-green-50/60 border-b border-green-100">
-                <h3 className="text-base font-bold text-gray-900">百度收录 Cookie 池维护——每天都要做</h3>
-              </div>
-              <div className="p-6 space-y-4 text-sm text-gray-700">
-                <p>分组任务页面右上角有个"管理 Cookie 池"按钮——系统每天抓取百度收录数据要用到登录 Cookie，一个账号的 Cookie 用久了会失效，需要全组一起维护一个"轮换池"保持新鲜。</p>
-                <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                  <p className="font-medium text-gray-800">团队约定的做法：</p>
-                  <ul className="list-disc list-inside space-y-1 text-gray-600">
-                    <li>每人负责维护 <b>3 个</b> 账号的 Cookie</li>
-                    <li>每天把池子里<b>最旧的那一条</b>（日期最早的）换成一个新取的 Cookie</li>
-                    <li>取 Cookie 的方式：打开百度（已登录对应账号）→ 右键 inspect/检查 打开 DevTools → Application → Cookies → 全选复制 → 粘贴进弹窗的文本框，系统会自动识别</li>
-                  </ul>
-                </div>
-                <p className="text-xs text-gray-400">每条 Cookie 前面都带一个日期小标签，一眼就能看出哪条最旧该换了。</p>
-              </div>
-            </Section>
-
-            {/* 分组报告 */}
-            <Section id="wf-group-report" className="bg-white rounded-2xl border-2 border-green-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 bg-green-50/60 border-b border-green-100 flex items-center justify-between">
-                <h3 className="text-base font-bold text-gray-900">成效报告——查看成果与历史表现</h3>
-                <ExtLink href="/content/group-report">打开成效报告</ExtLink>
-              </div>
-              <div className="p-6 space-y-4 text-sm text-gray-700">
-                <div className="grid gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">提交记录</span>
-                    <span className="text-gray-600">按日期看谁那天提交了哪些词，最基础的流水记录。</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">成效追踪</span>
-                    <span className="text-gray-600">每一条提交后来有没有排上名、有没有被收录，逐条列出来，最后一列"得分"点一下能展开看这一条是怎么算出来的（排名档位 × 搜索量权重 + 收录分 + 涨跌分）。</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-green-700 bg-green-50 rounded px-1.5 py-0.5 flex-shrink-0 w-20 text-center">追踪汇总</span>
-                    <span className="text-gray-600">月度整体统计：全组排名表（能看到自己和所有人排第几，但别人的具体数字看不到，只有自己那一行能看数字）、来源成效对比、获取收录/排名分布明细。</span>
-                  </div>
-                </div>
-              </div>
-            </Section>
-          </div>
-        </div>
-
-        {/* ══════════ 参考工具 ══════════ */}
-        <div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-1">参考工具</h2>
-          <p className="text-sm text-gray-400 mb-5">这些是平时"去看数据"的地方，不涉及要提交什么操作，按需查阅就好。</p>
-
-          <div className="space-y-4">
-            <Section id="ref-home" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">首页快报</h3>
-                <ExtLink href="/content">打开首页快报</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600">登录后第一眼看的总览页。顶部 4 张预警卡片——权重变动 / 收录变动 / 新增变动 / 搜索量查询——出现红色或橙色说明有站点异常，点卡片里的条目会弹出这个站点的详情（权重、IP、收录趋势等）。下面还有大站/中站/小站的对比图表，可以勾选站点看趋势对比。</p>
-            </Section>
-
-            <Section id="ref-site-intel" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">站点情报</h3>
-                <ExtLink href="/content/site-intel">打开站点情报</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600">就是个搜索框——想看某个域名的完整数据，直接在这里搜，会跳到该站点的详情页。侧边栏"站点情报"下面还挂了四个子页面：</p>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-gray-500">
-                <p>· <b className="text-gray-700">权重监控</b>——全站点 PC/移动权重、来路 IP 列表</p>
-                <p>· <b className="text-gray-700">收录监控</b>——全站点收录量趋势 + 状态判定</p>
-                <p>· <b className="text-gray-700">竞品日收</b>——竞品新增词监控（下面单独展开讲）</p>
-                <p>· <b className="text-gray-700">收录页面</b>——收录到具体 URL 级别的追踪</p>
-              </div>
-            </Section>
-
-            <Section id="ref-weight-index" className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-800 mb-2">权重监控 / 收录监控</h3>
-              <p className="text-sm text-gray-600">两个页面结构很像：一个筛选栏（域名、关注级别，收录监控还多一个"状态"筛选）+ 一张表格，每行是一个站点，带 30 天趋势小图。表格标题点一下可以按数值排序。每行"查看"按钮能弹出更大的趋势图。</p>
-            </Section>
-
-            <Section id="ref-competitor-daily" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">竞品日收——按钮最多，重点看一下</h3>
-                <ExtLink href="/content/competitor-daily">打开竞品日收</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">对比每个竞品站点昨天新增了多少关键词，状态列会标"正常/偏低/异常/偏高"——先按状态筛出异常的站点，再用下面这几个按钮深挖原因：</p>
-              <div className="space-y-2">
-                {[
-                  ['查看', '弹出近30天新增趋势折线图，带工作日/周末均值基线，方便判断是不是真的异常还是周末本来就低'],
-                  ['昨日新词', '当天具体新增了哪些关键词，分应用/游戏两个 tab，可以选日期回看历史'],
-                  ['更新词库', '近30天持续出现的词根聚合，点开能展开看具体变体词——适合拿去"更新词库"tab认领做'],
-                  ['排名变动', '涨入/跌出的关键词排名波动列表，带搜索量'],
-                  ['不稳定词', '近30天在涨入和跌出里都出现过的词，按波动天数排序——排名很不稳定的词'],
-                ].map(([label, desc]) => (
-                  <div key={label} className="flex items-center gap-2 text-sm">
-                    <span className="text-xs font-semibold text-blue-700 bg-blue-50 rounded px-1.5 py-0.5 flex-shrink-0 w-16 text-center">{label}</span>
-                    <span className="text-gray-600">{desc}</span>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            <Section id="ref-index-pages" className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-800 mb-2">收录页面</h3>
-              <p className="text-sm text-gray-600">追踪到具体页面（URL）级别的收录状态，记录首次发现/消失/再收录的时间。可以按站点、时间范围、状态（新发现/再收录/已脱收/待验证/更新/已收录）筛选。</p>
-            </Section>
-
-            <Section id="ref-charts" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">近期榜单</h3>
-                <ExtLink href="/content/charts">打开近期榜单</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600 mb-2"><b>月度趋势</b>tab：全部监控站点按月汇总应用/游戏新增关键词占比，能看涨跌词、搜索量变动、排名连续涨跌，跨年按月对比，找"哪个月哪个类目该发力"这种规律。</p>
-              <p className="text-sm text-gray-600"><b>新游榜单</b>tab：纯资讯，汇总 TapTap 和好游快爆的游戏行业榜单（今日游戏、即将上线、热搜榜等），跟自家站点数据完全无关，了解行业动态、蹭热点选题时看看就好，<b>只供参考</b>。</p>
-            </Section>
-
-            <Section id="ref-hot-keywords" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">热词雷达</h3>
-                <ExtLink href="/content/hot-keywords">打开热词雷达</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600">用来了解行业整体趋势、给分组任务的认领补灵感。右侧 6 个 tab（搜索量上涨/交叉词/竞品涨排名/连续上涨词/共新增词/更新词库）跟分组任务里的信号来源是同一套逻辑，只是这里是纯浏览，不能直接认领去做。理论上分组任务的词可以由管理员按分组筛选站点范围，热词雷达则看全部站点；不过现阶段各分组都还没设置筛选，两边看到的范围其实一样，这里就当参考用。</p>
-            </Section>
-
-            <Section id="ref-research" className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-800">研究中心</h3>
-                <ExtLink href="/content/research">打开研究中心</ExtLink>
-              </div>
-              <p className="text-sm text-gray-600">"研究周报"/"研究月报"两个 tab 所有人都能看：GitHub Actions 定时自动生成（周报每周一、月报每月1号），不用手动点"开始分析"。AI 通读这段时间每个站点的完整原始数据，写成大环境 / 自己站点成效 / 竞品成效 / 综合结论几段报告，顶部横排选期数，"各站点分析"里是 A-Z 卡片+搜索框，点开看某个站点的具体分析文字。</p>
-            </Section>
-          </div>
-        </div>
-
-        {/* ══════════ 管理员专区 ══════════ */}
-        {canSeeAll && (
-          <div id="admin-zone" className="scroll-mt-20">
-            <h2 className="text-lg font-semibold text-violet-700 mb-1">管理员</h2>
-            <p className="text-sm text-gray-400 mb-5">只有管理权限能看到这一块。</p>
-
-            <div className="space-y-4">
-              <Section id="admin-sites" className="bg-white rounded-xl border border-violet-200 p-5">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-800">网站管理</h3>
-                  <ExtLink href="/content/sites">打开网站管理</ExtLink>
-                </div>
-                <p className="text-sm text-gray-600 mb-4">站点要先在这里登记，才会进入整个监控/抓取系统——是所有数据的源头，配置错了后面全部数据都会跟着错，要仔细来。</p>
-
-                <div className="space-y-4 text-sm text-gray-600">
-                  <div>
-                    <p className="font-medium text-gray-800 mb-1.5">基本信息</p>
-                    <p>域名、站点名称、分类（大站/中站/小站）、关注级别（1=重点关注 / 2=侧重关注 / 3=普通关注，决定首页快报预警的敏感程度）、友情链接（同公司旗下站点，用于关联展示，不影响抓取）。</p>
-                  </div>
-
-                  <div>
-                    <p className="font-medium text-gray-800 mb-1.5">HTML 抓取配置——每个"来源"是一套独立的抓取规则</p>
-                    <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
-                      <p>· <b className="text-gray-700">列表页 URL</b>：填一个起始网址就行，<b>系统会自己往后自动翻页抓</b>（默认最多翻3页，抓到内容比上次更新的日期还旧就自动停），不用手动把每一页网址都列出来。一行是一个独立的起始入口，只有当同一个"来源"下有好几个不同的列表分类要一起抓时才需要多写几行（比如两个不同栏目各自的列表页）。</p>
-                      <p>· <b className="text-gray-700">标题 / 日期 CSS 选择器</b>：抓每条内容的标题和发布日期。</p>
-                      <p>· <b className="text-gray-700">文章链接 CSS 选择器</b>：选填，填了才会记录每条内容自己的 URL。</p>
-                      <p>· <b className="text-gray-700">内容类型</b>：应用/游戏二选一，用于后续分类统计。</p>
-                      <p>· 配完先点<b className="text-gray-700">"预览抓取"</b>，看抓出来的标题对不对、有没有多余的垃圾文字，别直接保存就不管了。</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="font-medium text-gray-800 mb-1.5">AI 帮我识别选择器</p>
-                    <p>每个来源下面都有这个折叠区——不用自己手动摸 CSS 选择器（很容易摸错）。右键页面"检查"，复制一条列表项的 HTML 粘贴进去，点"AI 分析"，会自动给出标题/日期/链接三个选择器，点"应用到上面的选择器"就填好了。<b className="text-gray-700">如果这个站的列表是靠 JS 调 API 加载的（不是纯 HTML），把浏览器 Network 里抓到的那段 JSON 响应粘贴进去也一样能分析</b>，不用切换模式。</p>
-                    <p className="mt-1.5">⚠ 有个前提：这一段 HTML/JSON 里不能混着<b className="text-gray-700">其它类型</b>的内容（比如同一个列表里应用和游戏混排、都带日期）——AI 只会给一套选择器，页面混着别的类型就会连带错误地把不相关的内容也抓进来。遇到这种混排列表，要按类型分别当成不同的"来源"各加一份、各自用更精确的选择器只圈住自己要的那一块。</p>
-                  </div>
-
-                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-600">
-                    ⚠ <b>日期选择器是硬性要求</b>：如果页面上找不到能抓到的发布日期，这个来源就不要配。没有日期，系统没法判断哪些是"新增"的，结果就是每天都把别人页面上的全部内容当成新增重复抓一遍，数据全是垃圾。
-                  </div>
-
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
-                    ⚠ <b>无限下拉的列表页</b>：不是自动翻页就能解决的（那是给"点下一页"链接式翻页用的）。先打开浏览器 DevTools 的 Network 面板，往下滚动看看是不是有 JS 在调一个返回 JSON 的接口来加载更多。如果是，把接口地址里的页码换成 <code className="text-xs bg-white px-1 rounded">{'{page}'}</code> 占位符填进"列表页 URL"（比如 <code className="text-xs bg-white px-1 rounded">https://api.example.com/more?page={'{page}'}</code>），系统识别到这个占位符会自动切换成接口轮询模式，自己把页码从1加到底（最多30页）。<code className="text-xs bg-white px-1 rounded">32r.com</code> 就是这种站，可以参考它的配置方式。
-                  </div>
-
-                  <div>
-                    <p className="font-medium text-gray-800 mb-1.5">列表操作</p>
-                    <p>编辑、删除（<span className="text-red-500">不可恢复</span>），可按域名/关注级别/分类筛选。</p>
-                  </div>
-
-                  <div>
-                    <p className="font-medium text-gray-800 mb-1.5">4 个开关——原则：这个站抓不到/不需要就关掉，别留着空跑</p>
-                    <div className="space-y-1.5 pl-3 border-l-2 border-gray-100">
-                      <p>· <b className="text-gray-700">关键词</b>：控制上面那套 HTML 配置要不要跑。自家网站不需要靠这个发现新词（新词是组员在分组任务里自己提交的），HTML 配置可以不填；没有日期字段、或更新很少的小站，也建议关掉，硬抓只会产生垃圾数据。</p>
-                      <p>· <b className="text-gray-700">涨跌</b>：抓这个站当天新涨入/跌出排名的词（有没有变化，不是具体第几名），是"竞品日收"里排名波动信号的来源。如果爱站对这个站屏蔽了涨跌数据（部分站点爱站不开放），开了也抓不到，直接关掉。</p>
-                      <p>· <b className="text-gray-700">排名</b>：抓这个站每个关键词具体排第几名。自家站点开这个是为了分组报告"成效追踪"能比对提交的词有没有排上名；竞品站点开这个是为了挖竞品排名信号（"竞品涨排名"这类 tab 的数据来源）。开关旁边有个小"PC"按钮，默认关闭——只有需要同时看PC端排名的站点（一般是自己的站点，想看M/PC合并判定成效）才需要开，竞品站点不用开，开了只是白占抓取资源。</p>
-                      <p>· <b className="text-gray-700">收录页面</b>：追踪到具体 URL 级别的收录状态。现在只给<b>需要追踪成效</b>（有分组在这个站点上提交、要看排名/收录结果）的站点开，不是所有站点都开。</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
-                    ⚠ "涨跌"和"排名"两个开关不能同时开——同时开启会弹出数据迁移确认框，迁移会丢弃一部分字段（比如 PC 端数据），操作前务必看清楚提示再确认。
-                  </div>
-                </div>
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">每天要做什么</h2>
+            <p className="mt-1 text-sm text-slate-500">按下面顺序完成即可，其他页面都是查询和辅助工具。</p>
+            <div className="mt-4 space-y-4">
+              <Section id="daily-tasks" title="1. 认领并提交当天任务" description="任务工作台是组员每天主要操作的页面。" href="/content/task-groups" linkLabel="打开任务工作台">
+                <ol className="space-y-4">
+                  <Step number={1} title="选择任务">从来源 Tab 中找到合适的词，点击“认领”；双击整行只是快捷操作。</Step>
+                  <Step number={2} title="完成内容">在左侧任务列表填写操作类型、最终关键词和页面 URL。三项完整后才能提交。</Step>
+                  <Step number={3} title="选择新增或更新">第一次制作该内容选择“新增”；同一成员、同一关键词、同一 URL 已提交过新增时，后续必须选择“更新”。</Step>
+                  <Step number={4} title="提交并清理待办">可以逐条提交，也可以批量提交。以前日期遗留的待提交任务要补完或移除，不要长期保留。</Step>
+                </ol>
+                <div className="mt-4"><Notice tone="warning" title="补做旧任务时也按内容身份判断">记录日期可以是旧日期，但系统仍会检查这个成员是否已用相同关键词和 URL 提交过“新增”。重复内容不是第二次新增，应改为“更新”。</Notice></div>
               </Section>
 
-              <Section id="admin-crawl-log" className="bg-white rounded-xl border border-violet-200 p-5">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-800">抓取日志</h3>
-                  <ExtLink href="/content/crawl-log">打开抓取日志</ExtLink>
-                </div>
-                <p className="text-sm text-gray-600 mb-3">监控每天的抓取任务有没有正常跑完，纯监控+出问题时补救，不是配置页。</p>
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>· <b className="text-gray-700">今日任务卡片</b>：关键词/权重/排名 3 张，显示成功/空/失败站点数；有异常可以"查看"展开具体是哪些站点出问题，或者点"重试"勾选失败/空的站点重新抓一次。</p>
-                  <p>· <b className="text-gray-700">运行记录表</b>：按日期/类型/域名筛选，也有"运行异常"快捷筛选；每行能"查看"这次运行的站点明细。</p>
-                  <p>· <b className="text-gray-700">"规则"按钮</b>：点开会弹出这一类抓取的完整说明——触发时间/触发方式、抓取对象、数据来源、限流策略、写入哪张表、已知风险，排查"为什么这个站点没抓到"时先看这个。</p>
-                </div>
+              <Section id="daily-cookie" title="2. 检查百度 Cookie 池" description="Cookie 失效会直接影响收录验证。" href="/content/task-groups" linkLabel="前往维护">
+                <p>在任务工作台打开 Cookie 池，优先替换日期最旧或已经失效的记录。每位成员按团队约定维护自己的账号，不要覆盖仍在使用的其他成员记录。</p>
+                <p className="mt-2 text-xs text-slate-500">如果页面提示需要重新验证，先刷新 Cookie，再等待下一轮验证任务；不要把“未验证到”直接当成页面掉收录。</p>
               </Section>
 
-              <Section id="admin-home" className="bg-white rounded-xl border border-violet-200 p-5">
-                <h3 className="text-sm font-semibold text-gray-800 mb-2">首页快报里的管理员功能</h3>
-                <p className="text-sm text-gray-600 mb-3">普通成员看到的首页快报没有导出功能，管理员额外多两处：</p>
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>· <b className="text-gray-700">收录变动卡片</b>——"涨词导出"/"跌词导出"：点击后要再输一次爱站账号密码验证，成功后按域名+日期范围（最多7天，爱站接口限制）逐日抓取涨入/跌出的关键词，生成一份按天分 sheet 的 Excel 下载。</p>
-                  <p>· <b className="text-gray-700">搜索量查询卡片</b>——"导出今日"/"导出全部"：同样要账号密码验证，导出关键词+搜索量的 CSV。</p>
-                </div>
+              <Section id="daily-results" title="3. 查看提交成效" description="确认提交后的收录、排名和得分依据。" href="/content/group-report" linkLabel="打开成效报告">
+                <div className="divide-y divide-slate-100"><QuickRow name="提交概况">查看成员提交量、搜索量及来源构成。</QuickRow><QuickRow name="成效追踪">逐条查看收录、M/PC 排名和评分；点击得分可查看计算依据。</QuickRow><QuickRow name="追踪汇总">查看一段时间内的成员、来源和成效分布。</QuickRow></div>
+                <div className="mt-4"><Notice title="排名判定规则">M 与 PC 分开保存并分别显示。当天未在抓取范围内找到只表示“未找到/可能超出范围”，不会直接判定为下降；同日同时出现升跌时保留两份证据，评分先采用上涨结果。</Notice></div>
               </Section>
 
-              <Section id="admin-research" className="bg-white rounded-xl border border-violet-200 p-5">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-800">研究中心（管理员专属的另外4个tab）</h3>
-                  <ExtLink href="/content/research">打开研究中心</ExtLink>
-                </div>
-                <p className="text-sm text-gray-600 mb-3">2026-08-26 起研究中心对全员开放，但只开"研究周报"/"研究月报"两个tab（说明见上面"参考工具"区）——竞品成效、站点诊断、研究季报、研究年报这4个信息量更大/更偏管理决策，继续只给管理员看。</p>
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>· <b className="text-gray-700">竞品成效</b>：展示 has_rank_title（网站管理里的"排名"开关）开启的竞品站点，每天自动追踪的新增内容有没有涨排名/收录，A-Z卡片选站点+搜索框；不含自己的站点（按"分组任务"页面里配的"自己站点"字段自动排除）。右上角"管理竞品站点"可以批量勾选要追踪哪些站点，不是新建站点——域名/CSS选择器还是要去网站管理配。</p>
-                  <p>· <b className="text-gray-700">站点诊断</b>：选一个站点+输入你想问的问题，AI读这个站点的全量历史数据（不是摘要）给详细策略建议——跟其它几个tab的"定时自动短点评"刻意反着来，用来深挖单个站点的具体问题。</p>
-                  <p>· <b className="text-gray-700">研究季报/年报</b>：跟周报/月报同一套逻辑，GitHub Actions 定时自动生成（季报每季度首日、年报每年1月1号），但不是从头重新读原始数据——季报汇总当季已经生成好的月报，年报汇总当年的季报，逐层往上滚。</p>
-                  <p>· <b className="text-gray-700">"成效"为什么分两段</b>：自己站点成效来自"分组任务"里组员提交内容的排名/收录追踪；竞品成效来自竞品站点自动追踪，两边数据来源完全不同，报告里刻意不混在一起写。</p>
-                </div>
+              <Section id="daily-feedback" title="4. 查看反馈新消息" description="侧边栏出现数字时，表示有尚未阅读的新回复。" href="/content/feedback" linkLabel="打开反馈优化">
+                <p>反馈留言板用于提交问题、优化建议和新站点。收到回复后，侧边栏“反馈优化”会显示未读数量；打开对应反馈即可阅读并继续沟通。</p>
               </Section>
             </div>
           </div>
-        )}
+
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">页面速查</h2>
+            <p className="mt-1 text-sm text-slate-500">不需要每天逐页查看；根据问题选择页面。</p>
+            <div className="mt-4 space-y-4">
+              <Section id="tool-overview" title="首页快报与站点情报" href="/content" linkLabel="打开首页">
+                <div className="divide-y divide-slate-100"><QuickRow name="首页快报">快速看权重、收录、新增和搜索量异常。</QuickRow><QuickRow name="站点搜索">输入域名进入单站完整资料。</QuickRow><QuickRow name="权重监控">比较站点 PC/M 权重、来路和近期趋势。</QuickRow><QuickRow name="收录监控">查看站点收录走势；具体 URL 请进入“收录页面”。</QuickRow></div>
+              </Section>
+
+              <Section id="tool-competitor" title="竞品日收" description="查看竞品昨日新词、排名波动和异常站点。" href="/content/competitor-daily" linkLabel="打开竞品日收">
+                <p>先用状态、站点或日期筛选，再查看具体新词和排名变化。原始“昨日新词”和排名波动明细保留 40 天，月报会在保留期内完成汇总；更长期趋势请查看研究报告。</p>
+                <div className="mt-3 divide-y divide-slate-100"><QuickRow name="昨日新词">查看指定日期新出现的关键词。</QuickRow><QuickRow name="排名波动">分别查看涨入和跌出，不把“未找到”当作下跌。</QuickRow><QuickRow name="更新词库">查看持续出现、适合更新现有内容的词。</QuickRow></div>
+              </Section>
+
+              <Section id="tool-trends" title="热词雷达与趋势发现" href="/content/trend-discovery" linkLabel="打开趋势发现">
+                <div className="divide-y divide-slate-100"><QuickRow name="热词雷达">根据站点排名、搜索量和竞品数据查看已形成的数据趋势。</QuickRow><QuickRow name="趋势词">根据公开社媒内容识别正在升温的候选词，并解释趋势分来源。</QuickRow><QuickRow name="新词发现">查看平台搜索推荐词；管理员可加入采集或忽略。</QuickRow></div>
+                <p className="mt-3 text-xs text-slate-500">社媒推荐词是后续采集线索，不等于已经形成趋势；是否成立仍要看公开内容证据。</p>
+              </Section>
+
+              <Section id="tool-research" title="研究中心" href="/content/research" linkLabel="打开研究中心">
+                <div className="divide-y divide-slate-100"><QuickRow name="商业词研究">维护商业词组、扩展推荐词并检查站点覆盖，全体组员可用。</QuickRow><QuickRow name="研究报告">查看自动生成的周报、月报、季报和年报，全体组员可用。</QuickRow><QuickRow name="成效与诊断">查看竞品成效或对单站进行诊断，仅管理员和超管可用。</QuickRow></div>
+              </Section>
+            </div>
+          </div>
+
+          {canManage && (
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">管理员维护</h2>
+              <p className="mt-1 text-sm text-slate-500">配置与补救操作会影响全站数据，修改前先确认范围。</p>
+              <div className="mt-4 space-y-4">
+                <Section id="admin-sites" title="网站管理" href="/content/sites" linkLabel="打开网站管理">
+                  <div className="divide-y divide-slate-100"><QuickRow name="基础配置">维护域名、站点分类、关注级别和抓取开关。</QuickRow><QuickRow name="抓取能力">关键词、涨跌、排名和收录页面按实际需求开启；无有效来源时不要空跑。</QuickRow><QuickRow name="排名 Excel">通过 GitHub Actions 补录排名资料；只保留目标主域、搜索量大于 0 的有效记录。</QuickRow></div>
+                  <div className="mt-4"><Notice tone="danger" title="不要把两个排名来源随意切换">涨跌记录和完整排名保存的字段与用途不同。调整开关或迁移数据前，先确认是否会影响 PC/M 资料和成效追踪。</Notice></div>
+                </Section>
+
+                <Section id="admin-jobs" title="抓取日志与成效缓存" href="/content/crawl-log" linkLabel="打开抓取日志">
+                  <p>抓取日志用于确认每日任务是否成功、哪些站点为空或失败。失败任务应先查错误原因，再只重跑受影响的范围。</p>
+                  <p className="mt-2">补录排名、修改评分 SQL 或修复追踪资料后，通过对应 GitHub Actions 刷新成效缓存；不要为了单个站点反复重跑全部任务。</p>
+                </Section>
+
+                <Section id="admin-permissions" title="当前权限说明">
+                  <div className="divide-y divide-slate-100"><QuickRow name="全部组员">任务工作台、商业词研究、研究报告、趋势与日常监控工具。</QuickRow><QuickRow name="管理员/超管">成效与诊断、网站管理、抓取日志及需要全局数据的管理操作。</QuickRow><QuickRow name="项目负责人">反馈处理、状态管理及项目级沟通。</QuickRow></div>
+                </Section>
+              </div>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   )

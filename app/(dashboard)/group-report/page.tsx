@@ -96,7 +96,7 @@ function fmtVol(v: number) {
   if (!v || v <= 0) return '—'
   return v.toLocaleString()
 }
-function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '' }
+function fmtDate(d: string) { return d ? d.slice(0, 10) : '' }
 
 async function readResponse<T>(response: Response, fallback: string): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: string }
@@ -465,12 +465,11 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-6 py-4">
+      <div className="border-b border-gray-100 bg-white px-6 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">成效报告</p>
-            <h1 className="text-lg font-semibold text-gray-900">{groupId ? (activeGroup?.name || '选择分组') : '全部分组提交概况'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{groupId ? '成效追踪与追踪总汇' : '集中查看所有可见分组及成员的提交情况'}</p>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">{groupId ? (activeGroup?.name || '选择分组') : '全部分组提交概况'}</h1>
+            <p className="mt-1.5 text-sm text-gray-500">{groupId ? '成效追踪与追踪总汇' : '集中查看所有可见分组及成员的提交情况'}</p>
           </div>
           {groupId && groups.length > 0 && (
             <select aria-label="切换成效报告分组" value={activeTabId}
@@ -496,15 +495,15 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
         <div className="flex items-center justify-center h-64 text-gray-400 text-sm">暂无分组</div>
       ) : !groupId ? (
         <div className="px-6 py-5 space-y-5">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-end gap-3">
             <div>
               <h2 className="text-sm font-semibold text-gray-800">提交概况</h2>
               <p className="text-xs text-gray-400">点击分组名称进入该组的成效追踪与追踪总汇</p>
             </div>
-            <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="ml-auto flex h-9 items-center gap-5 border-b border-gray-200">
               {(['yesterday', 'week', 'month', 'custom'] as Period[]).map(value => (
                 <button key={value} type="button" onClick={() => setPeriod(value)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${period === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                  className={`relative h-9 px-0.5 text-xs font-medium transition-colors ${period === value ? 'text-green-700 after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-green-600' : 'text-gray-500 hover:text-gray-800'}`}>
                   {PERIOD_LABELS[value]}
                 </button>
               ))}
@@ -525,27 +524,59 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
           {overviewGroups.map(group => {
             const totalCount = group.groupTotal?.total.count ?? group.members.reduce((sum, member) => sum + member.total.count, 0)
             return (
-              <section key={group.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
-                  <div>
-                    <Link href={`/content/group-report/${encodeURIComponent(group.id)}?view=outcomes`}
-                      className="inline-flex items-center gap-1.5 text-base font-semibold text-gray-900 hover:text-green-700 focus-visible:rounded focus-visible:ring-2 focus-visible:ring-green-500">
-                      {group.name}<span aria-hidden="true">→</span>
-                    </Link>
-                    <p className="mt-0.5 text-xs text-gray-400">提交概况</p>
-                  </div>
-                  <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500">{PERIOD_LABELS[period]}</span>
+              <section key={group.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                  <Link href={`/content/group-report/${encodeURIComponent(group.id)}?view=outcomes`}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 hover:text-green-700 focus-visible:rounded focus-visible:ring-2 focus-visible:ring-green-500">
+                    {group.name}<span aria-hidden="true">→</span>
+                  </Link>
+                  <span className="text-xs text-gray-400">{totalCount} 条提交</span>
                 </div>
-                <div className="flex gap-4 overflow-x-auto pb-2">
-                  {canSeeAll && group.groupTotal && (
-                    <ReportCard title="全部组员合计" total={group.groupTotal.total} bySource={group.groupTotal.bySource} isTotal />
-                  )}
-                  {group.members.map(member => (
-                    <ReportCard key={member.userId} title={member.username} memberType={member.memberType} total={member.total} bySource={member.bySource} />
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] table-fixed">
+                    <thead className="bg-gray-50/80 text-left text-xs font-medium text-gray-500">
+                      <tr>
+                        <th className="w-48 px-4 py-2.5">成员</th>
+                        <th className="w-20 px-3 py-2.5">类型</th>
+                        <th className="w-24 px-3 py-2.5 text-right">提交量</th>
+                        <th className="w-28 px-3 py-2.5 text-right">搜索量</th>
+                        <th className="px-5 py-2.5">来源构成</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {canSeeAll && group.groupTotal && (
+                        <tr className="bg-green-50/30">
+                          <td className="px-4 py-2.5 text-sm font-semibold text-gray-900">全部组员合计</td>
+                          <td className="px-3 py-2.5 text-xs text-gray-400">—</td>
+                          <td className="px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-gray-800">{group.groupTotal.total.count || '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-gray-800">{fmtVol(group.groupTotal.total.volume)}</td>
+                          <td className="px-5 py-2.5">
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              {group.groupTotal.bySource.map(item => <span key={item.source} className="text-xs text-gray-500">{item.source} <strong className="font-medium text-gray-700">{item.count}</strong></span>)}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {group.members.map(member => (
+                        <tr key={member.userId} className="hover:bg-gray-50/70">
+                          <td className="px-4 py-2.5 text-sm font-medium text-gray-900">{member.username}</td>
+                          <td className="px-3 py-2.5 text-xs text-gray-500">{member.memberType === 'game' ? '游戏' : '应用'}</td>
+                          <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-700">{member.total.count || '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-700">{fmtVol(member.total.volume)}</td>
+                          <td className="px-5 py-2.5">
+                            {member.bySource.length > 0 ? (
+                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                {member.bySource.map(item => <span key={item.source} className="text-xs text-gray-500">{item.source} <strong className="font-medium text-gray-700">{item.count}</strong></span>)}
+                              </div>
+                            ) : <span className="text-xs text-gray-300">暂无数据</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
                 {totalCount === 0 && (
-                  <p className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-center text-xs text-gray-400">
+                  <p className="border-t border-gray-100 px-4 py-3 text-center text-xs text-gray-400">
                     {PERIOD_LABELS[period]}暂无提交记录
                   </p>
                 )}
@@ -1090,10 +1121,10 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
               {/* Period selector */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-gray-500 mr-1">时间段：</span>
-                <div className="inline-flex rounded-lg border border-gray-200 bg-white overflow-hidden">
+                <div className="flex h-9 items-center gap-5 border-b border-gray-200">
                   {(['yesterday', 'week', 'month', 'custom'] as Period[]).map(p => (
                     <button key={p} onClick={() => setPeriod(p)}
-                      className={`px-4 py-1.5 text-sm font-medium transition-colors ${period === p ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                      className={`relative h-9 px-0.5 text-sm font-medium transition-colors ${period === p ? 'text-green-700 after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-green-600' : 'text-gray-500 hover:text-gray-800'}`}>
                       {PERIOD_LABELS[p]}
                     </button>
                   ))}

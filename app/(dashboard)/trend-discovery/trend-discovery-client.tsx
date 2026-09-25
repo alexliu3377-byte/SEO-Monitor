@@ -351,33 +351,24 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   return (
     <div className="min-h-full bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
-        <div className="mx-auto flex max-w-[1500px] items-end justify-between gap-5">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-5">
           <div>
-            <p className="text-xs font-semibold tracking-[0.18em] text-emerald-600">社媒信号 · 内部试行</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">趋势发现</h1>
-            <p className="mt-2 text-sm text-slate-500">在百度数据出现以前，从公开社媒内容中发现正在形成的新词。</p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">趋势发现</h1>
+            <p className="mt-1.5 text-sm text-slate-500">从公开社媒内容中发现正在形成的新词。</p>
           </div>
-          <div className="flex flex-none items-center gap-4">
-            {canManage && (
-              <button type="button" onClick={openSettings} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" /></svg>
-                设置采集词
-              </button>
-            )}
-            {initialRole === 'super' && (
-              <div className="hidden text-right lg:block">
-                <p className="text-xs text-slate-400">当前阶段</p>
-                <p className="mt-1 text-sm font-semibold text-slate-700">个人电脑低频试行</p>
-              </div>
-            )}
-          </div>
+          {canManage && (
+            <button type="button" onClick={openSettings} className="inline-flex h-9 flex-none items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" /></svg>
+              设置采集词
+            </button>
+          )}
         </div>
       </header>
 
       <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-8">
-        <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          <button type="button" onClick={() => setWorkspaceTab('trends')} className={`h-10 rounded-lg px-4 text-sm font-semibold transition ${workspaceTab === 'trends' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>趋势词</button>
-          <button type="button" onClick={() => setWorkspaceTab('keywords')} className={`h-10 rounded-lg px-4 text-sm font-semibold transition ${workspaceTab === 'keywords' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>新词发现</button>
+        <div className="mb-5 flex gap-6 border-b border-slate-200">
+          <button type="button" onClick={() => setWorkspaceTab('trends')} className={`relative h-11 px-1 text-sm font-semibold transition ${workspaceTab === 'trends' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>趋势词</button>
+          <button type="button" onClick={() => setWorkspaceTab('keywords')} className={`relative h-11 px-1 text-sm font-semibold transition ${workspaceTab === 'keywords' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>新词发现</button>
         </div>
 
         {workspaceTab === 'trends' ? <>
@@ -459,7 +450,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             <div className="flex min-h-12 items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 sm:px-6">
               <span className="text-xs text-slate-500">已选择 <strong className="text-slate-800">{selectedTermIds.size}</strong> 个候选词</span>
               <div className="flex items-center gap-2">
-                <button type="button" disabled={saving || selectedTermIds.size === 0} onClick={() => updateTermStatuses([...selectedTermIds], 'tracked')} className="h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">批量已布局</button>
+                <button type="button" disabled={saving || selectedTermIds.size === 0} onClick={() => updateTermStatuses([...selectedTermIds], 'tracked')} className="h-8 rounded-md border border-emerald-300 bg-transparent px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40">批量已布局</button>
                 <button type="button" disabled={saving || selectedTermIds.size === 0} onClick={() => updateTermStatuses([...selectedTermIds], 'dismissed')} className="h-8 rounded-md border border-red-200 bg-white px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">批量忽略</button>
               </div>
             </div>
@@ -520,9 +511,9 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                       </td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-end gap-1">
-                          <button type="button" onClick={() => openDetail(term)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50">查看</button>
-                          {canManage && <button type="button" disabled={saving || term.review_status === 'tracked'} onClick={() => updateTermStatuses([term.id], 'tracked')} className={`h-8 rounded-lg px-2.5 text-xs font-semibold shadow-sm disabled:opacity-60 ${term.review_status === 'tracked' ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{term.review_status === 'tracked' ? '已布局' : '已布局'}</button>}
-                          {canManage && <button type="button" disabled={saving} onClick={() => updateTermStatuses([term.id], 'dismissed')} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button>}
+                          <button type="button" onClick={() => openDetail(term)} className="h-8 rounded-md border border-slate-200 bg-transparent px-2.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50">查看</button>
+                          {canManage && <button type="button" disabled={saving || term.review_status === 'tracked'} onClick={() => updateTermStatuses([term.id], 'tracked')} className="h-8 rounded-md border border-emerald-300 bg-transparent px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">已布局</button>}
+                          {canManage && <button type="button" disabled={saving} onClick={() => updateTermStatuses([term.id], 'dismissed')} className="h-8 rounded-md border border-red-200 bg-transparent px-2.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略</button>}
                         </div>
                       </td>
                     </tr>
@@ -601,7 +592,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
 
             <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
               <button type="button" disabled={settingsSaving} onClick={() => setSettingsOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">关闭</button>
-              <button type="button" disabled={settingsLoading || settingsSaving} onClick={saveSettings} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+              <button type="button" disabled={settingsLoading || settingsSaving} onClick={saveSettings} className="h-10 rounded-lg border border-emerald-300 bg-transparent px-4 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                 {settingsSaving ? '保存中…' : '保存设置'}
               </button>
             </div>
@@ -684,7 +675,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
 
             {canManage && (
               <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6">
-                <button type="button" disabled={saving || selected.review_status === 'tracked'} onClick={() => updateReviewStatus('tracked')} className="h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                <button type="button" disabled={saving || selected.review_status === 'tracked'} onClick={() => updateReviewStatus('tracked')} className="h-10 rounded-lg border border-emerald-300 bg-transparent px-4 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                   {selected.review_status === 'tracked' ? '已加入布局观察' : saving ? '处理中…' : '标记为已布局'}
                 </button>
                 <button type="button" disabled={saving} onClick={() => updateReviewStatus('dismissed')} className="h-10 rounded-lg border border-red-200 bg-white px-4 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">忽略这个词</button>
