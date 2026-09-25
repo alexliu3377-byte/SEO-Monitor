@@ -1,0 +1,4 @@
+interface:
+  display_name: "SEO Monitor UI"
+  short_description: "Keep the SEO Monitor admin UI compact and consistent"
+  default_prompt: "Review or improve this SEO Monitor interface using the established project UI rules."
