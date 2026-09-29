@@ -87,21 +87,29 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
           <Link href="/page-studio" className="btn-ghost">返回全部项目</Link>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {project.pages.map(page => (
-            <article key={page.id} className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-emerald-300 hover:shadow-md">
-              <button type="button" onClick={() => openPage(page.id)} className="flex w-full items-start gap-4 p-5 text-left">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 group-hover:bg-emerald-50 group-hover:text-emerald-700"><svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6m-6 4h6" /></svg></span>
-                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-950">{page.name}</span><span className="mt-1 block truncate text-xs text-slate-500">{page.path}</span><span className="mt-3 inline-flex rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">{page.targetDevice === 'mobile' ? '手机端设计' : '电脑端设计'}</span></span>
-              </button>
-              <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3">
-                <button type="button" onClick={() => openPage(page.id)} className="btn-ghost">编辑</button>
-                <button type="button" onClick={() => void copyCode(page.id)} className="btn-ghost">{copiedPageId === page.id ? '已复制' : '复制代码'}</button>
-                <button type="button" onClick={() => downloadPageDocument(project, page)} className="btn-ghost">下载</button>
-                {project.pages.length > 1 && <button type="button" onClick={() => deletePage(page.id)} className="ml-auto inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button>}
-              </div>
-            </article>
-          ))}
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse">
+              <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
+                <tr><th className="px-5 py-3">页面名称</th><th className="px-4 py-3">文件名</th><th className="px-4 py-3">主要设计端</th><th className="px-5 py-3 text-right">操作</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {project.pages.map(page => (
+                  <tr key={page.id} className="hover:bg-slate-50/70">
+                    <td className="px-5 py-3">
+                      <button type="button" onClick={() => openPage(page.id)} className="flex items-center gap-3 text-left font-semibold text-slate-900 hover:text-emerald-700">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500"><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6m-6 4h6" /></svg></span>
+                        <span className="truncate">{page.name}</span>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-500">{page.path}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{page.targetDevice === 'mobile' ? '手机端' : '电脑端'}</td>
+                    <td className="px-5 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => openPage(page.id)} className="btn-ghost">编辑</button><button type="button" onClick={() => void copyCode(page.id)} className="btn-ghost">{copiedPageId === page.id ? '已复制' : '复制代码'}</button><button type="button" onClick={() => downloadPageDocument(project, page)} className="btn-ghost">下载</button>{project.pages.length > 1 && <button type="button" onClick={() => deletePage(page.id)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button>}</div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       </main>
 
