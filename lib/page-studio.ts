@@ -165,6 +165,15 @@ function stripCssImageReferences(css: string) {
     .replace(/background\s*:\s*([^;]*?)url\([^;]+;?/gi, 'background: #f1f5f9;')
 }
 
+const IMAGE_PLACEHOLDER_DATA_URL = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+    <rect width="320" height="180" fill="#f1f5f9"/>
+    <rect x="1" y="1" width="318" height="178" rx="8" fill="none" stroke="#94a3b8" stroke-dasharray="7 6"/>
+    <path d="M126 116l28-31 19 20 12-13 28 24H126z" fill="#cbd5e1"/>
+    <circle cx="190" cy="66" r="11" fill="#cbd5e1"/>
+  </svg>
+`)}`
+
 export function extractImportedCode(rawHtml: string, rawCss: string, options: { removeImages?: boolean } = {}) {
   const removeImages = options.removeImages ?? true
   const source = rawHtml.trim()
@@ -182,17 +191,12 @@ export function extractImportedCode(rawHtml: string, rawCss: string, options: { 
     documentValue.querySelectorAll('picture source, video source').forEach(node => node.remove())
     documentValue.querySelectorAll('video[poster]').forEach(video => video.removeAttribute('poster'))
     documentValue.querySelectorAll('img').forEach((image, index) => {
-      const placeholder = documentValue.createElement('div')
-      const alt = image.getAttribute('alt')?.trim()
-      const width = Number.parseInt(image.getAttribute('width') ?? '', 10)
-      const height = Number.parseInt(image.getAttribute('height') ?? '', 10)
-      const ratio = width > 0 && height > 0 ? `${width} / ${height}` : '16 / 9'
-      placeholder.setAttribute('data-studio-image-placeholder', String(index + 1))
-      placeholder.setAttribute('role', 'img')
-      placeholder.setAttribute('aria-label', alt || `待替换图片 ${index + 1}`)
-      placeholder.setAttribute('style', `aspect-ratio:${ratio};min-height:96px;display:flex;align-items:center;justify-content:center;padding:16px;border:1px dashed #94a3b8;background:#f1f5f9;color:#64748b;text-align:center;font-size:14px;`)
-      placeholder.textContent = alt ? `图片位置：${alt}` : `图片位置 ${index + 1}（请替换）`
-      image.replaceWith(placeholder)
+      const alt = image.getAttribute('alt')?.trim() || `待替换图片 ${index + 1}`
+      image.removeAttribute('srcset')
+      image.removeAttribute('sizes')
+      image.setAttribute('src', IMAGE_PLACEHOLDER_DATA_URL)
+      image.setAttribute('alt', alt)
+      image.setAttribute('data-studio-image-placeholder', String(index + 1))
     })
     documentValue.querySelectorAll<HTMLElement>('[style]').forEach(element => {
       const style = element.getAttribute('style') ?? ''
