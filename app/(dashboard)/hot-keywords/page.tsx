@@ -662,6 +662,10 @@ export default function HotRadarPage() {
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]))
   }
   const detailVolumeRisingByDate = useMemo(() => groupByDateWithType(detailVolumeRisingRows), [detailVolumeRisingRows]) // eslint-disable-line react-hooks/exhaustive-deps
+  const detailVolumeEntry = useMemo(
+    () => detailKw ? data?.volumeRisingWords.find(row => row.keyword === detailKw) ?? null : null,
+    [data, detailKw]
+  )
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1145,13 +1149,66 @@ export default function HotRadarPage() {
               <div>
                 <h3 className="font-semibold text-gray-900">{detailKw}</h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {activeTab === 'wordLib' ? '近30天长尾词分布' : '近30天出现记录'}
+                  {activeTab === 'volumeRising' ? '搜索量变化与近30天排名记录' : activeTab === 'wordLib' ? '近30天长尾词分布' : '近30天出现记录'}
                 </p>
               </div>
               <button type="button" aria-label="关闭关键词详情" onClick={() => setDetailKw(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
             <div className="overflow-y-auto flex-1 p-4">
-              {detailLoading ? (
+              {activeTab === 'volumeRising' ? (
+                <div className="space-y-4">
+                  {detailVolumeEntry && (
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                      <div>
+                        <p className="text-xs text-gray-400">之前</p>
+                        <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-800">{fmtVolume(getBaselineVolume(detailVolumeEntry))}</p>
+                        <p className="mt-0.5 text-[11px] text-gray-400">{detailVolumeEntry.baselineDate?.replaceAll('-', '/') || '追踪起点'}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-gray-300">→</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatNetGrowthPercent(detailVolumeEntry)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">现在</p>
+                        <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVolume(detailVolumeEntry.volume)}</p>
+                        <p className="mt-0.5 text-[11px] text-gray-400">{detailVolumeEntry.last_date?.replaceAll('-', '/') || '最新记录'}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-gray-500">近30天排名波动</p>
+                    {detailLoading ? (
+                      <div className="flex items-center justify-center py-8 text-gray-400 gap-2">
+                        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        加载中...
+                      </div>
+                    ) : detailVolumeRisingByDate.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-8">近30天暂无排名记录</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {detailVolumeRisingByDate.map(([date, entries]) => (
+                          <div key={date} className="flex items-start gap-2">
+                            <span className="text-xs text-gray-400 w-20 flex-shrink-0 pt-1.5">{date.replaceAll('-', '/')}</span>
+                            <div className="flex flex-wrap gap-1">
+                              {entries.map(({ domain, type }) => (
+                                <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-1 text-gray-700">
+                                  <span className="truncate max-w-[130px]">{domain}</span>
+                                  <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
+                                    {type === 'rankup' ? '↑' : '↓'}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : detailLoading ? (
                 <div className="flex items-center justify-center py-10 text-gray-400 gap-2">
                   <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1159,29 +1216,6 @@ export default function HotRadarPage() {
                   </svg>
                   加载中...
                 </div>
-              ) : activeTab === 'volumeRising' ? (
-                /* 搜索量上涨：按日期分组，每个站点chip旁标出当天是涨排还是跌排 */
-                detailVolumeRisingByDate.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-10">近30天暂无排名记录</p>
-                ) : (
-                  <div className="space-y-2">
-                    {detailVolumeRisingByDate.map(([date, entries]) => (
-                      <div key={date} className="flex items-start gap-2">
-                        <span className="text-xs text-gray-400 w-16 flex-shrink-0 pt-1.5">{date.slice(5)}</span>
-                        <div className="flex flex-wrap gap-1">
-                          {entries.map(({ domain, type }) => (
-                            <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-1 text-gray-700">
-                              <span className="truncate max-w-[130px]">{domain}</span>
-                              <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                                {type === 'rankup' ? '↑' : '↓'}
-                              </span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )
               ) : activeTab === 'wordLib' ? (
                 /* 更新词库：按站点分组显示长尾词 */
                 wordLibSiteKws.length === 0 ? (

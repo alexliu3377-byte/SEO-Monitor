@@ -2843,30 +2843,57 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       )
     }
     if (detailSource === '搜索上涨') {
+      const volumeEntry = radarData?.volumeRisingWords.find(row => row.keyword === detailKw) ?? null
       const byDate = new Map<string, { domain: string; type: 'rankup' | 'rankdown' }[]>()
       for (const r of detailVolumeRisingRows) {
         if (!byDate.has(r.date)) byDate.set(r.date, [])
         byDate.get(r.date)!.push({ domain: r.domain, type: r.type })
       }
       const sorted = Array.from(byDate.entries()).sort((a, b) => b[0].localeCompare(a[0]))
-      if (sorted.length === 0) return <p className="text-sm text-gray-400 text-center py-10">近30天暂无排名记录</p>
       return (
-        <div className="space-y-2">
-          {sorted.map(([date, entries]) => (
-            <div key={date} className="flex items-start gap-2">
-              <span className="text-xs text-gray-400 w-10 flex-shrink-0 pt-1">{date.slice(5)}</span>
-              <div className="flex flex-wrap gap-1">
-                {entries.map(({ domain, type }) => (
-                  <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-0.5 text-gray-700">
-                    <span>{domain}</span>
-                    <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                      {type === 'rankup' ? '↑' : '↓'}
-                    </span>
-                  </span>
-                ))}
+        <div className="space-y-4">
+          {volumeEntry && (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <div>
+                <p className="text-xs text-gray-400">之前</p>
+                <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-800">{fmtVol(getBaselineVolume(volumeEntry))}</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">{volumeEntry.baselineDate?.replaceAll('-', '/') || '追踪起点'}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-gray-300">→</p>
+                <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatNetGrowthPercent(volumeEntry)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-400">现在</p>
+                <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVol(volumeEntry.volume)}</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">{volumeEntry.last_date?.replaceAll('-', '/') || '最新记录'}</p>
               </div>
             </div>
-          ))}
+          )}
+          <div>
+            <p className="mb-2 text-xs font-medium text-gray-500">近30天排名波动</p>
+            {sorted.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">近30天暂无排名记录</p>
+            ) : (
+              <div className="space-y-2">
+                {sorted.map(([date, entries]) => (
+                  <div key={date} className="flex items-start gap-2">
+                    <span className="text-xs text-gray-400 w-20 flex-shrink-0 pt-1">{date.replaceAll('-', '/')}</span>
+                    <div className="flex flex-wrap gap-1">
+                      {entries.map(({ domain, type }) => (
+                        <span key={`${domain}|${type}`} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-1.5 py-0.5 text-gray-700">
+                          <span>{domain}</span>
+                          <span className={type === 'rankup' ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
+                            {type === 'rankup' ? '↑' : '↓'}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )
     }
@@ -3503,7 +3530,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
               <div>
                 <h3 className="font-semibold text-gray-900">{detailKw}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">近30天出现记录</p>
+                <p className="text-xs text-gray-400 mt-0.5">{detailSource === '搜索上涨' ? '搜索量变化与近30天排名记录' : '近30天出现记录'}</p>
               </div>
               <button type="button" aria-label="关闭关键词详情" onClick={() => setDetailKw(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
