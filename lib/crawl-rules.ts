@@ -246,6 +246,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '趋势发现（内部试行）',
     badge: '独立 GitHub 调度 · 专用电脑低频执行',
     items: [
+      { label: '共新增词 / 更新词库日期与类型', text: '这两个工作入口默认显示昨日资料，仍可通过资料日期切回近30天历史。共新增词保留“首次出现=新增、再次出现=更新”的判断；更新词库代表旧词扩出新长尾，列表固定显示“更新”。这里的铭牌只描述词库资料性质，不改变组员认领后默认执行“新增”任务。get_wordlib_words 的 last_date 历史上来自 discovered_at（凌晨抓取日），前端把等于今日的批次归到昨日资料日，避免把抓取时间误当成竞品资料日期。' },
       { label: '触发方式', text: '独立私有仓库 trend-collector-worker 每30分钟派发一次 GitHub Actions；任务只投递给带 trend-collector 标签的新电脑 self-hosted Runner，并用 workflow concurrency 保证同一时刻只运行一轮。每轮先随机等待0–15分钟，再向主系统领取最多一个到期词；没有到期任务就正常结束，不由 Vercel 或主仓库执行浏览器采集' },
       { label: '平台范围', text: 'v3.0.0 第一阶段先接小红书和抖音网页搜索首屏，小黑盒配置保留但默认关闭，等前两者稳定后再单独适配；每个平台使用隔离的本地 Chrome profile，由使用者人工登录' },
       { label: '采集词与任务队列', text: '只有项目负责人可在“趋势发现”页面维护搜索入口词，每个平台最多100个、每个词2–40字符；设置保存在 trend_collection_queries。独立 Worker 通过带采集密钥的 claim 接口原子领取最久未执行的一个词，数据库使用90分钟租约避免多节点重复领取，同一个词领取后至少间隔12小时才再次到期；词量增长时会自动拉长轮换周期，不需要增加 Windows 计划任务' },

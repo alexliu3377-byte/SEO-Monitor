@@ -58,6 +58,12 @@ const PAGE_SIZE = 20
 function getMYDate(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
+
+// 更新词库的 RPC 记录的是凌晨抓取时间；日常批次实际对应昨日竞品资料。
+function normalizeWordLibDate(value: unknown, today: string, yesterday: string): string {
+  const date = value ? String(value).slice(0, 10) : ''
+  return date === today ? yesterday : date
+}
 function fmtVol(v: number) {
   if (!v || v <= 0) return '—'
   return v.toLocaleString()
@@ -1770,9 +1776,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     fetch('/api/wordlib')
       .then(r => r.json())
       .then(({ data }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null }) => {
-        const t = today
         setWordLibData((data || []).map(r => {
-          const last_date = String(r.last_date || '').slice(0, 10)
+          const last_date = normalizeWordLibDate(r.last_date, today, yesterday)
           return {
             keyword: r.keyword,
             longTailCount: r.long_tail_count,
@@ -1780,14 +1785,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             siteCount: r.site_count,
             sites: r.sites || [],
             last_date,
-            first_date: last_date === t ? t : '',
+            first_date: '',
           }
         }))
         setWordLibLoaded(true)
       })
       .catch(() => { setWordLibData([]) })
       .finally(() => { setWordLibLoading(false) })
-  }, [isWorkspaceRoute, rightTab, wordLibLoaded, wordLibLoading, today])
+  }, [isWorkspaceRoute, rightTab, wordLibLoaded, wordLibLoading, today, yesterday])
 
   useEffect(() => {
     if (!isWorkspaceRoute || !activeGroupId || selectedDate !== today) return
@@ -2630,7 +2635,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (rightTab === 'wordLib') {
       if (wordLibLoading) return <Spinner />
       const datedWordLibWords = filterByRadarDate(wordLibWords, radarDate)
-        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       const sorted_wl = sortCol && sortDir ? [...datedWordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.longTailCount??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.longTailCount??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -2658,8 +2662,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有匹配的词库数据</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
-                  badge={getBadge(w.first_date, w.last_date, yesterday)}
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} includeYesterday />}
+                  badge="updated"
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />}
                   claimed={false}
                   onClaim={() => claimKeyword(w.keyword, '更新词库', 0)}
                   onView={() => openDetail(w.keyword, '更新词库')}>
@@ -3244,7 +3248,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(''); setBadgeFilter('all'); setSortCol('date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' || tab === 'wordLib' ? yesterday : ''); setBadgeFilter('all'); setSortCol('date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}
@@ -3262,7 +3266,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
                       </select>
                     </label>
-                    {(['cross', 'rank', 'streak', 'newWords', 'wordLib'] as RightTab[]).includes(rightTab) && (
+                    {(['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab) && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-400">
                         类型
                         <div className="inline-flex overflow-hidden rounded border border-gray-200 bg-white">

@@ -46,6 +46,13 @@ function getMYDate(offsetDays = 0): string {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
 
+// 更新词库按“哪一天的竞品资料”展示。它的 RPC 历史上用 discovered_at
+// （今天凌晨抓到），而日常抓取实际处理的是昨日资料，因此当天抓取批次应显示为昨日。
+function normalizeWordLibDate(value: unknown, today: string, yesterday: string): string {
+  const date = value ? String(value).slice(0, 10) : ''
+  return date === today ? yesterday : date
+}
+
 type Badge = 'new' | 'updated' | null
 
 // 标签描述这条资料在其记录日期当天的性质，而不是只提醒今天。这样轮休后
@@ -423,9 +430,8 @@ export default function HotRadarPage() {
     fetch('/api/wordlib')
       .then(r => r.json())
       .then(({ data }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null }) => {
-        const t = today
         setWordLibData((data || []).map(r => {
-          const last_date = String(r.last_date || '').slice(0, 10)
+          const last_date = normalizeWordLibDate(r.last_date, today, yesterday)
           return {
             keyword: r.keyword,
             longTailCount: r.long_tail_count,
@@ -433,14 +439,16 @@ export default function HotRadarPage() {
             siteCount: r.site_count,
             sites: r.sites || [],
             last_date,
-            first_date: last_date === t ? t : '',
+            // “更新词库”本身就是旧词扩出新长尾后的更新线索，不把抓取日
+            // 伪装成首次出现日；列表统一显示“更新”。
+            first_date: '',
           }
         }))
         setWordLibLoaded(true)
       })
       .catch(() => { setWordLibData([]) })
       .finally(() => { setWordLibLoading(false) })
-  }, [activeTab, wordLibLoaded, wordLibLoading, today])
+  }, [activeTab, wordLibLoaded, wordLibLoading, today, yesterday])
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -569,7 +577,13 @@ export default function HotRadarPage() {
 
   const pagedList = activeList.slice(page * pageSize, (page + 1) * pageSize)
 
-  function handleTabChange(tab: Tab) { setActiveTab(tab); setPage(0); setFilterDate(''); setSortCol('date'); setSortDir('desc') }
+  function handleTabChange(tab: Tab) {
+    setActiveTab(tab)
+    setPage(0)
+    setFilterDate(tab === 'new' || tab === 'wordLib' ? yesterday : '')
+    setSortCol('date')
+    setSortDir('desc')
+  }
 
   const sortIcons = (col: string) => {
     const isAsc = sortCol === col && sortDir === 'asc'
@@ -1056,7 +1070,7 @@ export default function HotRadarPage() {
                     ) : (
                       (pagedList as (WordEntry & { longTailCount: number })[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
-                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} includeYesterday />
+                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
                           </td>
