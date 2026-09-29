@@ -11,6 +11,7 @@ import {
   buildPageDocument,
   copyPageDocument,
   downloadPageDocument,
+  extractImportedCode,
   getPageStudioProject,
   savePageStudioProject,
 } from '@/lib/page-studio'
@@ -40,9 +41,13 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [rightPanel, setRightPanel] = useState<'style' | 'traits'>('style')
-  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | null>(null)
+  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | null>(null)
   const [newPageName, setNewPageName] = useState('')
   const [newPageDevice, setNewPageDevice] = useState<'desktop' | 'mobile'>('desktop')
+  const [newPageSource, setNewPageSource] = useState<'blank' | 'code'>('blank')
+  const [codeHtml, setCodeHtml] = useState('')
+  const [codeCss, setCodeCss] = useState('')
+  const [codeRemoveImages, setCodeRemoveImages] = useState(true)
   const [previewDocument, setPreviewDocument] = useState('')
   const [copied, setCopied] = useState(false)
 
@@ -180,7 +185,11 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const editor = editorRef.current
     if (!current || !editor) return
     if (!newPageName.trim()) return
-    const next = addPageStudioPage(current, newPageName, newPageDevice)
+    let next = addPageStudioPage(current, newPageName, newPageDevice)
+    if (newPageSource === 'code') {
+      const imported = extractImportedCode(codeHtml, codeCss, { removeImages: codeRemoveImages })
+      next = { ...next, pages: next.pages.map(item => item.id === next.activePageId ? { ...item, html: imported.html, css: imported.css } : item) }
+    }
     const page = next.pages.find(item => item.id === next.activePageId)
     if (!page) return
     editor.DomComponents.clear()
@@ -192,6 +201,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     setDialog(null)
     setNewPageName('')
     setNewPageDevice('desktop')
+    setNewPageSource('blank')
+    setCodeHtml('')
+    setCodeCss('')
+    setCodeRemoveImages(true)
     const nextDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
     editor.setDevice(nextDevice)
     setDevice(nextDevice)
@@ -225,6 +238,28 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     window.setTimeout(() => setCopied(false), 1800)
   }
 
+  function replaceCurrentWithCode() {
+    const current = snapshotCurrent()
+    const editor = editorRef.current
+    if (!current || !editor || !codeHtml.trim()) return
+    const imported = extractImportedCode(codeHtml, codeCss, { removeImages: codeRemoveImages })
+    editor.DomComponents.clear()
+    editor.CssComposer.clear()
+    editor.setComponents(imported.html)
+    editor.setStyle(imported.css)
+    const next = {
+      ...current,
+      pages: current.pages.map(page => page.id === current.activePageId ? { ...page, html: imported.html, css: imported.css, projectData: undefined } : page),
+    }
+    projectRef.current = next
+    setProject(next)
+    setSaved(false)
+    setDialog(null)
+    setCodeHtml('')
+    setCodeCss('')
+    setCodeRemoveImages(true)
+  }
+
   if (!project) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-100"><div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm"><h1 className="text-lg font-semibold text-slate-900">找不到这个项目</h1><p className="mt-2 text-sm text-slate-500">它可能已被删除，或保存在另一个浏览器中。</p><Link href="/page-studio" className="btn-primary mt-5">返回项目管理</Link></div></div>
   }
@@ -248,6 +283,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         <button type="button" aria-pressed={rightPanelOpen} onClick={() => setRightPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{rightPanelOpen ? '隐藏属性' : '显示属性'}</button>
         <button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button>
         <button type="button" onClick={showPreview} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">预览</button>
+        <button type="button" onClick={() => setDialog('import-code')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">粘贴代码</button>
         <button type="button" onClick={persist} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">保存</button>
         <button type="button" onClick={() => void copyCurrentCode()} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">{copied ? '已复制' : '复制代码'}</button>
         <button type="button" onClick={exportCurrent} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700">导出当前页</button>
@@ -273,7 +309,12 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
 
       {dialog === 'preview' && <AppDialog title={`${activePage.name} · 页面预览`} description="链接可点击；外部网址会在预览框中打开。" onClose={() => setDialog(null)} width="max-w-6xl" bodyClassName="min-h-0 flex-1 bg-slate-200 p-3"><iframe title="页面预览" srcDoc={previewDocument} sandbox="allow-popups allow-popups-to-escape-sandbox" className="h-[72vh] w-full rounded-lg border border-slate-300 bg-white" /></AppDialog>}
       {dialog === 'audit' && <AppDialog title="百度基础检查" description="这是导出前的结构提醒，不代表搜索排名保证。" onClose={() => setDialog(null)} width="max-w-xl"><div className="space-y-3">{audits.map(item => <div key={item.label} className={`rounded-lg border p-4 ${item.ok ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}><div className="flex items-center justify-between"><strong className="text-sm text-slate-900">{item.label}</strong><span className={`text-xs font-semibold ${item.ok ? 'text-emerald-700' : 'text-amber-700'}`}>{item.ok ? '通过' : '需检查'}</span></div><p className="mt-1 text-sm text-slate-600">{item.detail}</p></div>)}</div></AppDialog>}
-      {dialog === 'add-page' && <AppDialog title="增加页面" description="先命名并选择主要设计尺寸；进入画布后仍可切换预览。" onClose={() => setDialog(null)} width="max-w-md" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!newPageName.trim()} onClick={addPage} className="btn-primary">增加页面</button></div>}><label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={newPageName} onChange={event => setNewPageName(event.target.value)} placeholder="例如：关于我们" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500" /></label><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端'], ['mobile', '手机端']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageDevice === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-device" value={value} checked={newPageDevice === value} onChange={() => setNewPageDevice(value)} className="sr-only" />{label}</label>)}</div></fieldset></AppDialog>}
+      {dialog === 'add-page' && <AppDialog title="增加页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setDialog(null)} width={newPageSource === 'code' ? 'max-w-5xl' : 'max-w-md'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!newPageName.trim() || (newPageSource === 'code' && !codeHtml.trim())} onClick={addPage} className="btn-primary">增加页面</button></div>}><label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={newPageName} onChange={event => setNewPageName(event.target.value)} placeholder="例如：关于我们" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500" /></label><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">建立方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['blank', '空白页面'], ['code', '粘贴页面代码']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageSource === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-source" value={value} checked={newPageSource === value} onChange={() => setNewPageSource(value)} className="sr-only" />{label}</label>)}</div></fieldset><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端'], ['mobile', '手机端']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageDevice === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-device" value={value} checked={newPageDevice === value} onChange={() => setNewPageDevice(value)} className="sr-only" />{label}</label>)}</div></fieldset>{newPageSource === 'code' && <CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} />}</AppDialog>}
+      {dialog === 'import-code' && <AppDialog title={`粘贴代码到“${activePage.name}”`} description="确认后会替换当前页面的画布内容；尚未保存的当前内容会被覆盖。" onClose={() => setDialog(null)} width="max-w-5xl" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!codeHtml.trim()} onClick={replaceCurrentWithCode} className="btn-primary">替换当前页面</button></div>}><CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} /></AppDialog>}
     </div>
   )
+}
+
+function CodeImportFields({ html, css, removeImages, onHtml, onCss, onRemoveImages }: { html: string; css: string; removeImages: boolean; onHtml: (value: string) => void; onCss: (value: string) => void; onRemoveImages: (value: boolean) => void }) {
+  return <><label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3"><input type="checkbox" checked={removeImages} onChange={event => onRemoveImages(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600" /><span><span className="block text-sm font-semibold text-slate-900">替换原页面图片</span><span className="mt-0.5 block text-xs text-slate-600">保留图片标签、class 与尺寸，只替换图片内容。</span></span></label><div className="mt-5 grid gap-4 lg:grid-cols-2"><label className="block text-sm font-medium text-slate-700">HTML<textarea value={html} onChange={event => onHtml(event.target.value)} placeholder="粘贴完整页面 HTML" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label><label className="block text-sm font-medium text-slate-700">CSS（可选）<textarea value={css} onChange={event => onCss(event.target.value)} placeholder="依次粘贴页面使用的 CSS" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label></div></>
 }

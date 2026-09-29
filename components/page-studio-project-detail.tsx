@@ -9,6 +9,7 @@ import {
   addPageStudioPage,
   copyPageDocument,
   downloadPageDocument,
+  extractImportedCode,
   getPageStudioProject,
   savePageStudioProject,
 } from '@/lib/page-studio'
@@ -19,6 +20,10 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
   const [showAddPage, setShowAddPage] = useState(false)
   const [pageName, setPageName] = useState('')
   const [targetDevice, setTargetDevice] = useState<'desktop' | 'mobile'>('desktop')
+  const [pageSource, setPageSource] = useState<'blank' | 'code'>('blank')
+  const [pageHtml, setPageHtml] = useState('')
+  const [pageCss, setPageCss] = useState('')
+  const [removeImages, setRemoveImages] = useState(true)
   const [copiedPageId, setCopiedPageId] = useState<string | null>(null)
 
   useEffect(() => setProject(getPageStudioProject(projectId)), [projectId])
@@ -31,11 +36,20 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
 
   function createPage() {
     if (!project || !pageName.trim()) return
-    const next = savePageStudioProject(addPageStudioPage(project, pageName, targetDevice))
+    let draft = addPageStudioPage(project, pageName, targetDevice)
+    if (pageSource === 'code') {
+      const imported = extractImportedCode(pageHtml, pageCss, { removeImages })
+      draft = { ...draft, pages: draft.pages.map(page => page.id === draft.activePageId ? { ...page, html: imported.html, css: imported.css } : page) }
+    }
+    const next = savePageStudioProject(draft)
     setProject(next)
     setShowAddPage(false)
     setPageName('')
     setTargetDevice('desktop')
+    setPageSource('blank')
+    setPageHtml('')
+    setPageCss('')
+    setRemoveImages(true)
   }
 
   function deletePage(pageId: string) {
@@ -113,9 +127,11 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
         </section>
       </main>
 
-      {showAddPage && <AppDialog title="新增页面" description="先确定页面名称和主要设计尺寸，进入编辑器后仍可切换预览。" onClose={() => setShowAddPage(false)} width="max-w-lg" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddPage(false)} className="btn-secondary">取消</button><button type="button" disabled={!pageName.trim()} onClick={createPage} className="btn-primary">新增页面</button></div>}>
+      {showAddPage && <AppDialog title="新增页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setShowAddPage(false)} width={pageSource === 'code' ? 'max-w-5xl' : 'max-w-lg'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddPage(false)} className="btn-secondary">取消</button><button type="button" disabled={!pageName.trim() || (pageSource === 'code' && !pageHtml.trim())} onClick={createPage} className="btn-primary">新增页面</button></div>}>
         <label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={pageName} onChange={event => setPageName(event.target.value)} placeholder="例如：游戏下载页" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
+        <fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">建立方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['blank', '空白页面', '使用基础响应式模板'], ['code', '粘贴页面代码', '导入 HTML 与 CSS 后修改']] as const).map(([value, label, description]) => <label key={value} className={`cursor-pointer rounded-lg border p-4 ${pageSource === value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}><input type="radio" name="page-source" value={value} checked={pageSource === value} onChange={() => setPageSource(value)} className="sr-only" /><span className="block text-sm font-semibold text-slate-900">{label}</span><span className="mt-1 block text-xs text-slate-500">{description}</span></label>)}</div></fieldset>
         <fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端', '以宽屏页面为主要设计画布'], ['mobile', '手机端', '以 375px 手机页面开始设计']] as const).map(([value, label, description]) => <label key={value} className={`cursor-pointer rounded-lg border p-4 ${targetDevice === value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}><input type="radio" name="target-device" value={value} checked={targetDevice === value} onChange={() => setTargetDevice(value)} className="sr-only" /><span className="block text-sm font-semibold text-slate-900">{label}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{description}</span></label>)}</div></fieldset>
+        {pageSource === 'code' && <><label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3"><input type="checkbox" checked={removeImages} onChange={event => setRemoveImages(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600" /><span><span className="block text-sm font-semibold text-slate-900">替换原页面图片</span><span className="mt-0.5 block text-xs text-slate-600">保留图片标签、class 与尺寸，只替换图片内容。</span></span></label><div className="mt-5 grid gap-4 lg:grid-cols-2"><label className="block text-sm font-medium text-slate-700">HTML<textarea value={pageHtml} onChange={event => setPageHtml(event.target.value)} placeholder="粘贴完整页面 HTML" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label><label className="block text-sm font-medium text-slate-700">CSS（可选）<textarea value={pageCss} onChange={event => setPageCss(event.target.value)} placeholder="依次粘贴页面使用的 CSS" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label></div></>}
       </AppDialog>}
     </div>
   )
