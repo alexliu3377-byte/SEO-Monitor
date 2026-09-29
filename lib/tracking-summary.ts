@@ -255,18 +255,19 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
 }
 
 // 研究报告"机会缺口"（scripts/research-report.ts Stage2）用——判断一个竞品
-// 赢下的词是不是我方"零覆盖"，要靠这份"我方历史上有没有做过这个词"的全量
-// 集合去比对，不能按周期限定（三个月前做过、现在还在排名的词依然算已覆盖，
-// 不该因为这期没提交就被误判成缺口）。site_tracking_records 永久保留、持续
-// 增长，超3000行会被 PostgREST 静默截断（这个项目已经踩过好几次同一个坑，
-// 见 project_supabase_row_limit_hard_cap），必须走 fetchAllRows 分页，不能
-// 直接 select()。只要 keyword 一列，量再大也很轻。
+// 赢下的词是不是我方"零覆盖"，要靠这份"我方历史上有没有提交过这个词"的
+// 全量集合去比对，不能按周期限定。member_claimed_keywords 一条提交只存一行，
+// 是这项判断的业务源头；不要再扫描 site_tracking_records 的每日追踪历史，后者
+// 会把同一份提交重复数十次，数据增长后也容易在周报 finalize 阶段触发数据库
+// statement timeout。仍然走 fetchAllRows，避免超过 PostgREST 单次 3000 行上限。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchOwnCoveredKeywordSet(service: any): Promise<Set<string>> {
-  const { count } = await service.from('site_tracking_records').select('id', { count: 'exact', head: true })
   const rows = await fetchAllRows<{ keyword: string }>((from, to) =>
-    service.from('site_tracking_records').select('keyword').order('id', { ascending: true }).range(from, to),
-    { countHint: count ?? 0 })
+    service.from('member_claimed_keywords')
+      .select('keyword')
+      .eq('status', 'submitted')
+      .order('id', { ascending: true })
+      .range(from, to))
   return new Set(rows.map(r => r.keyword.trim()))
 }
 
@@ -284,4 +285,3 @@ export async function fetchOwnSiteDomains(service: any): Promise<Set<string>> {
   }
   return domains
 }
-
