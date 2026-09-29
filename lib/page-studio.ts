@@ -56,8 +56,14 @@ h1 { max-width: 760px; margin: 8px 0 16px; font-size: clamp(36px, 6vw, 68px); li
 .content-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 48px 6%; }
 article { padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; }
 article h2 { margin-top: 0; font-size: 20px; }
-footer { padding: 28px 6%; border-top: 1px solid #e2e8f0; color: #64748b; }
-@media (max-width: 720px) { .site-header { align-items: flex-start; flex-direction: column; gap: 12px; padding-top: 16px; padding-bottom: 16px; } nav { gap: 16px; } .hero { padding-top: 52px; padding-bottom: 52px; } .content-grid { grid-template-columns: 1fr; } }`
+footer { padding: 28px 6%; border-top: 1px solid #e2e8f0; color: #64748b; }`
+
+const MOBILE_STARTER_CSS = `${STARTER_CSS}
+.site-header { align-items: flex-start; flex-direction: column; gap: 12px; padding: 16px 20px; }
+nav { gap: 16px; }
+.hero { padding: 48px 20px; }
+.content-grid { grid-template-columns: 1fr; padding: 28px 20px; }
+footer { padding: 24px 20px; }`
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -122,7 +128,7 @@ export function addPageStudioPage(project: PageStudioProject, name: string, targ
   return {
     ...project,
     activePageId: pageId,
-    pages: [...project.pages, { id: pageId, name: base, path: `${pathBase}.html`, html: STARTER_HTML, css: STARTER_CSS, targetDevice }],
+    pages: [...project.pages, { id: pageId, name: base, path: `${pathBase}.html`, html: STARTER_HTML, css: targetDevice === 'mobile' ? MOBILE_STARTER_CSS : STARTER_CSS, targetDevice }],
   }
 }
 

@@ -152,6 +152,25 @@
   min-height: 30px;
   color: #0f172a;
 }
+.page-studio-panel .gjs-layers {
+  background: #fff !important;
+  color: #334155 !important;
+}
+.page-studio-panel .gjs-layer {
+  background: #fff !important;
+  color: #475569 !important;
+  font-size: 12px;
+}
+.page-studio-panel .gjs-layer-title {
+  min-height: 34px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff !important;
+}
+.page-studio-panel .gjs-layer-title:hover,
+.page-studio-panel .gjs-layer.gjs-selected > .gjs-layer-title {
+  background: #ecfdf5 !important;
+  color: #047857 !important;
+}
 #page-studio-canvas .gjs-editor,
 #page-studio-canvas .gjs-cv-canvas {
   width: 100%;

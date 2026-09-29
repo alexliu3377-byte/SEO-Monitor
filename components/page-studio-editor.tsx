@@ -37,8 +37,8 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<PageStudioProject | null>(null)
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(true)
-  const [device, setDevice] = useState<'Desktop' | 'Tablet' | 'Mobile'>('Desktop')
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const [leftPanel, setLeftPanel] = useState<'blocks' | 'layers'>('blocks')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [rightPanel, setRightPanel] = useState<'style' | 'traits'>('style')
   const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | null>(null)
@@ -73,6 +73,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         components: page.html,
         style: page.css,
         blockManager: { appendTo: '#page-studio-blocks' },
+        layerManager: { appendTo: '#page-studio-layers' },
         traitManager: { appendTo: '#page-studio-traits' },
         styleManager: {
           appendTo: '#page-studio-styles',
@@ -80,15 +81,14 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             { name: '尺寸与位置', open: true, buildProps: ['display', 'position', 'width', 'height', 'max-width', 'min-height', 'margin', 'padding'] },
             { name: '文字', open: true, buildProps: ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color', 'text-align', 'text-decoration'] },
             { name: '外观', open: false, buildProps: ['background-color', 'border', 'border-radius', 'box-shadow', 'opacity'] },
-            { name: '响应式', open: false, buildProps: ['flex-direction', 'justify-content', 'align-items', 'gap', 'grid-template-columns', 'overflow'] },
+            { name: '布局', open: false, buildProps: ['flex-direction', 'justify-content', 'align-items', 'gap', 'grid-template-columns', 'overflow'] },
           ],
         },
         panels: { defaults: [] },
         deviceManager: {
           devices: [
-            { id: 'Desktop', name: '电脑', width: '' },
-            { id: 'Tablet', name: '平板', width: '768px', widthMedia: '900px' },
-            { id: 'Mobile', name: '手机', width: '375px', widthMedia: '600px' },
+            { id: 'Desktop', name: '电脑页面', width: '1440px' },
+            { id: 'Mobile', name: 'M端页面', width: '375px' },
           ],
         },
         canvas: { styles: [], scripts: [] },
@@ -107,8 +107,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       if (page.projectData) editor.loadProjectData(page.projectData)
       const initialDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
       editor.setDevice(initialDevice)
-      setDevice(initialDevice)
       editor.on('update', () => setSaved(false))
+      editor.on('component:selected', component => {
+        if (component.is('image')) component.set('resizable', true)
+      })
       editorRef.current = editor
       setReady(true)
     }
@@ -176,7 +178,6 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     setProject(next)
     const nextDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
     editor.setDevice(nextDevice)
-    setDevice(nextDevice)
     setSaved(false)
   }
 
@@ -207,7 +208,6 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     setCodeRemoveImages(true)
     const nextDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
     editor.setDevice(nextDevice)
-    setDevice(nextDevice)
     setSaved(false)
   }
 
@@ -276,9 +276,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         <select aria-label="当前页面" value={project.activePageId} onChange={event => loadPage(event.target.value)} className="h-9 min-w-40 rounded-lg border border-slate-200 bg-white px-3 text-sm"><option disabled>选择页面</option>{project.pages.map(page => <option key={page.id} value={page.id}>{page.name} · {page.path}</option>)}</select>
         <button type="button" onClick={() => setDialog('add-page')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">+ 页面</button>
 
-        <div className="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
-          {([['Desktop', '电脑'], ['Tablet', '平板'], ['Mobile', '手机']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={device === value} onClick={() => { setDevice(value); editorRef.current?.setDevice(value) }} className={`h-7 rounded-md px-2.5 text-xs font-medium ${device === value ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
-        </div>
+        <span className="ml-auto inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">{activePage.targetDevice === 'mobile' ? 'M端页面 · 375px' : 'PC页面 · 1440px'}</span>
         <button type="button" aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{leftPanelOpen ? '隐藏模块' : '显示模块'}</button>
         <button type="button" aria-pressed={rightPanelOpen} onClick={() => setRightPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{rightPanelOpen ? '隐藏属性' : '显示属性'}</button>
         <button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button>
@@ -290,9 +288,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className={`${leftPanelOpen ? 'w-52' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
-          <div className="border-b border-slate-200 px-4 py-3"><h2 className="text-xs font-semibold text-slate-900">添加模块</h2><p className="mt-1 text-[11px] leading-4 text-slate-500">拖进中间画布，再选中修改。</p></div>
-          <div id="page-studio-blocks" className="page-studio-panel" />
+        <aside className={`${leftPanelOpen ? 'w-60' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
+          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>添加模块</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>页面结构</button></div>
+          <div id="page-studio-blocks" className={`page-studio-panel ${leftPanel === 'blocks' ? '' : 'hidden'}`} />
+          <div id="page-studio-layers" className={`page-studio-panel ${leftPanel === 'layers' ? '' : 'hidden'}`} />
         </aside>
 
         <main className="relative min-w-0 flex-1 bg-slate-200 p-4">
