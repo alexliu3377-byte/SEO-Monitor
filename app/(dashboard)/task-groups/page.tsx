@@ -22,7 +22,8 @@ interface RankWord { keyword: string; siteCount: number; volume: number; sites: 
 interface StreakWord { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }
 interface CrossWord { keyword: string; volume: number; last_date: string; first_date: string; newSites: string[]; rankSites: string[] }
 interface VolumeRisingWord {
-  keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string
+  keyword: string; volume: number; prevVolume: number | null; change: number
+  baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
 }
 
@@ -67,6 +68,23 @@ function normalizeWordLibDate(value: unknown, today: string, yesterday: string):
 function fmtVol(v: number) {
   if (!v || v <= 0) return '—'
   return v.toLocaleString()
+}
+function formatSignedVolume(value: number) {
+  if (!value) return '—'
+  return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
+}
+function getNetVolumeChange(row: VolumeRisingWord) {
+  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
+}
+function getBaselineVolume(row: VolumeRisingWord) {
+  return Number.isFinite(row.baselineVolume)
+    ? row.baselineVolume
+    : row.prevVolume ?? Math.max(0, row.volume - row.change)
+}
+function getVolumeSignal(row: VolumeRisingWord) {
+  if (row.change < 0) return { label: '回落仍增', className: 'text-amber-600' }
+  if (row.change === 0) return { label: '净增维持', className: 'text-gray-400' }
+  return { label: '继续净增', className: 'text-green-600' }
 }
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '—' }
 function normalizeUrl(raw: string): string {
@@ -812,7 +830,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 站点域名过滤，全组共享同一份全局列表。
   const volumeRisingWordsSorted = useMemo(() => {
     if (!radarData) return []
-    return [...radarData.volumeRisingWords].sort((a, b) => b.last_date.localeCompare(a.last_date) || b.change - a.change)
+    return [...radarData.volumeRisingWords].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date))
   }, [radarData])
 
   const allNewWords = useMemo(() => {
@@ -2405,26 +2423,30 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const base_vr = filterByRadarDate(volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword)), radarDate)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'change' ? (a.change??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'change' ? (b.change??0) : 0
+        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(a) : sortCol === 'change' ? (a.change??0) : 0
+        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(b) : sortCol === 'change' ? (b.change??0) : 0
         if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_vr
       const slice = sorted_vr.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
       return (
         <>
-          <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
+          <div className="border-b border-gray-100 bg-emerald-50/50 px-4 py-2 text-xs text-gray-600">
+            <span className="font-medium text-emerald-700">判断规则：</span>累计净增 = 当前搜索量 − 追踪起点；只有大于 0 才是真正上涨。
+          </div>
+          <table aria-label="数据表格" className="w-full min-w-[780px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
-              <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">涨幅{sortIcons('change')}</span></th>
+              <th className="px-2 py-2 text-center font-medium w-24" title="当前搜索量 − 系统建立的追踪起点"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">累计净增{sortIcons('netChange')}</span></th>
+              <th className="px-2 py-2 text-center font-medium w-24" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">本次变化{sortIcons('change')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-16">排名波动</th>
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
               {slice.length === 0 ? (
-                <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+                <tr><td colSpan={7} className="table-td text-center text-gray-400 py-10">暂无累计净增的词</td></tr>
               ) : slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge="updated"
@@ -2432,7 +2454,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '搜索上涨', w.volume)}
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
-                  <td className="px-2 py-2 text-center text-xs font-medium text-green-600">+{w.change.toLocaleString()}</td>
+                  <td className="px-2 py-2 text-center text-xs" title={`追踪起点${w.baselineDate ? ` ${w.baselineDate}` : ''}：${fmtVol(getBaselineVolume(w))} → 当前 ${fmtVol(w.volume)}`}>
+                    <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
+                      <span className="font-medium text-green-600">{formatSignedVolume(getNetVolumeChange(w))}</span>
+                      <span className={`text-[10px] ${getVolumeSignal(w).className}`}>{getVolumeSignal(w).label}</span>
+                    </span>
+                  </td>
+                  <td className={`px-2 py-2 text-center text-xs font-medium ${w.change > 0 ? 'text-green-600' : w.change < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '暂无上次数值' : `上次 ${fmtVol(w.prevVolume)} → 当前 ${fmtVol(w.volume)}`}>{formatSignedVolume(w.change)}</td>
                   <td className="px-2 py-2 text-center text-xs text-gray-500">{w.volume > 0 ? w.volume.toLocaleString() : '—'}</td>
                   <td className="px-2 py-2 text-center text-xs whitespace-nowrap">
                     {w.rankTrend === 'both' ? <span className="inline-flex items-center font-semibold"><span className="text-green-500">↑</span><span className="text-red-500">↓</span></span>
@@ -3248,7 +3276,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' || tab === 'wordLib' ? yesterday : ''); setBadgeFilter('all'); setSortCol('date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' || tab === 'wordLib' ? yesterday : ''); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}

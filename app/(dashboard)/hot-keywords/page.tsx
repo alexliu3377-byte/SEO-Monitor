@@ -28,7 +28,8 @@ interface StreakGrouped {
   last_date: string; first_date: string
 }
 interface VolumeRisingEntry {
-  keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string
+  keyword: string; volume: number; prevVolume: number | null; change: number
+  baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
 }
 interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[] }
@@ -44,6 +45,27 @@ const PAGE_SIZES: PageSize[] = [50, 100, 500]
 
 function getMYDate(offsetDays = 0): string {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
+}
+
+function formatSignedVolume(value: number): string {
+  if (!value) return '—'
+  return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
+}
+
+function getNetVolumeChange(row: VolumeRisingEntry): number {
+  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
+}
+
+function getBaselineVolume(row: VolumeRisingEntry): number {
+  return Number.isFinite(row.baselineVolume)
+    ? row.baselineVolume
+    : row.prevVolume ?? Math.max(0, row.volume - row.change)
+}
+
+function getVolumeSignal(row: VolumeRisingEntry): { label: string; className: string } {
+  if (row.change < 0) return { label: '回落仍增', className: 'text-amber-600' }
+  if (row.change === 0) return { label: '净增维持', className: 'text-gray-400' }
+  return { label: '继续净增', className: 'text-green-600' }
 }
 
 // 更新词库按“哪一天的竞品资料”展示。它的 RPC 历史上用 discovered_at
@@ -488,9 +510,9 @@ export default function HotRadarPage() {
       rankWords:   sortByDate(rw, yesterday, (a, b) => b.volume - a.volume || b.siteCount - a.siteCount),
       crossWords:  sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
       streakWords: data.streakWords || [],
-      // keyword_volume 没有站点归属，跟其他几类不一样不受 minSites 门槛过滤，
-      // 直接按涨幅排序。
-      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => b.last_date.localeCompare(a.last_date) || b.change - a.change),
+      // 搜索量趋势按相对追踪起点的累计净增排序；本次变化只用来
+      // 判断最近是否适合更新，不再把回落但仍净增的词丢掉。
+      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date)),
     }
   }, [data, minSites, yesterday])
 
@@ -564,6 +586,7 @@ export default function HotRadarPage() {
           case 'rankDays':      va = a.rankDays ?? 0;   vb = b.rankDays ?? 0;   break
           case 'streak':        va = a.streak ?? 0;     vb = b.streak ?? 0;     break
           case 'change':        va = a.change ?? 0;     vb = b.change ?? 0;     break
+          case 'netChange':     va = getNetVolumeChange(a); vb = getNetVolumeChange(b); break
           case 'longTailCount': va = a.longTailCount ?? 0; vb = b.longTailCount ?? 0; break
           case 'siteCount':     va = a.siteCount ?? 0;  vb = b.siteCount ?? 0;  break
         }
@@ -581,7 +604,7 @@ export default function HotRadarPage() {
     setActiveTab(tab)
     setPage(0)
     setFilterDate(tab === 'new' || tab === 'wordLib' ? yesterday : '')
-    setSortCol('date')
+    setSortCol(tab === 'volumeRising' ? 'netChange' : 'date')
     setSortDir('desc')
   }
 
@@ -752,6 +775,12 @@ export default function HotRadarPage() {
               </div>
             </div>
 
+            {activeTab === 'volumeRising' && (
+              <div className="border-b border-gray-100 bg-emerald-50/50 px-4 py-2 text-xs text-gray-600">
+                <span className="font-medium text-emerald-700">判断规则：</span>累计净增 = 当前搜索量 − 追踪起点；只有大于 0 才是真正上涨，“本次变化”只表示最近方向。
+              </div>
+            )}
+
             {/* Tables — 统一列宽：日期 w-24 | 关键词 w-52 | 数字列 w-24 each | 站点 auto | 操作 w-16 */}
             <div className="overflow-x-auto [&_td]:py-2 [&_th]:py-2">
 
@@ -880,6 +909,7 @@ export default function HotRadarPage() {
                     <col className="w-48" />
                     <col className="w-24" />
                     <col className="w-24" />
+                    <col className="w-24" />
                     <col />
                     <col className="w-20" />
                     <col className="w-16" />
@@ -888,7 +918,8 @@ export default function HotRadarPage() {
                     <tr>
                       <th className="table-th"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
                       <th className="table-th">关键词</th>
-                      <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">涨幅{sortIcons('change')}</span></th>
+                      <th className="table-th text-center whitespace-nowrap" title="当前搜索量 − 系统建立的追踪起点"><span className="inline-flex items-center justify-center gap-0.5">累计净增{sortIcons('netChange')}</span></th>
+                      <th className="table-th text-center whitespace-nowrap" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5">本次变化{sortIcons('change')}</span></th>
                       <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">当前搜索量{sortIcons('volume')}</span></th>
                       <th className="table-th">出现站点</th>
                       <th className="table-th text-center">排名波动</th>
@@ -897,7 +928,7 @@ export default function HotRadarPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {pagedList.length === 0 ? (
-                      <tr><td colSpan={7} className="table-td text-center text-gray-400 py-10">暂无搜索量上涨的词</td></tr>
+                      <tr><td colSpan={8} className="table-td text-center text-gray-400 py-10">暂无累计净增的词</td></tr>
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
@@ -906,7 +937,13 @@ export default function HotRadarPage() {
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
                           </td>
                           <td className="table-td text-center">
-                            <span className="font-semibold text-green-600">+{fmtVolume(w.change)}</span>
+                            <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap" title={`追踪起点${w.baselineDate ? ` ${w.baselineDate}` : ''}：${fmtVolume(getBaselineVolume(w))} → 当前 ${fmtVolume(w.volume)}`}>
+                              <span className="font-semibold text-green-600">{formatSignedVolume(getNetVolumeChange(w))}</span>
+                              <span className={`text-[10px] ${getVolumeSignal(w).className}`}>{getVolumeSignal(w).label}</span>
+                            </span>
+                          </td>
+                          <td className="table-td text-center">
+                            <span className={`font-semibold ${w.change > 0 ? 'text-green-600' : w.change < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '暂无上次数值' : `上次 ${fmtVolume(w.prevVolume)} → 当前 ${fmtVolume(w.volume)}`}>{formatSignedVolume(w.change)}</span>
                           </td>
                           <td className="table-td text-center">
                             <span className="font-semibold text-gray-900">{fmtVolume(w.volume)}</span>

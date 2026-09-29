@@ -12,13 +12,22 @@ function getMY(offsetDays = 0) {
 interface NewWordRow    { keyword: string; site_count: number; total_count: number; sites: string[]; first_date: string; last_date: string }
 interface RankWordRow   { keyword: string; site_count: number; max_volume: number;  sites: string[]; first_date: string; last_date: string; rank_days: number }
 interface StreakWordRow { keyword: string; domain: string; streak: number; volume: number; first_seen: string; last_seen: string }
-interface VolumeRisingRow { keyword: string; volume: number; prev_volume: number | null; volume_change: number; stat_date: string }
+interface VolumeRisingRow {
+  keyword: string
+  volume: number
+  prev_volume: number | null
+  volume_change: number
+  baseline_volume: number
+  baseline_date: string
+  net_volume_change: number
+  stat_date: string
+}
 
 export interface HotRadarPayload {
   newWords: { keyword: string; count: number; siteCount: number; sites: string[]; last_date: string; first_date: string }[]
   rankWords: { keyword: string; siteCount: number; volume: number; sites: string[]; last_date: string; first_date: string; rankDays: number }[]
   streakWords: { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }[]
-  volumeRisingWords: { keyword: string; volume: number; prevVolume: number | null; change: number; last_date: string; sites: string[]; rankTrend: 'up' | 'down' | 'both' | null }[]
+  volumeRisingWords: { keyword: string; volume: number; prevVolume: number | null; change: number; baselineVolume: number; baselineDate: string; netChange: number; last_date: string; sites: string[]; rankTrend: 'up' | 'down' | 'both' | null }[]
 }
 
 export interface HotRadarComputeResult {
@@ -58,10 +67,10 @@ export async function computeHotRadarPayload(supabase: any): Promise<HotRadarCom
     rpcWithRetry(db, 'get_hot_rank_words',   { p_since: since }),
     rpcWithRetry(db, 'get_hot_streak_words', { p_since: since }),
     db.from('keyword_volume')
-      .select('keyword, volume, prev_volume, volume_change, stat_date')
-      .gt('volume_change', 0)
+      .select('keyword, volume, prev_volume, volume_change, baseline_volume, baseline_date, net_volume_change, stat_date')
+      .gt('net_volume_change', 0)
       .gte('stat_date', getMY(-14))
-      .order('volume_change', { ascending: false })
+      .order('net_volume_change', { ascending: false })
       .limit(500),
   ])
   if (newWordsErr) { console.error('[hot-radar] get_hot_new_words 失败:', newWordsErr.message); failedSections.push('newWords') }
@@ -139,6 +148,9 @@ export async function computeHotRadarPayload(supabase: any): Promise<HotRadarCom
       volume:      Number(r.volume),
       prevVolume:  r.prev_volume != null ? Number(r.prev_volume) : null,
       change:      Number(r.volume_change),
+      baselineVolume: Number(r.baseline_volume),
+      baselineDate: toDate(r.baseline_date),
+      netChange:   Number(r.net_volume_change),
       last_date:   toDate(r.stat_date),
       sites:       t ? Array.from(t.sites) : [],
       rankTrend:   (!t ? null : t.hasUpLatest && t.hasDownLatest ? 'both' : t.hasUpLatest ? 'up' : t.hasDownLatest ? 'down' : null) as 'up' | 'down' | 'both' | null,
