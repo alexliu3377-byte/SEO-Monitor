@@ -8,9 +8,11 @@ import {
   PageStudioPage,
   PageStudioProject,
   addPageStudioPage,
+  buildPageChangeReport,
   buildPageDocument,
   copyPageDocument,
   downloadPageDocument,
+  diffPageCode,
   extractImportedCode,
   getPageStudioProject,
   savePageStudioProject,
@@ -41,7 +43,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [leftPanel, setLeftPanel] = useState<'blocks' | 'layers'>('blocks')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [rightPanel, setRightPanel] = useState<'style' | 'traits'>('style')
-  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | null>(null)
+  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | 'changes' | null>(null)
   const [newPageName, setNewPageName] = useState('')
   const [newPageDevice, setNewPageDevice] = useState<'desktop' | 'mobile'>('desktop')
   const [newPageSource, setNewPageSource] = useState<'blank' | 'code'>('blank')
@@ -50,6 +52,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [codeRemoveImages, setCodeRemoveImages] = useState(true)
   const [previewDocument, setPreviewDocument] = useState('')
   const [copied, setCopied] = useState(false)
+  const [reportCopied, setReportCopied] = useState(false)
 
   useEffect(() => {
     const stored = getPageStudioProject(projectId)
@@ -105,6 +108,16 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       blocks.add('ad-slot', { label: '广告位', category: '常用组件', content: '<aside aria-label="广告" style="min-height:120px;display:flex;align-items:center;justify-content:center;border:1px dashed #94a3b8;background:#f8fafc;color:#64748b;">广告位 1200 × 120</aside>' })
 
       if (page.projectData) editor.loadProjectData(page.projectData)
+      if (page.baselineHtml === undefined || page.baselineCss === undefined) {
+        const baselineHtml = editor.getHtml()
+        const baselineCss = editor.getCss() ?? ''
+        const withBaseline = {
+          ...initialProject,
+          pages: initialProject.pages.map(item => item.id === page.id ? { ...item, baselineHtml, baselineCss } : item),
+        }
+        projectRef.current = withBaseline
+        setProject(withBaseline)
+      }
       const initialDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
       editor.setDevice(initialDevice)
       editor.on('update', () => setSaved(false))
@@ -197,6 +210,12 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     editor.CssComposer.clear()
     editor.setComponents(page.html)
     editor.setStyle(page.css)
+    const normalizedHtml = editor.getHtml()
+    const normalizedCss = editor.getCss() ?? ''
+    next = {
+      ...next,
+      pages: next.pages.map(item => item.id === page.id ? { ...item, html: normalizedHtml, css: normalizedCss, baselineHtml: normalizedHtml, baselineCss: normalizedCss } : item),
+    }
     projectRef.current = next
     setProject(next)
     setDialog(null)
@@ -247,9 +266,11 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     editor.CssComposer.clear()
     editor.setComponents(imported.html)
     editor.setStyle(imported.css)
+    const normalizedHtml = editor.getHtml()
+    const normalizedCss = editor.getCss() ?? ''
     const next = {
       ...current,
-      pages: current.pages.map(page => page.id === current.activePageId ? { ...page, html: imported.html, css: imported.css, projectData: undefined } : page),
+      pages: current.pages.map(page => page.id === current.activePageId ? { ...page, html: normalizedHtml, css: normalizedCss, baselineHtml: normalizedHtml, baselineCss: normalizedCss, projectData: undefined } : page),
     }
     projectRef.current = next
     setProject(next)
@@ -258,6 +279,15 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     setCodeHtml('')
     setCodeCss('')
     setCodeRemoveImages(true)
+  }
+
+  async function copyChangeReport() {
+    const current = snapshotCurrent()
+    if (!current) return
+    const page = current.pages.find(item => item.id === current.activePageId) ?? current.pages[0]
+    await navigator.clipboard.writeText(buildPageChangeReport(current, page))
+    setReportCopied(true)
+    window.setTimeout(() => setReportCopied(false), 1800)
   }
 
   if (!project) {
@@ -282,6 +312,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         <button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button>
         <button type="button" onClick={showPreview} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">预览</button>
         <button type="button" onClick={() => setDialog('import-code')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">粘贴代码</button>
+        <button type="button" onClick={() => setDialog('changes')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">修改记录</button>
         <button type="button" onClick={persist} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">保存</button>
         <button type="button" onClick={() => void copyCurrentCode()} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">{copied ? '已复制' : '复制代码'}</button>
         <button type="button" onClick={exportCurrent} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700">导出当前页</button>
@@ -310,10 +341,27 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       {dialog === 'audit' && <AppDialog title="百度基础检查" description="这是导出前的结构提醒，不代表搜索排名保证。" onClose={() => setDialog(null)} width="max-w-xl"><div className="space-y-3">{audits.map(item => <div key={item.label} className={`rounded-lg border p-4 ${item.ok ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}><div className="flex items-center justify-between"><strong className="text-sm text-slate-900">{item.label}</strong><span className={`text-xs font-semibold ${item.ok ? 'text-emerald-700' : 'text-amber-700'}`}>{item.ok ? '通过' : '需检查'}</span></div><p className="mt-1 text-sm text-slate-600">{item.detail}</p></div>)}</div></AppDialog>}
       {dialog === 'add-page' && <AppDialog title="增加页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setDialog(null)} width={newPageSource === 'code' ? 'max-w-5xl' : 'max-w-md'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!newPageName.trim() || (newPageSource === 'code' && !codeHtml.trim())} onClick={addPage} className="btn-primary">增加页面</button></div>}><label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={newPageName} onChange={event => setNewPageName(event.target.value)} placeholder="例如：关于我们" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500" /></label><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">建立方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['blank', '空白页面'], ['code', '粘贴页面代码']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageSource === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-source" value={value} checked={newPageSource === value} onChange={() => setNewPageSource(value)} className="sr-only" />{label}</label>)}</div></fieldset><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端'], ['mobile', '手机端']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageDevice === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-device" value={value} checked={newPageDevice === value} onChange={() => setNewPageDevice(value)} className="sr-only" />{label}</label>)}</div></fieldset>{newPageSource === 'code' && <CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} />}</AppDialog>}
       {dialog === 'import-code' && <AppDialog title={`粘贴代码到“${activePage.name}”`} description="确认后会替换当前页面的画布内容；尚未保存的当前内容会被覆盖。" onClose={() => setDialog(null)} width="max-w-5xl" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!codeHtml.trim()} onClick={replaceCurrentWithCode} className="btn-primary">替换当前页面</button></div>}><CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} /></AppDialog>}
+      {dialog === 'changes' && <ChangeReportDialog project={snapshotCurrent() ?? project} pageId={project.activePageId} copied={reportCopied} onCopy={() => void copyChangeReport()} onClose={() => setDialog(null)} />}
     </div>
   )
 }
 
 function CodeImportFields({ html, css, removeImages, onHtml, onCss, onRemoveImages }: { html: string; css: string; removeImages: boolean; onHtml: (value: string) => void; onCss: (value: string) => void; onRemoveImages: (value: boolean) => void }) {
   return <><label className="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3"><input type="checkbox" checked={removeImages} onChange={event => onRemoveImages(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600" /><span><span className="block text-sm font-semibold text-slate-900">替换原页面图片</span><span className="mt-0.5 block text-xs text-slate-600">保留图片标签、class 与尺寸，只替换图片内容。</span></span></label><div className="mt-5 grid gap-4 lg:grid-cols-2"><label className="block text-sm font-medium text-slate-700">HTML<textarea value={html} onChange={event => onHtml(event.target.value)} placeholder="粘贴完整页面 HTML" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label><label className="block text-sm font-medium text-slate-700">CSS（可选）<textarea value={css} onChange={event => onCss(event.target.value)} placeholder="依次粘贴页面使用的 CSS" className="mt-2 h-64 w-full resize-y rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-emerald-500" /></label></div></>
+}
+
+function ChangeReportDialog({ project, pageId, copied, onCopy, onClose }: { project: PageStudioProject; pageId: string; copied: boolean; onCopy: () => void; onClose: () => void }) {
+  const page = project.pages.find(item => item.id === pageId) ?? project.pages[0]
+  const htmlDiff = diffPageCode(page.baselineHtml ?? page.html, page.html, 'html').filter(line => line.type !== 'same')
+  const cssDiff = diffPageCode(page.baselineCss ?? page.css, page.css, 'css').filter(line => line.type !== 'same')
+  const changedCount = htmlDiff.length + cssDiff.length
+
+  const codeSection = (title: string, lines: typeof htmlDiff) => <section>
+    <div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-900">{title}</h3><span className="text-xs text-slate-500">{lines.length} 行变化</span></div>
+    <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-950 py-2 font-mono text-xs leading-5">
+      {lines.length === 0 ? <p className="px-3 py-4 text-center text-slate-400">没有修改</p> : lines.map((line, index) => <div key={`${line.type}-${index}`} className={`grid grid-cols-[24px_1fr] gap-2 px-3 ${line.type === 'removed' ? 'bg-red-950/70 text-red-200' : 'bg-emerald-950/70 text-emerald-200'}`}><span className="select-none text-center font-bold">{line.type === 'removed' ? '−' : '+'}</span><code className="whitespace-pre-wrap break-all">{line.value}</code></div>)}
+    </div>
+  </section>
+
+  return <AppDialog title={`${page.name} · 修改记录`} description="红色是原代码中被移除的内容，绿色是当前新增内容；这里只用于交接，不会写进正式 HTML。" onClose={onClose} width="max-w-5xl" footer={<div className="flex items-center justify-between gap-3"><span className="text-xs text-slate-500">共 {changedCount} 行变化</span><div className="flex gap-2"><button type="button" onClick={onClose} className="btn-secondary">关闭</button><button type="button" onClick={onCopy} className="btn-primary">{copied ? '已复制修改说明' : '复制修改说明'}</button></div></div>}><div className="space-y-6">{codeSection('HTML 修改', htmlDiff)}{codeSection('CSS 修改', cssDiff)}</div></AppDialog>
 }

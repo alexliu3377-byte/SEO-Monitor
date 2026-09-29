@@ -105,7 +105,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] border-collapse">
               <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
-                <tr><th className="px-5 py-3">页面名称</th><th className="px-4 py-3">文件名</th><th className="px-4 py-3">主要设计端</th><th className="px-5 py-3 text-right">操作</th></tr>
+                <tr><th className="px-5 py-3">页面名称</th><th className="px-4 py-3">文件名</th><th className="px-4 py-3">主要设计端</th><th className="px-4 py-3">修改状态</th><th className="px-5 py-3 text-right">操作</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {project.pages.map(page => (
@@ -118,6 +118,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-500">{page.path}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{page.targetDevice === 'mobile' ? '手机端' : '电脑端'}</td>
+                    <td className="px-4 py-3 text-sm">{page.baselineHtml !== undefined && (page.html !== page.baselineHtml || page.css !== page.baselineCss) ? <span className="font-medium text-amber-700">已有修改</span> : <span className="text-slate-400">未修改</span>}</td>
                     <td className="px-5 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => openPage(page.id)} className="btn-ghost">编辑</button><button type="button" onClick={() => void copyCode(page.id)} className="btn-ghost">{copiedPageId === page.id ? '已复制' : '复制代码'}</button><button type="button" onClick={() => downloadPageDocument(project, page)} className="btn-ghost">下载</button>{project.pages.length > 1 && <button type="button" onClick={() => deletePage(page.id)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button>}</div></td>
                   </tr>
                 ))}

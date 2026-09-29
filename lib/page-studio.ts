@@ -6,6 +6,13 @@ export type PageStudioPage = {
   css: string
   targetDevice?: 'desktop' | 'mobile'
   projectData?: Record<string, unknown>
+  baselineHtml?: string
+  baselineCss?: string
+}
+
+export type PageStudioDiffLine = {
+  type: 'same' | 'added' | 'removed'
+  value: string
 }
 
 export type PageStudioProject = {
@@ -215,4 +222,75 @@ export function extractImportedCode(rawHtml: string, rawCss: string, options: { 
     html: documentValue.body.innerHTML.trim() || source,
     css: (removeImages ? stripCssImageReferences(combinedCss) : combinedCss.replace(/@import\s+(?:url\()?[^;]+;?/gi, '')) || STARTER_CSS,
   }
+}
+
+function readableCode(value: string, kind: 'html' | 'css') {
+  const normalized = kind === 'html'
+    ? value.replace(/>\s*</g, '>\n<')
+    : value.replace(/}\s*/g, '}\n').replace(/;\s*/g, ';\n')
+  return normalized.split('\n').map(line => line.trim()).filter(Boolean)
+}
+
+function indexDiff(before: string[], after: string[]): PageStudioDiffLine[] {
+  const result: PageStudioDiffLine[] = []
+  const size = Math.max(before.length, after.length)
+  for (let index = 0; index < size; index += 1) {
+    if (before[index] === after[index] && before[index] !== undefined) result.push({ type: 'same', value: before[index] })
+    else {
+      if (before[index] !== undefined) result.push({ type: 'removed', value: before[index] })
+      if (after[index] !== undefined) result.push({ type: 'added', value: after[index] })
+    }
+  }
+  return result
+}
+
+export function diffPageCode(beforeValue: string, afterValue: string, kind: 'html' | 'css'): PageStudioDiffLine[] {
+  const before = readableCode(beforeValue, kind)
+  const after = readableCode(afterValue, kind)
+  if (before.length > 700 || after.length > 700) return indexDiff(before, after)
+
+  const columns = after.length + 1
+  const matrix = new Uint16Array((before.length + 1) * columns)
+  for (let left = before.length - 1; left >= 0; left -= 1) {
+    for (let right = after.length - 1; right >= 0; right -= 1) {
+      const position = left * columns + right
+      matrix[position] = before[left] === after[right]
+        ? matrix[(left + 1) * columns + right + 1] + 1
+        : Math.max(matrix[(left + 1) * columns + right], matrix[left * columns + right + 1])
+    }
+  }
+
+  const result: PageStudioDiffLine[] = []
+  let left = 0
+  let right = 0
+  while (left < before.length && right < after.length) {
+    if (before[left] === after[right]) {
+      result.push({ type: 'same', value: before[left] }); left += 1; right += 1
+    } else if (matrix[(left + 1) * columns + right] >= matrix[left * columns + right + 1]) {
+      result.push({ type: 'removed', value: before[left] }); left += 1
+    } else {
+      result.push({ type: 'added', value: after[right] }); right += 1
+    }
+  }
+  while (left < before.length) result.push({ type: 'removed', value: before[left++] })
+  while (right < after.length) result.push({ type: 'added', value: after[right++] })
+  return result
+}
+
+export function buildPageChangeReport(project: PageStudioProject, page: PageStudioPage) {
+  const htmlDiff = diffPageCode(page.baselineHtml ?? page.html, page.html, 'html').filter(line => line.type !== 'same')
+  const cssDiff = diffPageCode(page.baselineCss ?? page.css, page.css, 'css').filter(line => line.type !== 'same')
+  const render = (title: string, lines: PageStudioDiffLine[]) => [
+    `## ${title}`,
+    ...(lines.length ? lines.map(line => `${line.type === 'added' ? '+' : '-'} ${line.value}`) : ['（没有修改）']),
+  ].join('\n')
+  return [
+    `项目：${project.name}`,
+    `页面：${page.name}（${page.path}）`,
+    `设计端：${page.targetDevice === 'mobile' ? 'M端' : 'PC端'}`,
+    '',
+    render('HTML 修改', htmlDiff),
+    '',
+    render('CSS 修改', cssDiff),
+  ].join('\n')
 }
