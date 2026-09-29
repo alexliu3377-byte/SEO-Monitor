@@ -1,5 +1,6 @@
 export const CONTENT_SYSTEM_ROOT = '/content'
 export const APP_UPDATE_SYSTEM_ROOT = '/app-updates'
+export const PAGE_STUDIO_SYSTEM_ROOT = '/page-studio'
 
 export const CONTENT_LEGACY_ROOTS = [
   '/guide',

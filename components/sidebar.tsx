@@ -6,12 +6,14 @@ import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { contentSystemPath } from '@/lib/system-routes'
 import { useUser } from '@/lib/user-context'
+import { isProjectOwner } from '@/lib/project-owner'
 
 type NavItem = {
   href: string
   label: string
   icon: React.ReactNode
   superOnly?: boolean
+  ownerOnly?: boolean
   hideNormal?: boolean
   children?: NavItem[]
 }
@@ -133,6 +135,16 @@ const APP_UPDATE_ITEMS: NavItem[] = [
   },
 ]
 
+const PAGE_STUDIO_ITEMS: NavItem[] = [
+  {
+    href: '/page-studio',
+    label: '项目管理',
+    superOnly: true,
+    ownerOnly: true,
+    icon: <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16v14H4zM8 9h8M8 13h5" /></svg>,
+  },
+]
+
 const BASE_CONTENT_ITEMS = NAV_GROUPS.flatMap(group => group.items)
 
 function findContentItem(href: string): NavItem {
@@ -191,7 +203,7 @@ const CONTENT_ITEMS: NavItem[] = [
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { role } = useUser()
+  const { id: userId, role } = useUser()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [feedbackUnread, setFeedbackUnread] = useState(0)
@@ -227,7 +239,7 @@ export default function Sidebar() {
   }, [])
 
   useEffect(() => {
-    if (pathname.startsWith('/app-updates')) {
+    if (pathname.startsWith('/app-updates') || pathname.startsWith('/page-studio')) {
       setFeedbackUnread(0)
       return
     }
@@ -297,12 +309,14 @@ export default function Sidebar() {
   }
 
   const isAppUpdateCenter = pathname.startsWith('/app-updates')
+  const isPageStudio = pathname.startsWith('/page-studio')
   const canSeeItem = (item: NavItem) => {
     if (item.superOnly && role !== 'super') return false
+    if (item.ownerOnly && !isProjectOwner(userId)) return false
     if (item.hideNormal && role === 'normal') return false
     return true
   }
-  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : CONTENT_ITEMS)
+  const allItems = (isAppUpdateCenter ? APP_UPDATE_ITEMS : isPageStudio ? PAGE_STUDIO_ITEMS : CONTENT_ITEMS)
     .map(item => item.children
       ? { ...item, children: item.children.filter(canSeeItem) }
       : item
@@ -347,10 +361,14 @@ export default function Sidebar() {
             style={{
               background: isAppUpdateCenter
                 ? 'linear-gradient(135deg, #2563eb, #1d4ed8)'
-                : 'linear-gradient(135deg, #16a34a, #15803d)',
+                : isPageStudio
+                  ? 'linear-gradient(135deg, #0f766e, #047857)'
+                  : 'linear-gradient(135deg, #16a34a, #15803d)',
               boxShadow: isAppUpdateCenter
                 ? '0 4px 12px rgba(37,99,235,0.35)'
-                : '0 4px 12px rgba(22,163,74,0.35)',
+                : isPageStudio
+                  ? '0 4px 12px rgba(15,118,110,0.35)'
+                  : '0 4px 12px rgba(22,163,74,0.35)',
             }}
           >
             <svg className="w-[18px] h-[18px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -359,10 +377,10 @@ export default function Sidebar() {
           </div>
           <div>
             <p className="text-white font-semibold text-sm leading-tight">
-              {isAppUpdateCenter ? '奇心应用更新中心' : '奇心内容发布系统'}
+              {isAppUpdateCenter ? '奇心应用更新中心' : isPageStudio ? '奇心页面设计工作室' : '奇心内容发布系统'}
             </p>
             <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              {isAppUpdateCenter ? 'V4.0 超管实验' : '内容运营后台'}
+              {isAppUpdateCenter ? 'V4.0 超管实验' : isPageStudio ? '可视化网页原型' : '内容运营后台'}
             </p>
           </div>
           <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
@@ -412,7 +430,7 @@ export default function Sidebar() {
                         aria-current={isChildActive ? 'page' : undefined}
                         className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                           isChildActive
-                            ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
+                            ? `${isAppUpdateCenter ? 'bg-blue-600' : isPageStudio ? 'bg-teal-600' : 'bg-green-600'} text-white`
                             : 'text-white/60 hover:bg-white/8 hover:text-white/90'
                         }`}
                       >
@@ -437,7 +455,7 @@ export default function Sidebar() {
               aria-current={isActive ? 'page' : undefined}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 isActive
-                  ? `${isAppUpdateCenter ? 'bg-blue-600' : 'bg-green-600'} text-white`
+                  ? `${isAppUpdateCenter ? 'bg-blue-600' : isPageStudio ? 'bg-teal-600' : 'bg-green-600'} text-white`
                   : 'text-white/65 hover:bg-white/8 hover:text-white/95'
               }`}
             >

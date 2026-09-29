@@ -81,3 +81,84 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Page Studio keeps GrapesJS functional while matching the dashboard's compact visual language. */
+.page-studio-panel,
+.page-studio-panel .gjs-one-bg {
+  background-color: #fff !important;
+  color: #334155 !important;
+}
+.page-studio-panel .gjs-two-color {
+  color: #334155 !important;
+}
+.page-studio-panel .gjs-three-bg {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+.page-studio-panel .gjs-four-color,
+.page-studio-panel .gjs-four-color-h:hover {
+  color: #059669 !important;
+}
+.page-studio-panel .gjs-blocks-c {
+  padding: 10px;
+  gap: 8px;
+  justify-content: stretch;
+}
+.page-studio-panel .gjs-block {
+  width: calc(50% - 4px);
+  min-height: 66px;
+  margin: 0;
+  padding: 10px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: none;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+}
+.page-studio-panel .gjs-block:hover {
+  border-color: #10b981;
+  color: #047857;
+}
+.page-studio-panel .gjs-block-category,
+.page-studio-panel .gjs-sm-sector {
+  border-bottom: 1px solid #e2e8f0;
+}
+.page-studio-panel .gjs-title,
+.page-studio-panel .gjs-sm-sector-title {
+  padding: 11px 12px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+.page-studio-panel .gjs-sm-properties,
+.page-studio-panel .gjs-trt-traits {
+  padding: 10px;
+}
+.page-studio-panel .gjs-sm-property,
+.page-studio-panel .gjs-trt-trait {
+  color: #475569;
+  font-size: 11px;
+}
+.page-studio-panel .gjs-field {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+}
+.page-studio-panel .gjs-field input,
+.page-studio-panel .gjs-field select {
+  min-height: 30px;
+  color: #0f172a;
+}
+#page-studio-canvas .gjs-editor,
+#page-studio-canvas .gjs-cv-canvas {
+  width: 100%;
+  height: 100%;
+  top: 0;
+}
+#page-studio-canvas .gjs-one-bg { background-color: #fff; }
+#page-studio-canvas .gjs-two-color { color: #334155; }
+#page-studio-canvas .gjs-four-color,
+#page-studio-canvas .gjs-four-color-h:hover { color: #059669; }

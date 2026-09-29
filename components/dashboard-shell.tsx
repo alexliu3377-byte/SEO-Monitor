@@ -6,7 +6,7 @@ import Sidebar from './sidebar'
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  if (pathname === '/') {
+  if (pathname === '/' || pathname.startsWith('/page-studio/editor/')) {
     return <main id="main-content" className="min-h-screen bg-slate-50">{children}</main>
   }
 

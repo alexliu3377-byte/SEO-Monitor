@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
+import { isProjectOwner } from '@/lib/project-owner'
 
 function ArrowIcon() {
   return <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 10h12m-4-4 4 4-4 4" /></svg>
@@ -11,7 +12,8 @@ function ArrowIcon() {
 
 export default function SystemPortal() {
   const router = useRouter()
-  const { email, role } = useUser()
+  const { id, email, role } = useUser()
+  const canUsePageStudio = role === 'super' && isProjectOwner(id)
 
   async function logout() {
     await getBrowserClient().auth.signOut()
@@ -50,7 +52,7 @@ export default function SystemPortal() {
             <p className="mt-1 text-xs text-slate-500">只显示当前账号可以访问的系统</p>
           </div>
 
-          <div className={`grid gap-5 ${role === 'super' ? 'md:grid-cols-2' : 'max-w-xl'}`}>
+          <div className={`grid gap-5 ${role === 'super' ? `md:grid-cols-2 ${canUsePageStudio ? 'xl:grid-cols-3' : ''}` : 'max-w-xl'}`}>
             <Link href="/content" className="group flex min-h-72 flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md sm:p-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
@@ -78,6 +80,23 @@ export default function SystemPortal() {
                 <p className="mt-3 text-sm leading-7 text-slate-600">发现应用新版本，审核更新日志、公开下载资料并批量导出。</p>
                 <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-5 text-sm font-semibold text-blue-700">
                   <span>进入更新工作台</span>
+                  <span className="transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
+                </div>
+              </Link>
+            )}
+
+            {canUsePageStudio && (
+              <Link href="/page-studio" className="group flex min-h-72 flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-md sm:p-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16v14H4zM8 9h8M8 13h5" /></svg>
+                  </div>
+                  <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-medium text-teal-700">原型测试</span>
+                </div>
+                <h3 className="mt-7 text-xl font-semibold text-slate-950">页面设计工作室</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">粘贴或新建页面，通过拖动、输入数值和电脑／手机预览完成网页原型。</p>
+                <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-5 text-sm font-semibold text-teal-700">
+                  <span>进入项目管理</span>
                   <span className="transition-transform group-hover:translate-x-1"><ArrowIcon /></span>
                 </div>
               </Link>
