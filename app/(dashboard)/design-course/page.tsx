@@ -1,5 +1,5 @@
-import DesignTrainingCourse from '@/components/design-training-course'
+import { redirect } from 'next/navigation'
 
 export default function DesignCoursePage() {
-  return <DesignTrainingCourse />
+  redirect('/page-studio/design-course')
 }
