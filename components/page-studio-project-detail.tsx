@@ -25,23 +25,47 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
   const [pageCss, setPageCss] = useState('')
   const [removeImages, setRemoveImages] = useState(true)
   const [copiedPageId, setCopiedPageId] = useState<string | null>(null)
+  const [storageError, setStorageError] = useState('')
 
-  useEffect(() => setProject(getPageStudioProject(projectId)), [projectId])
+  useEffect(() => {
+    let active = true
+    getPageStudioProject(projectId)
+      .then(value => { if (active) setProject(value) })
+      .catch(error => {
+        if (!active) return
+        setStorageError(error instanceof Error ? error.message : '项目读取失败')
+        setProject(null)
+      })
+    return () => { active = false }
+  }, [projectId])
 
-  function openPage(pageId: string) {
+  async function openPage(pageId: string) {
     if (!project) return
-    savePageStudioProject({ ...project, activePageId: pageId })
+    try {
+      await savePageStudioProject({ ...project, activePageId: pageId })
+      setStorageError('')
+    } catch (error) {
+      setStorageError(error instanceof Error ? error.message : '项目保存失败')
+      return
+    }
     router.push(`/page-studio/editor/${project.id}`)
   }
 
-  function createPage() {
+  async function createPage() {
     if (!project || !pageName.trim()) return
     let draft = addPageStudioPage(project, pageName, targetDevice)
     if (pageSource === 'code') {
       const imported = extractImportedCode(pageHtml, pageCss, { removeImages })
       draft = { ...draft, pages: draft.pages.map(page => page.id === draft.activePageId ? { ...page, html: imported.html, css: imported.css } : page) }
     }
-    const next = savePageStudioProject(draft)
+    let next: PageStudioProject
+    try {
+      next = await savePageStudioProject(draft)
+      setStorageError('')
+    } catch (error) {
+      setStorageError(error instanceof Error ? error.message : '页面保存失败')
+      return
+    }
     setProject(next)
     setShowAddPage(false)
     setPageName('')
@@ -52,16 +76,23 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
     setRemoveImages(true)
   }
 
-  function deletePage(pageId: string) {
+  async function deletePage(pageId: string) {
     if (!project || project.pages.length <= 1) return
     const page = project.pages.find(item => item.id === pageId)
     if (!page || !window.confirm(`删除页面“${page.name}”？这份本地草稿将无法恢复。`)) return
     const pages = project.pages.filter(item => item.id !== pageId)
-    const next = savePageStudioProject({
-      ...project,
-      pages,
-      activePageId: project.activePageId === pageId ? pages[0].id : project.activePageId,
-    })
+    let next: PageStudioProject
+    try {
+      next = await savePageStudioProject({
+        ...project,
+        pages,
+        activePageId: project.activePageId === pageId ? pages[0].id : project.activePageId,
+      })
+      setStorageError('')
+    } catch (error) {
+      setStorageError(error instanceof Error ? error.message : '页面删除失败')
+      return
+    }
     setProject(next)
   }
 
@@ -96,6 +127,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
       </header>
 
       <main className="mx-auto max-w-[1380px] p-5 sm:p-8">
+        {storageError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{storageError}</div>}
         <div className="mb-4 flex items-center justify-between">
           <div><h2 className="text-sm font-semibold text-slate-950">页面文件</h2><p className="mt-0.5 text-xs text-slate-500">{project.pages.length} 个页面，代码分别导出。</p></div>
           <Link href="/page-studio" className="btn-ghost">返回全部项目</Link>
@@ -111,7 +143,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
                 {project.pages.map(page => (
                   <tr key={page.id} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3">
-                      <button type="button" onClick={() => openPage(page.id)} className="flex items-center gap-3 text-left font-semibold text-slate-900 hover:text-emerald-700">
+                      <button type="button" onClick={() => void openPage(page.id)} className="flex items-center gap-3 text-left font-semibold text-slate-900 hover:text-emerald-700">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500"><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6m-6 4h6" /></svg></span>
                         <span className="truncate">{page.name}</span>
                       </button>
@@ -119,7 +151,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
                     <td className="px-4 py-3 text-sm text-slate-500">{page.path}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{page.targetDevice === 'mobile' ? '手机端' : '电脑端'}</td>
                     <td className="px-4 py-3 text-sm">{page.baselineHtml !== undefined && (page.html !== page.baselineHtml || page.css !== page.baselineCss) ? <span className="font-medium text-amber-700">已有修改</span> : <span className="text-slate-400">未修改</span>}</td>
-                    <td className="px-5 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => openPage(page.id)} className="btn-ghost">编辑</button><button type="button" onClick={() => void copyCode(page.id)} className="btn-ghost">{copiedPageId === page.id ? '已复制' : '复制代码'}</button><button type="button" onClick={() => downloadPageDocument(project, page)} className="btn-ghost">下载</button>{project.pages.length > 1 && <button type="button" onClick={() => deletePage(page.id)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button>}</div></td>
+                    <td className="px-5 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => void openPage(page.id)} className="btn-ghost">编辑</button><button type="button" onClick={() => void copyCode(page.id)} className="btn-ghost">{copiedPageId === page.id ? '已复制' : '复制代码'}</button><button type="button" onClick={() => downloadPageDocument(project, page)} className="btn-ghost">下载</button>{project.pages.length > 1 && <button type="button" onClick={() => void deletePage(page.id)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button>}</div></td>
                   </tr>
                 ))}
               </tbody>
@@ -128,7 +160,7 @@ export default function PageStudioProjectDetail({ projectId }: { projectId: stri
         </section>
       </main>
 
-      {showAddPage && <AppDialog title="新增页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setShowAddPage(false)} width={pageSource === 'code' ? 'max-w-5xl' : 'max-w-lg'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddPage(false)} className="btn-secondary">取消</button><button type="button" disabled={!pageName.trim() || (pageSource === 'code' && !pageHtml.trim())} onClick={createPage} className="btn-primary">新增页面</button></div>}>
+      {showAddPage && <AppDialog title="新增页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setShowAddPage(false)} width={pageSource === 'code' ? 'max-w-5xl' : 'max-w-lg'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddPage(false)} className="btn-secondary">取消</button><button type="button" disabled={!pageName.trim() || (pageSource === 'code' && !pageHtml.trim())} onClick={() => void createPage()} className="btn-primary">新增页面</button></div>}>
         <label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={pageName} onChange={event => setPageName(event.target.value)} placeholder="例如：游戏下载页" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
         <fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">建立方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['blank', '空白页面', '使用基础响应式模板'], ['code', '粘贴页面代码', '导入 HTML 与 CSS 后修改']] as const).map(([value, label, description]) => <label key={value} className={`cursor-pointer rounded-lg border p-4 ${pageSource === value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}><input type="radio" name="page-source" value={value} checked={pageSource === value} onChange={() => setPageSource(value)} className="sr-only" /><span className="block text-sm font-semibold text-slate-900">{label}</span><span className="mt-1 block text-xs text-slate-500">{description}</span></label>)}</div></fieldset>
         <fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端', '以宽屏页面为主要设计画布'], ['mobile', '手机端', '以 375px 手机页面开始设计']] as const).map(([value, label, description]) => <label key={value} className={`cursor-pointer rounded-lg border p-4 ${targetDevice === value ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}><input type="radio" name="target-device" value={value} checked={targetDevice === value} onChange={() => setTargetDevice(value)} className="sr-only" /><span className="block text-sm font-semibold text-slate-900">{label}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{description}</span></label>)}</div></fieldset>

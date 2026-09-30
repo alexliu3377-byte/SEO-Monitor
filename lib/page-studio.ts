@@ -1,3 +1,5 @@
+import { getBrowserClient } from './supabase'
+
 export type PageStudioPage = {
   id: string
   name: string
@@ -25,7 +27,31 @@ export type PageStudioProject = {
   pages: PageStudioPage[]
 }
 
+export type PageStudioFavoriteModule = {
+  id: string
+  name: string
+  category: string
+  html: string
+  css: string
+  createdAt: string
+  updatedAt?: string
+  version?: number
+  versions?: Array<{ version: number; html: string; css: string; createdAt: string }>
+  sourceName?: string
+  sourceUrl?: string
+}
+
+export type PageStudioProjectVersion = {
+  id: number
+  projectId: string
+  versionNo: number
+  label: string
+  project: PageStudioProject
+  createdAt: string
+}
+
 const STORAGE_KEY = 'qixin-page-studio-projects-v1'
+const FAVORITE_MODULES_STORAGE_KEY = 'qixin-page-studio-favorite-modules-v1'
 
 const STARTER_HTML = `<header class="site-header">
   <a class="brand" href="/">页面名称</a>
@@ -102,27 +128,180 @@ export function readPageStudioProjects(): PageStudioProject[] {
   }
 }
 
+function cloudStorageError(error: { code?: string; message?: string }) {
+  if (error.code === '42P01') return new Error('页面设计数据库尚未初始化，请先运行 20260930_page_studio_cloud_storage.sql')
+  return new Error(error.message || '页面设计资料同步失败')
+}
+
+async function upsertCloudRows(table: 'page_studio_projects' | 'page_studio_favorite_modules', items: Array<PageStudioProject | PageStudioFavoriteModule>) {
+  if (items.length === 0) return
+  const client = getBrowserClient() as any
+  const rows = items.map(item => ({
+    id: item.id,
+    payload: item,
+    updated_at: 'updatedAt' in item ? item.updatedAt : item.createdAt,
+  }))
+  const { error } = await client.from(table).upsert(rows, { onConflict: 'id' })
+  if (error) throw cloudStorageError(error)
+}
+
+export async function loadPageStudioProjects(): Promise<PageStudioProject[]> {
+  const local = readPageStudioProjects()
+  const client = getBrowserClient() as any
+  const { data, error } = await client.from('page_studio_projects').select('payload').order('updated_at', { ascending: false })
+  if (error) throw cloudStorageError(error)
+  const cloud = (data ?? []).map((row: { payload: PageStudioProject }) => row.payload).filter(Boolean)
+  if (cloud.length === 0 && local.length > 0) {
+    await upsertCloudRows('page_studio_projects', local)
+    return local
+  }
+  writePageStudioProjects(cloud)
+  return cloud
+}
+
 export function writePageStudioProjects(projects: PageStudioProject[]) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects))
   window.dispatchEvent(new CustomEvent('page-studio-projects-changed'))
 }
 
-export function savePageStudioProject(project: PageStudioProject) {
+export function readPageStudioFavoriteModules(): PageStudioFavoriteModule[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const value = window.localStorage.getItem(FAVORITE_MODULES_STORAGE_KEY)
+    if (!value) return []
+    const modules = JSON.parse(value) as PageStudioFavoriteModule[]
+    return Array.isArray(modules) ? modules : []
+  } catch {
+    return []
+  }
+}
+
+export async function loadPageStudioFavoriteModules(): Promise<PageStudioFavoriteModule[]> {
+  const local = readPageStudioFavoriteModules()
+  const client = getBrowserClient() as any
+  const { data, error } = await client.from('page_studio_favorite_modules').select('payload').order('updated_at', { ascending: false })
+  if (error) throw cloudStorageError(error)
+  const cloud = (data ?? []).map((row: { payload: PageStudioFavoriteModule }) => row.payload).filter(Boolean)
+  if (cloud.length === 0 && local.length > 0) {
+    await upsertCloudRows('page_studio_favorite_modules', local)
+    return local
+  }
+  writePageStudioFavoriteModules(cloud)
+  return cloud
+}
+
+function writePageStudioFavoriteModules(modules: PageStudioFavoriteModule[]) {
+  window.localStorage.setItem(FAVORITE_MODULES_STORAGE_KEY, JSON.stringify(modules))
+  window.dispatchEvent(new CustomEvent('page-studio-favorite-modules-changed'))
+}
+
+export async function createPageStudioFavoriteModule(input: Pick<PageStudioFavoriteModule, 'name' | 'category' | 'html' | 'css'> & { sourceName?: string; sourceUrl?: string }) {
+  const now = new Date().toISOString()
+  const favorite: PageStudioFavoriteModule = {
+    id: uid('module'),
+    name: input.name.trim() || '未命名模块',
+    category: input.category.trim() || '通用',
+    html: input.html,
+    css: input.css,
+    createdAt: now,
+    updatedAt: now,
+    version: 1,
+    versions: [],
+    sourceName: input.sourceName?.trim().slice(0, 100) || undefined,
+    sourceUrl: input.sourceUrl?.trim().slice(0, 500) || undefined,
+  }
+  writePageStudioFavoriteModules([favorite, ...readPageStudioFavoriteModules()])
+  await upsertCloudRows('page_studio_favorite_modules', [favorite])
+  return favorite
+}
+
+export async function updatePageStudioFavoriteModule(moduleId: string, input: Pick<PageStudioFavoriteModule, 'html' | 'css'>) {
+  const modules = readPageStudioFavoriteModules()
+  const index = modules.findIndex(item => item.id === moduleId)
+  if (index < 0) throw new Error('找不到这个收藏模块')
+  const current = modules[index]
+  const currentVersion = current.version ?? 1
+  const next: PageStudioFavoriteModule = {
+    ...current,
+    html: input.html,
+    css: input.css,
+    version: currentVersion + 1,
+    updatedAt: new Date().toISOString(),
+    versions: [
+      ...(current.versions ?? []),
+      { version: currentVersion, html: current.html, css: current.css, createdAt: current.updatedAt ?? current.createdAt },
+    ].slice(-20),
+  }
+  modules[index] = next
+  writePageStudioFavoriteModules(modules)
+  await upsertCloudRows('page_studio_favorite_modules', [next])
+  return next
+}
+
+export async function deletePageStudioFavoriteModule(moduleId: string) {
+  writePageStudioFavoriteModules(readPageStudioFavoriteModules().filter(module => module.id !== moduleId))
+  const client = getBrowserClient() as any
+  const { error } = await client.from('page_studio_favorite_modules').delete().eq('id', moduleId)
+  if (error) throw cloudStorageError(error)
+}
+
+export async function savePageStudioProject(project: PageStudioProject, options: { createVersion?: boolean; label?: string } = {}) {
   const projects = readPageStudioProjects()
   const next = { ...project, updatedAt: new Date().toISOString() }
   const index = projects.findIndex(item => item.id === project.id)
   if (index >= 0) projects[index] = next
   else projects.unshift(next)
   writePageStudioProjects(projects)
+  await upsertCloudRows('page_studio_projects', [next])
+  if (options.createVersion) {
+    const client = getBrowserClient() as any
+    const { data: latest, error: latestError } = await client
+      .from('page_studio_project_versions')
+      .select('version_no')
+      .eq('project_id', next.id)
+      .order('version_no', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (latestError) throw cloudStorageError(latestError)
+    const { error: versionError } = await client.from('page_studio_project_versions').insert({
+      project_id: next.id,
+      version_no: (latest?.version_no ?? 0) + 1,
+      label: options.label?.trim().slice(0, 80) || '手动保存',
+      payload: next,
+    })
+    if (versionError) throw cloudStorageError(versionError)
+  }
   return next
 }
 
-export function deletePageStudioProject(projectId: string) {
-  writePageStudioProjects(readPageStudioProjects().filter(project => project.id !== projectId))
+export async function loadPageStudioProjectVersions(projectId: string): Promise<PageStudioProjectVersion[]> {
+  const client = getBrowserClient() as any
+  const { data, error } = await client
+    .from('page_studio_project_versions')
+    .select('id, project_id, version_no, label, payload, created_at')
+    .eq('project_id', projectId)
+    .order('version_no', { ascending: false })
+    .limit(30)
+  if (error) throw cloudStorageError(error)
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    projectId: row.project_id,
+    versionNo: row.version_no,
+    label: row.label,
+    project: row.payload,
+    createdAt: row.created_at,
+  }))
 }
 
-export function getPageStudioProject(projectId: string) {
-  return readPageStudioProjects().find(project => project.id === projectId) ?? null
+export async function deletePageStudioProject(projectId: string) {
+  writePageStudioProjects(readPageStudioProjects().filter(project => project.id !== projectId))
+  const client = getBrowserClient() as any
+  const { error } = await client.from('page_studio_projects').delete().eq('id', projectId)
+  if (error) throw cloudStorageError(error)
+}
+
+export async function getPageStudioProject(projectId: string) {
+  return (await loadPageStudioProjects()).find(project => project.id === projectId) ?? null
 }
 
 export function addPageStudioPage(project: PageStudioProject, name: string, targetDevice: 'desktop' | 'mobile' = 'desktop'): PageStudioProject {
