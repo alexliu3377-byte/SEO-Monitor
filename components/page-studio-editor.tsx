@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import type { Editor } from 'grapesjs'
+import type { Component, Editor } from 'grapesjs'
 import AppDialog from '@/components/app-dialog'
 import {
   PageStudioPage,
@@ -53,6 +53,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [previewDocument, setPreviewDocument] = useState('')
   const [copied, setCopied] = useState(false)
   const [reportCopied, setReportCopied] = useState(false)
+  const [selectedComponentName, setSelectedComponentName] = useState<string | null>(null)
 
   useEffect(() => {
     const stored = getPageStudioProject(projectId)
@@ -177,9 +178,23 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       const initialDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
       editor.setDevice(initialDevice)
       editor.on('update', () => setSaved(false))
-      editor.on('component:selected', component => {
-        if (component.is('image')) component.set('resizable', true)
+      editor.on('component:selected', (component: Component) => {
+        setSelectedComponentName(component.getName() || component.get('tagName') || '区块')
+        if (component.parent() && !component.is('text')) {
+          component.set('resizable', {
+            tl: false,
+            tc: false,
+            tr: false,
+            cl: true,
+            cr: true,
+            bl: false,
+            bc: false,
+            br: false,
+            keepAutoHeight: true,
+          })
+        }
       })
+      editor.on('component:deselected', () => setSelectedComponentName(null))
       editorRef.current = editor
       setReady(true)
     }
@@ -227,6 +242,41 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     setProject(next)
     setSaved(true)
     return next
+  }
+
+  function selectParentComponent() {
+    const editor = editorRef.current
+    const parent = editor?.getSelected()?.parent()
+    if (editor && parent && parent.parent()) editor.select(parent)
+  }
+
+  function makeSelectedHorizontal() {
+    const component = editorRef.current?.getSelected()
+    if (!component) return
+    const currentStyle = component.getStyle()
+    component.addStyle({
+      display: 'flex',
+      'flex-direction': 'row',
+      'flex-wrap': 'wrap',
+      'align-items': 'stretch',
+      gap: currentStyle.gap || '16px',
+    })
+    component.addAttributes({ 'data-studio-layout': 'horizontal' })
+    setSaved(false)
+  }
+
+  function setSelectedWidth(width: '33.333%' | '50%' | '100%') {
+    const component = editorRef.current?.getSelected()
+    if (!component) return
+    const basis = width === '33.333%' ? 'calc(33.333% - 11px)' : width === '50%' ? 'calc(50% - 8px)' : '100%'
+    component.addStyle({
+      width,
+      'max-width': 'none',
+      'flex-basis': basis,
+      'flex-grow': '0',
+      'box-sizing': 'border-box',
+    })
+    setSaved(false)
   }
 
   function loadPage(pageId: string) {
@@ -381,9 +431,19 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           <div id="page-studio-layers" className={`page-studio-panel ${leftPanel === 'layers' ? '' : 'hidden'}`} />
         </aside>
 
-        <main className="relative min-w-0 flex-1 bg-slate-200 p-4">
+        <main className="relative flex min-w-0 flex-1 flex-col gap-2 bg-slate-200 p-4">
           {!ready && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100 text-sm text-slate-500">正在准备编辑画布…</div>}
-          <div id="page-studio-canvas" className="h-full overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
+          {selectedComponentName && <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 shadow-sm">
+            <span className="mr-1 max-w-36 truncate text-xs text-slate-500" title={selectedComponentName}>已选：{selectedComponentName}</span>
+            <button type="button" onClick={selectParentComponent} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
+            <button type="button" onClick={makeSelectedHorizontal} className="h-7 rounded-md border border-emerald-300 px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50" title="让这个外框里的子模块左右排列">改为横排</button>
+            <span className="ml-1 text-[11px] text-slate-400">当前宽度</span>
+            <button type="button" onClick={() => setSelectedWidth('33.333%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/3</button>
+            <button type="button" onClick={() => setSelectedWidth('50%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/2</button>
+            <button type="button" onClick={() => setSelectedWidth('100%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">全宽</button>
+            <span className="ml-auto text-[11px] text-slate-400">也可拖动选中框左右边缘调宽</span>
+          </div>}
+          <div id="page-studio-canvas" className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
         </main>
 
         <aside className={`${rightPanelOpen ? 'w-72' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
