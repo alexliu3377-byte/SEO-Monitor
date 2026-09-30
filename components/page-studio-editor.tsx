@@ -84,7 +84,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             { name: '尺寸与位置', open: true, buildProps: ['display', 'position', 'width', 'height', 'max-width', 'min-height', 'margin', 'padding'] },
             { name: '文字', open: true, buildProps: ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color', 'text-align', 'text-decoration'] },
             { name: '外观', open: false, buildProps: ['background-color', 'border', 'border-radius', 'box-shadow', 'opacity'] },
-            { name: '布局', open: false, buildProps: ['flex-direction', 'justify-content', 'align-items', 'gap', 'grid-template-columns', 'overflow'] },
+            { name: '布局', open: true, buildProps: ['flex-direction', 'flex-wrap', 'flex-grow', 'flex-basis', 'justify-content', 'align-items', 'gap', 'grid-template-columns', 'overflow'] },
           ],
         },
         panels: { defaults: [] },
@@ -99,13 +99,69 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
 
       const blocks = editor.BlockManager
       blocks.add('section', { label: '内容区块', category: '基础结构', content: '<section style="padding:48px 6%;"><h2>区块标题</h2><p>在这里输入内容。</p></section>', attributes: { title: '加入内容区块' } })
+      blocks.add('horizontal-row', {
+        label: '横向排列区',
+        category: '基础结构',
+        attributes: { title: '先放入横向区，再把多个模块拖进去左右排列' },
+        content: {
+          tagName: 'section',
+          attributes: { 'data-studio-layout': 'horizontal' },
+          style: { display: 'flex', 'flex-wrap': 'wrap', gap: '16px', 'min-height': '96px', padding: '12px' },
+          droppable: true,
+        },
+      })
       blocks.add('two-columns', { label: '双栏布局', category: '基础结构', content: '<section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;padding:40px 6%;"><div><h2>左栏</h2><p>输入内容</p></div><div><h2>右栏</h2><p>输入内容</p></div></section>' })
+      blocks.add('two-drop-columns', {
+        label: '两个自由栏',
+        category: '基础结构',
+        attributes: { title: '把模块分别拖入左右栏' },
+        content: '<section data-studio-layout="columns" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:12px;"><div data-studio-slot="左栏" style="min-height:96px;"></div><div data-studio-slot="右栏" style="min-height:96px;"></div></section>',
+      })
+      blocks.add('three-drop-columns', {
+        label: '三个自由栏',
+        category: '基础结构',
+        attributes: { title: '把模块分别拖入三个栏位' },
+        content: '<section data-studio-layout="columns" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:12px;"><div data-studio-slot="左栏" style="min-height:96px;"></div><div data-studio-slot="中栏" style="min-height:96px;"></div><div data-studio-slot="右栏" style="min-height:96px;"></div></section>',
+      })
       blocks.add('heading', { label: '标题', category: '文字', content: '<h2>请输入标题</h2>' })
       blocks.add('text', { label: '文字', category: '文字', content: '<p>双击修改这段文字。</p>' })
       blocks.add('button', { label: '链接按钮', category: '常用组件', content: '<a href="#" style="display:inline-block;padding:10px 16px;border:1px solid #059669;border-radius:8px;color:#047857;text-decoration:none;font-weight:700;">按钮文字</a>' })
       blocks.add('image', { label: '网址图片', category: '常用组件', activate: true, content: { type: 'image', attributes: { alt: '图片说明' }, style: { 'max-width': '100%', height: 'auto' } } })
       blocks.add('list', { label: '列表模块', category: '常用组件', content: '<section style="padding:32px;border:1px solid #e2e8f0;border-radius:12px;"><h2>列表标题</h2><ul><li>列表内容一</li><li>列表内容二</li><li>列表内容三</li></ul></section>' })
       blocks.add('ad-slot', { label: '广告位', category: '常用组件', content: '<aside aria-label="广告" style="min-height:120px;display:flex;align-items:center;justify-content:center;border:1px dashed #94a3b8;background:#f8fafc;color:#64748b;">广告位 1200 × 120</aside>' })
+
+      const installLayoutGuides = () => {
+        const documentValue = editor.Canvas.getDocument()
+        if (!documentValue || documentValue.getElementById('page-studio-layout-guides')) return
+        const style = documentValue.createElement('style')
+        style.id = 'page-studio-layout-guides'
+        style.textContent = `
+          [data-studio-layout="horizontal"]:empty,
+          [data-studio-slot]:empty {
+            position: relative;
+            outline: 1px dashed #94a3b8;
+            outline-offset: -1px;
+            background: #f8fafc;
+          }
+          [data-studio-layout="horizontal"]:empty::before,
+          [data-studio-slot]:empty::before {
+            content: attr(data-studio-slot);
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            font: 13px/1.4 system-ui, sans-serif;
+            pointer-events: none;
+          }
+          [data-studio-layout="horizontal"]:empty::before {
+            content: '把多个模块拖到这里，它们会左右排列';
+          }
+        `
+        documentValue.head.appendChild(style)
+      }
+      editor.on('load canvas:frame:load', installLayoutGuides)
 
       if (page.projectData) editor.loadProjectData(page.projectData)
       if (page.baselineHtml === undefined || page.baselineCss === undefined) {
@@ -321,7 +377,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       <div className="flex min-h-0 flex-1">
         <aside className={`${leftPanelOpen ? 'w-60' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
           <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>添加模块</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>页面结构</button></div>
-          <div id="page-studio-blocks" className={`page-studio-panel ${leftPanel === 'blocks' ? '' : 'hidden'}`} />
+          <div className={leftPanel === 'blocks' ? '' : 'hidden'}><p className="border-b border-slate-100 px-3 py-2 text-[11px] leading-4 text-slate-500">要左右放置，先拖入“横向排列区”或“自由栏”，再把模块拖进虚线区域。</p><div id="page-studio-blocks" className="page-studio-panel" /></div>
           <div id="page-studio-layers" className={`page-studio-panel ${leftPanel === 'layers' ? '' : 'hidden'}`} />
         </aside>
 
