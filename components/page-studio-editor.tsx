@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import type { Component, Editor } from 'grapesjs'
 import AppDialog from '@/components/app-dialog'
+import PageStudioDevtools from '@/components/page-studio-devtools'
 import {
   PageStudioFavoriteModule,
   PageStudioPage,
@@ -12,6 +13,7 @@ import {
   addPageStudioPage,
   buildPageChangeReport,
   buildPageDocument,
+  buildPagePrototypeDocument,
   copyPageDocument,
   createPageStudioFavoriteModule,
   deletePageStudioFavoriteModule,
@@ -65,14 +67,15 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const projectRef = useRef<PageStudioProject | null>(null)
   const favoriteModulesRef = useRef<PageStudioFavoriteModule[]>([])
   const persistRef = useRef<(createVersion?: boolean, label?: string) => Promise<PageStudioProject | null>>(async () => null)
+  const pendingInteractionRef = useRef<{ trigger: Component; mode: 'hover-show' | 'click-toggle' } | null>(null)
   const [project, setProject] = useState<PageStudioProject | null>(null)
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(true)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [leftPanel, setLeftPanel] = useState<'blocks' | 'layers'>('blocks')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
-  const [rightPanel, setRightPanel] = useState<'style' | 'traits'>('style')
-  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | 'changes' | 'save-module' | 'module-library' | 'module-versions' | 'import-module' | 'animation' | 'versions' | null>(null)
+  const [rightPanel, setRightPanel] = useState<'style' | 'devtools' | 'traits'>('devtools')
+  const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | 'changes' | 'save-module' | 'module-library' | 'module-versions' | 'import-module' | 'animation' | 'interaction' | 'versions' | null>(null)
   const [newPageName, setNewPageName] = useState('')
   const [newPageDevice, setNewPageDevice] = useState<'desktop' | 'mobile'>('desktop')
   const [newPageSource, setNewPageSource] = useState<'blank' | 'code'>('blank')
@@ -98,6 +101,11 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [versions, setVersions] = useState<PageStudioProjectVersion[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [selectedFavorite, setSelectedFavorite] = useState<PageStudioFavoriteModule | null>(null)
+  const [interactionMode, setInteractionMode] = useState<'hover-show' | 'click-toggle'>('hover-show')
+  const [interactionPicking, setInteractionPicking] = useState(false)
+  const [showInteractionLayers, setShowInteractionLayers] = useState(false)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
 
   useEffect(() => {
     let disposed = false
@@ -210,6 +218,14 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           [data-studio-layout="horizontal"]:empty::before {
             content: '把多个模块拖到这里，它们会左右排列';
           }
+          html.studio-show-interaction-layers [data-studio-interaction-target] {
+            display: var(--studio-interaction-display, block) !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            outline: 2px dashed #f59e0b !important;
+            outline-offset: 2px;
+          }
         `
         documentValue.head.appendChild(style)
       }
@@ -236,8 +252,42 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       }
       const initialDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
       editor.setDevice(initialDevice)
-      editor.on('update', () => setSaved(false))
+      const refreshHistory = () => {
+        setCanUndo(editor.UndoManager.hasUndo())
+        setCanRedo(editor.UndoManager.hasRedo())
+      }
+      editor.on('update undo redo', () => {
+        setSaved(false)
+        refreshHistory()
+      })
       editor.on('component:selected', (component: Component) => {
+        const pendingInteraction = pendingInteractionRef.current
+        if (pendingInteraction && component !== pendingInteraction.trigger) {
+          const interactionId = `studio-target-${Date.now().toString(36)}`
+          const display = String(component.getStyle()?.display || 'block')
+          const previousTargetId = pendingInteraction.trigger.getAttributes()['data-studio-target']
+          const wrapper = editor.getWrapper()
+          if (previousTargetId && wrapper) {
+            wrapper.find(`[data-studio-interaction-target="${previousTargetId}"]`).forEach(previousTarget => {
+              previousTarget.removeAttributes(['data-studio-interaction-target', 'data-studio-display'])
+            })
+          }
+          pendingInteraction.trigger.addAttributes({
+            'data-studio-interaction': pendingInteraction.mode,
+            'data-studio-target': interactionId,
+            'aria-haspopup': 'true',
+            'aria-expanded': 'false',
+          })
+          component.addAttributes({
+            'data-studio-interaction-target': interactionId,
+            'data-studio-display': display === 'none' ? 'block' : display,
+          })
+          pendingInteractionRef.current = null
+          setInteractionPicking(false)
+          setShowInteractionLayers(true)
+          editor.Canvas.getDocument()?.documentElement.classList.add('studio-show-interaction-layers')
+          setSaved(false)
+        }
         setSelectedComponentName(component.getName() || component.get('tagName') || '区块')
         if (component.parent() && !component.is('text')) {
           component.set('resizable', {
@@ -255,6 +305,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       })
       editor.on('component:deselected', () => setSelectedComponentName(null))
       editorRef.current = editor
+      refreshHistory()
       setReady(true)
     }
     void initialize().catch(error => {
@@ -615,8 +666,52 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const current = snapshotCurrent()
     if (!current) return
     const page = current.pages.find(item => item.id === current.activePageId) ?? current.pages[0]
-    setPreviewDocument(buildPageDocument(current, page))
+    setPreviewDocument(buildPagePrototypeDocument(current, page))
     setDialog('preview')
+  }
+
+  function openInteractionDialog() {
+    const attributes = editorRef.current?.getSelected()?.getAttributes() ?? {}
+    setInteractionMode(attributes['data-studio-interaction'] === 'click-toggle' ? 'click-toggle' : 'hover-show')
+    setDialog('interaction')
+  }
+
+  function startPickingInteractionTarget() {
+    const trigger = editorRef.current?.getSelected()
+    if (!trigger) return
+    pendingInteractionRef.current = { trigger, mode: interactionMode }
+    setInteractionPicking(true)
+    setLeftPanelOpen(true)
+    setLeftPanel('layers')
+    setDialog(null)
+  }
+
+  function cancelPickingInteractionTarget() {
+    pendingInteractionRef.current = null
+    setInteractionPicking(false)
+  }
+
+  function removeSelectedInteraction() {
+    const editor = editorRef.current
+    const trigger = editor?.getSelected()
+    if (!editor || !trigger) return
+    const attributes = trigger.getAttributes()
+    const targetId = attributes['data-studio-target']
+    trigger.removeAttributes(['data-studio-interaction', 'data-studio-target', 'aria-haspopup', 'aria-expanded'])
+    const wrapper = editor.getWrapper()
+    if (targetId && wrapper) {
+      wrapper.find(`[data-studio-interaction-target="${targetId}"]`).forEach(target => {
+        target.removeAttributes(['data-studio-interaction-target', 'data-studio-display'])
+      })
+    }
+    setSaved(false)
+    setDialog(null)
+  }
+
+  function toggleInteractionLayers() {
+    const next = !showInteractionLayers
+    setShowInteractionLayers(next)
+    editorRef.current?.Canvas.getDocument()?.documentElement.classList.toggle('studio-show-interaction-layers', next)
   }
 
   async function exportCurrent() {
@@ -683,6 +778,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
 
   const activePage = project.pages.find(page => page.id === project.activePageId) ?? project.pages[0]
   const audits = typeof window !== 'undefined' ? auditPage({ ...activePage, html: editorRef.current?.getHtml() ?? activePage.html }) : []
+  const selectedHasInteraction = Boolean(editorRef.current?.getSelected()?.getAttributes()['data-studio-interaction'])
 
   return (
     <div className="flex h-screen min-w-[1040px] flex-col overflow-hidden bg-slate-100 text-slate-900">
@@ -692,6 +788,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         <div className="mx-2 h-6 w-px bg-slate-200" />
         <select aria-label="当前页面" value={project.activePageId} onChange={event => loadPage(event.target.value)} className="h-9 min-w-40 rounded-lg border border-slate-200 bg-white px-3 text-sm"><option disabled>选择页面</option>{project.pages.map(page => <option key={page.id} value={page.id}>{page.name} · {page.path}</option>)}</select>
         <button type="button" onClick={() => setDialog('add-page')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">+ 页面</button>
+        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <button type="button" disabled={!canUndo} onClick={() => editorRef.current?.UndoManager.undo()} className="inline-flex h-9 items-center px-2.5 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button>
+          <button type="button" disabled={!canRedo} onClick={() => editorRef.current?.UndoManager.redo()} className="inline-flex h-9 items-center border-l border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button>
+        </div>
 
         <span className="ml-auto inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">{activePage.targetDevice === 'mobile' ? 'M端页面 · 375px' : 'PC页面 · 1440px'}</span>
         <button type="button" aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{leftPanelOpen ? '隐藏模块' : '显示模块'}</button>
@@ -717,6 +817,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
 
         <main className="relative flex min-w-0 flex-1 flex-col gap-2 bg-slate-200 p-4">
           {!ready && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100 text-sm text-slate-500">正在准备编辑画布…</div>}
+          {interactionPicking && <div className="flex shrink-0 items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-sm"><strong>请选择下拉层</strong><span>直接点击画布里的目标层；若它被隐藏，请从左侧“页面结构”选择。</span><button type="button" onClick={cancelPickingInteractionTarget} className="ml-auto rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100">取消</button></div>}
           {selectedComponentName && <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 shadow-sm">
             <span className="mr-1 max-w-36 truncate text-xs text-slate-500" title={selectedComponentName}>已选：{selectedComponentName}</span>
             <button type="button" onClick={selectParentComponent} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
@@ -725,20 +826,23 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             <button type="button" onClick={() => setSelectedWidth('33.333%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/3</button>
             <button type="button" onClick={() => setSelectedWidth('50%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/2</button>
             <button type="button" onClick={() => setSelectedWidth('100%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">全宽</button>
+            <button type="button" onClick={openInteractionDialog} className={`h-7 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button>
+            <button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button>
             <button type="button" onClick={openAnimationDialog} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button>
             <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">收藏模块</button>
           </div>}
           <div id="page-studio-canvas" className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
         </main>
 
-        <aside className={`${rightPanelOpen ? 'w-72' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
-          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setRightPanel('style')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'style' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>样式</button><button type="button" onClick={() => setRightPanel('traits')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'traits' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>内容属性</button></div>
+        <aside className={`${rightPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
+          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setRightPanel('style')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'style' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>可视化</button><button type="button" onClick={() => setRightPanel('devtools')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'devtools' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>开发者样式</button><button type="button" onClick={() => setRightPanel('traits')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'traits' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>属性</button></div>
           <div id="page-studio-styles" className={`page-studio-panel ${rightPanel === 'style' ? '' : 'hidden'}`} />
+          <div className={rightPanel === 'devtools' ? '' : 'hidden'}><PageStudioDevtools editor={editorRef.current} /></div>
           <div id="page-studio-traits" className={`page-studio-panel ${rightPanel === 'traits' ? '' : 'hidden'}`} />
         </aside>
       </div>
 
-      {dialog === 'preview' && <AppDialog title={`${activePage.name} · 页面预览`} description="链接可点击；外部网址会在预览框中打开。" onClose={() => setDialog(null)} width="max-w-6xl" bodyClassName="min-h-0 flex-1 bg-slate-200 p-3"><iframe title="页面预览" srcDoc={previewDocument} sandbox="allow-popups allow-popups-to-escape-sandbox" className="h-[72vh] w-full rounded-lg border border-slate-300 bg-white" /></AppDialog>}
+      {dialog === 'preview' && <AppDialog title={`${activePage.name} · 页面预览`} description="可测试链接，以及你设定的悬停或点击展开交互。" onClose={() => setDialog(null)} width="max-w-6xl" bodyClassName="min-h-0 flex-1 bg-slate-200 p-3"><iframe title="页面预览" srcDoc={previewDocument} sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" className="h-[72vh] w-full rounded-lg border border-slate-300 bg-white" /></AppDialog>}
       {dialog === 'audit' && <AppDialog title="百度基础检查" description="这是导出前的结构提醒，不代表搜索排名保证。" onClose={() => setDialog(null)} width="max-w-xl"><div className="space-y-3">{audits.map(item => <div key={item.label} className={`rounded-lg border p-4 ${item.ok ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}><div className="flex items-center justify-between"><strong className="text-sm text-slate-900">{item.label}</strong><span className={`text-xs font-semibold ${item.ok ? 'text-emerald-700' : 'text-amber-700'}`}>{item.ok ? '通过' : '需检查'}</span></div><p className="mt-1 text-sm text-slate-600">{item.detail}</p></div>)}</div></AppDialog>}
       {dialog === 'add-page' && <AppDialog title="增加页面" description="可以从空白开始，也可以直接粘贴这个页面的 HTML 与 CSS。" onClose={() => setDialog(null)} width={newPageSource === 'code' ? 'max-w-5xl' : 'max-w-md'} footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!newPageName.trim() || (newPageSource === 'code' && !codeHtml.trim())} onClick={addPage} className="btn-primary">增加页面</button></div>}><label className="block text-sm font-medium text-slate-700">页面名称<input autoFocus value={newPageName} onChange={event => setNewPageName(event.target.value)} placeholder="例如：关于我们" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-emerald-500" /></label><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">建立方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['blank', '空白页面'], ['code', '粘贴页面代码']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageSource === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-source" value={value} checked={newPageSource === value} onChange={() => setNewPageSource(value)} className="sr-only" />{label}</label>)}</div></fieldset><fieldset className="mt-5"><legend className="text-sm font-medium text-slate-700">主要设计尺寸</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['desktop', '电脑端'], ['mobile', '手机端']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${newPageDevice === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="new-page-device" value={value} checked={newPageDevice === value} onChange={() => setNewPageDevice(value)} className="sr-only" />{label}</label>)}</div></fieldset>{newPageSource === 'code' && <CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} />}</AppDialog>}
       {dialog === 'import-code' && <AppDialog title={`粘贴代码到“${activePage.name}”`} description="确认后会替换当前页面的画布内容；尚未保存的当前内容会被覆盖。" onClose={() => setDialog(null)} width="max-w-5xl" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" disabled={!codeHtml.trim()} onClick={replaceCurrentWithCode} className="btn-primary">替换当前页面</button></div>}><CodeImportFields html={codeHtml} css={codeCss} removeImages={codeRemoveImages} onHtml={setCodeHtml} onCss={setCodeCss} onRemoveImages={setCodeRemoveImages} /></AppDialog>}
@@ -748,6 +852,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       {dialog === 'module-versions' && selectedFavorite && <AppDialog title={`${selectedFavorite.name} · 模块历史`} description={`当前版本 v${selectedFavorite.version ?? 1}，最多保留 20 个旧版本。`} onClose={() => setDialog('module-library')} width="max-w-2xl">{selectedFavorite.versions?.length ? <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">{[...selectedFavorite.versions].reverse().map(version => <div key={`${version.version}-${version.createdAt}`} className="flex items-center justify-between gap-4 px-4 py-3"><div><p className="text-sm font-semibold text-slate-900">v{version.version}</p><p className="mt-0.5 text-xs text-slate-500">{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short', hour12: false }).format(new Date(version.createdAt))}</p></div><button type="button" onClick={() => void restoreFavoriteVersion(version)} className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">恢复为新版本</button></div>)}</div> : <div className="py-12 text-center text-sm text-slate-500">暂无旧版本</div>}</AppDialog>}
       {dialog === 'import-module' && <AppDialog title="导入外部模块" description="可从 Uiverse 等来源粘贴 HTML/CSS；脚本、iframe、追踪代码和外部 @import 会被移除。" onClose={() => setDialog('module-library')} width="max-w-5xl" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog('module-library')} className="btn-secondary">返回</button><button type="button" disabled={!favoriteName.trim() || !moduleHtml.trim()} onClick={() => void importExternalModule()} className="btn-primary">导入到收藏</button></div>}><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">模块名称<input value={favoriteName} onChange={event => setFavoriteName(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3" /></label><label className="text-sm font-medium text-slate-700">分类<select value={favoriteCategory} onChange={event => setFavoriteCategory(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-300 bg-white px-3">{['通用', '列表', '导航', '广告位', '内容区', '卡片', '按钮', '页尾'].map(item => <option key={item}>{item}</option>)}</select></label><label className="text-sm font-medium text-slate-700">来源名称（可选）<input value={moduleSourceName} onChange={event => setModuleSourceName(event.target.value)} placeholder="Uiverse / React Bits / 自己设计" className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3" /></label><label className="text-sm font-medium text-slate-700">来源网址（可选）<input value={moduleSourceUrl} onChange={event => setModuleSourceUrl(event.target.value)} placeholder="https://..." className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3" /></label></div><div className="mt-5 grid gap-4 lg:grid-cols-2"><label className="text-sm font-medium text-slate-700">HTML<textarea value={moduleHtml} onChange={event => setModuleHtml(event.target.value)} className="mt-2 h-64 w-full rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs text-slate-100" /></label><label className="text-sm font-medium text-slate-700">CSS<textarea value={moduleCss} onChange={event => setModuleCss(event.target.value)} className="mt-2 h-64 w-full rounded-lg border border-slate-300 bg-slate-950 p-3 font-mono text-xs text-slate-100" /></label></div><p className="mt-3 text-xs leading-5 text-slate-500">React Bits / Aceternity 的 React 组件不能直接拖入 GrapesJS；请先转为静态 HTML/CSS，交互逻辑留给技术部接回。</p></AppDialog>}
       {dialog === 'animation' && <AppDialog title="动画参数" description="只使用可导出的 CSS 动画，不向页面加入 JavaScript。" onClose={() => setDialog(null)} width="max-w-lg" footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" onClick={applyAnimation} className="btn-primary">应用动画</button></div>}><fieldset><legend className="text-sm font-medium text-slate-700">效果</legend><div className="mt-2 grid grid-cols-2 gap-2">{([['none', '无动画'], ['fade-in', '淡入'], ['fade-up', '向上淡入'], ['scale-in', '缩放淡入']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-3 py-3 text-sm ${animationPreset === value ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-800' : 'border-slate-200'}`}><input type="radio" checked={animationPreset === value} onChange={() => setAnimationPreset(value)} className="sr-only" />{label}</label>)}</div></fieldset><div className="mt-5 grid grid-cols-2 gap-4"><label className="text-sm font-medium text-slate-700">时长（ms）<input type="number" min="100" max="5000" step="50" value={animationDuration} onChange={event => setAnimationDuration(Number(event.target.value))} className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3" /></label><label className="text-sm font-medium text-slate-700">延迟（ms）<input type="number" min="0" max="5000" step="50" value={animationDelay} onChange={event => setAnimationDelay(Number(event.target.value))} className="mt-2 h-11 w-full rounded-lg border border-slate-300 px-3" /></label></div></AppDialog>}
+      {dialog === 'interaction' && <AppDialog title="设置展开交互" description="先选中菜单按钮，再指定要出现的下拉层。原网站脚本不会被执行。" onClose={() => setDialog(null)} width="max-w-lg" footer={<div className="flex w-full items-center justify-between gap-2">{selectedHasInteraction ? <button type="button" onClick={removeSelectedInteraction} className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50">移除交互</button> : <span />}<div className="flex gap-2"><button type="button" onClick={() => setDialog(null)} className="btn-secondary">取消</button><button type="button" onClick={startPickingInteractionTarget} className="btn-primary">下一步：选择下拉层</button></div></div>}><fieldset><legend className="text-sm font-medium text-slate-700">打开方式</legend><div className="mt-2 grid grid-cols-2 gap-3">{([['hover-show', '鼠标移入展开'], ['click-toggle', '点击展开']] as const).map(([value, label]) => <label key={value} className={`cursor-pointer rounded-lg border px-4 py-3 text-sm font-semibold ${interactionMode === value ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}><input type="radio" name="interaction-mode" checked={interactionMode === value} onChange={() => setInteractionMode(value)} className="sr-only" />{label}</label>)}</div></fieldset><div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800">操作方法</p><p className="mt-1">1. 当前选中的元素会作为菜单按钮。</p><p>2. 点击“下一步”后，再选择整块下拉菜单。</p><p>3. 点击顶部“预览”测试效果；编辑画布内不会直接触发展开。</p></div></AppDialog>}
       {dialog === 'versions' && <AppDialog title="项目版本记录" description="自动保存更新当前草稿；手动保存、AI 初稿与恢复操作会生成可恢复版本。" onClose={() => setDialog(null)} width="max-w-2xl">{versionsLoading ? <div className="py-12 text-center text-sm text-slate-500">正在读取版本…</div> : versions.length === 0 ? <div className="py-12 text-center text-sm text-slate-500">还没有版本，点击一次“保存”即会建立。</div> : <div className="overflow-hidden rounded-lg border border-slate-200 bg-white"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3">版本</th><th className="px-4 py-3">说明</th><th className="px-4 py-3">时间</th><th className="px-4 py-3 text-right">操作</th></tr></thead><tbody className="divide-y divide-slate-100">{versions.map(version => <tr key={version.id}><td className="px-4 py-3 font-semibold text-slate-900">v{version.versionNo}</td><td className="px-4 py-3 text-slate-600">{version.label}</td><td className="px-4 py-3 text-slate-500">{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short', hour12: false }).format(new Date(version.createdAt))}</td><td className="px-4 py-3 text-right"><button type="button" onClick={() => void restoreVersion(version)} className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">恢复</button></td></tr>)}</tbody></table></div>}</AppDialog>}
     </div>
   )

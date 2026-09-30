@@ -323,6 +323,62 @@ export function buildPageDocument(project: PageStudioProject, page: PageStudioPa
   return `<!doctype html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${title}</title>\n<style>\n${page.css}\n</style>\n</head>\n<body>\n${page.html}\n</body>\n</html>`
 }
 
+export function buildPagePrototypeDocument(project: PageStudioProject, page: PageStudioPage) {
+  const interactionRuntime = `
+<style>
+[data-studio-interaction-target][hidden] { display: none !important; }
+[data-studio-interaction-target].studio-interaction-open {
+  display: var(--studio-interaction-display, block) !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+</style>
+<script>
+(() => {
+  const targets = Array.from(document.querySelectorAll('[data-studio-interaction-target]'));
+  const findTarget = id => targets.find(node => node.getAttribute('data-studio-interaction-target') === id);
+  const open = target => {
+    target.style.setProperty('--studio-interaction-display', target.getAttribute('data-studio-display') || 'block');
+    target.hidden = false;
+    target.classList.add('studio-interaction-open');
+  };
+  const close = target => {
+    target.classList.remove('studio-interaction-open');
+    target.hidden = true;
+  };
+  document.querySelectorAll('[data-studio-interaction][data-studio-target]').forEach(trigger => {
+    const target = findTarget(trigger.getAttribute('data-studio-target'));
+    if (!target) return;
+    close(target);
+    const mode = trigger.getAttribute('data-studio-interaction');
+    if (mode === 'click-toggle') {
+      trigger.addEventListener('click', event => {
+        if (!trigger.getAttribute('href') || trigger.getAttribute('href') === '#') event.preventDefault();
+        const nextOpen = target.hidden;
+        targets.forEach(close);
+        if (nextOpen) open(target);
+        trigger.setAttribute('aria-expanded', String(nextOpen));
+      });
+      return;
+    }
+    let closeTimer;
+    const enter = () => { window.clearTimeout(closeTimer); open(target); };
+    const leave = () => { closeTimer = window.setTimeout(() => close(target), 120); };
+    trigger.addEventListener('mouseenter', enter);
+    trigger.addEventListener('mouseleave', leave);
+    target.addEventListener('mouseenter', enter);
+    target.addEventListener('mouseleave', leave);
+  });
+  document.addEventListener('click', event => {
+    if (event.target.closest('[data-studio-interaction], [data-studio-interaction-target]')) return;
+    targets.forEach(close);
+  });
+})();
+</script>`
+  return buildPageDocument(project, page).replace('</body>', `${interactionRuntime}\n</body>`)
+}
+
 export function downloadPageDocument(project: PageStudioProject, page: PageStudioPage) {
   const blob = new Blob([buildPageDocument(project, page)], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
