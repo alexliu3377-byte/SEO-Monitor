@@ -120,6 +120,25 @@
   border-color: #10b981;
   color: #047857;
 }
+.page-studio-panel .gjs-block-label {
+  width: 100%;
+}
+.page-studio-panel .studio-block-label {
+  display: flex;
+  min-height: 46px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+.page-studio-panel .studio-block-label svg {
+  flex: none;
+  color: #0f766e;
+}
+.page-studio-panel .gjs-block:hover .studio-block-label svg {
+  color: #059669;
+}
 .page-studio-panel .gjs-block-category,
 .page-studio-panel .gjs-sm-sector {
   border-bottom: 1px solid #e2e8f0;

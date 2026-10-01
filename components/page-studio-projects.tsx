@@ -119,9 +119,9 @@ export default function PageStudioProjects() {
       <header className="border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
         <div className="mx-auto flex max-w-[1380px] flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-semibold text-emerald-700">页面设计工作室 · 原型测试</p>
+            <p className="text-xs font-semibold text-emerald-700">简易页面搭建器</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">页面项目</h1>
-            <p className="mt-1 text-sm text-slate-500">像做简报一样整理网页，再导出给技术部。</p>
+            <p className="mt-1 text-sm text-slate-500">选择现成模块、替换内容和调整布局，再交给前端实现。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setDialog('ai')} className="btn-secondary">AI 生成初稿</button>

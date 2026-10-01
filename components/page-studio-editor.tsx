@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Component, Editor } from 'grapesjs'
 import AppDialog from '@/components/app-dialog'
 import PageStudioDevtools from '@/components/page-studio-devtools'
+import PageStudioModuleLibrary from '@/components/page-studio-module-library'
+import PageStudioQuickStyle from '@/components/page-studio-quick-style'
 import {
   PageStudioFavoriteModule,
   PageStudioPage,
@@ -40,6 +42,37 @@ const STUDIO_ANIMATION_CSS = `
 @media (prefers-reduced-motion: reduce) { [data-studio-animation] { animation: none !important; } }
 `
 
+const STUDIO_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#f1f5f9"/><rect x="1" y="1" width="318" height="178" rx="12" fill="none" stroke="#94a3b8" stroke-dasharray="8 6"/><path d="m80 135 58-61 37 39 25-27 45 49H80z" fill="#cbd5e1"/><circle cx="220" cy="55" r="14" fill="#cbd5e1"/></svg>')}`
+
+const ICON_PATHS = {
+  section: '<path d="M4 5h16v14H4zM4 9h16"/>',
+  row: '<path d="M4 5h7v14H4zM13 5h7v14h-7z"/>',
+  columns: '<path d="M3 5h5v14H3zM10 5h5v14h-5zM17 5h4v14h-4z"/>',
+  heading: '<path d="M5 5v14M19 5v14M5 12h14"/>',
+  text: '<path d="M5 7h14M5 12h14M5 17h9"/>',
+  button: '<rect x="3" y="7" width="18" height="10" rx="3"/><path d="M8 12h8"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m5 17 5-5 3 3 2-2 4 4M16.5 8h.01"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  home: '<path d="m3 11 9-8 9 8v10h-6v-6H9v6H3z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  download: '<path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/>',
+  refresh: '<path d="M20 6v6h-6M4 18v-6h6M18.5 9A7 7 0 0 0 6 7M5.5 15A7 7 0 0 0 18 17"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/>',
+} as const
+
+function iconSvg(path: string, size = 24) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`
+}
+
+function blockLabel(path: string, label: string) {
+  return `<span class="studio-block-label">${iconSvg(path, 22)}<span>${label}</span></span>`
+}
+
+function iconBlock(path: string, label: string) {
+  return `<span role="img" aria-label="${label}" style="display:inline-flex;width:40px;height:40px;align-items:center;justify-content:center;color:#0f766e;">${iconSvg(path, 28)}</span>`
+}
+
 function registerFavoriteBlock(editor: Editor, module: PageStudioFavoriteModule) {
   editor.BlockManager.add(`${FAVORITE_BLOCK_PREFIX}${module.id}`, {
     label: module.name,
@@ -68,13 +101,16 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const favoriteModulesRef = useRef<PageStudioFavoriteModule[]>([])
   const persistRef = useRef<(createVersion?: boolean, label?: string) => Promise<PageStudioProject | null>>(async () => null)
   const pendingInteractionRef = useRef<{ trigger: Component; mode: 'hover-show' | 'click-toggle' } | null>(null)
+  const componentClipboardRef = useRef<Component | null>(null)
+  const shortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
   const [project, setProject] = useState<PageStudioProject | null>(null)
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(true)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [leftPanel, setLeftPanel] = useState<'blocks' | 'layers'>('blocks')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
-  const [rightPanel, setRightPanel] = useState<'style' | 'devtools' | 'traits'>('devtools')
+  const [rightPanel, setRightPanel] = useState<'quick' | 'style' | 'devtools' | 'traits'>('quick')
+  const [advancedMode, setAdvancedMode] = useState(false)
   const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | 'changes' | 'save-module' | 'module-library' | 'module-versions' | 'import-module' | 'animation' | 'interaction' | 'versions' | null>(null)
   const [newPageName, setNewPageName] = useState('')
   const [newPageDevice, setNewPageDevice] = useState<'desktop' | 'mobile'>('desktop')
@@ -106,6 +142,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [showInteractionLayers, setShowInteractionLayers] = useState(false)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
+  const [hasCopiedComponent, setHasCopiedComponent] = useState(false)
 
   useEffect(() => {
     let disposed = false
@@ -158,9 +195,9 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       favoriteModulesRef.current = storedFavoriteModules
       setFavoriteModules(storedFavoriteModules)
       storedFavoriteModules.forEach(module => registerFavoriteBlock(editor, module))
-      blocks.add('section', { label: '内容区块', category: '基础结构', content: '<section style="padding:48px 6%;"><h2>区块标题</h2><p>在这里输入内容。</p></section>', attributes: { title: '加入内容区块' } })
+      blocks.add('section', { label: blockLabel(ICON_PATHS.section, '内容区块'), category: '基础结构', content: '<section style="padding:48px 6%;"><h2>区块标题</h2><p>在这里输入内容。</p></section>', attributes: { title: '加入内容区块' } })
       blocks.add('horizontal-row', {
-        label: '横向排列区',
+        label: blockLabel(ICON_PATHS.row, '横向排列'),
         category: '基础结构',
         attributes: { title: '先放入横向区，再把多个模块拖进去左右排列' },
         content: {
@@ -170,25 +207,43 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           droppable: true,
         },
       })
-      blocks.add('two-columns', { label: '双栏布局', category: '基础结构', content: '<section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;padding:40px 6%;"><div><h2>左栏</h2><p>输入内容</p></div><div><h2>右栏</h2><p>输入内容</p></div></section>' })
+      blocks.add('two-columns', { label: blockLabel(ICON_PATHS.row, '双栏布局'), category: '基础结构', content: '<section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;padding:40px 6%;"><div><h2>左栏</h2><p>输入内容</p></div><div><h2>右栏</h2><p>输入内容</p></div></section>' })
       blocks.add('two-drop-columns', {
-        label: '两个自由栏',
+        label: blockLabel(ICON_PATHS.row, '两个自由栏'),
         category: '基础结构',
         attributes: { title: '把模块分别拖入左右栏' },
         content: '<section data-studio-layout="columns" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:12px;"><div data-studio-slot="左栏" style="min-height:96px;"></div><div data-studio-slot="右栏" style="min-height:96px;"></div></section>',
       })
       blocks.add('three-drop-columns', {
-        label: '三个自由栏',
+        label: blockLabel(ICON_PATHS.columns, '三个自由栏'),
         category: '基础结构',
         attributes: { title: '把模块分别拖入三个栏位' },
         content: '<section data-studio-layout="columns" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:12px;"><div data-studio-slot="左栏" style="min-height:96px;"></div><div data-studio-slot="中栏" style="min-height:96px;"></div><div data-studio-slot="右栏" style="min-height:96px;"></div></section>',
       })
-      blocks.add('heading', { label: '标题', category: '文字', content: '<h2>请输入标题</h2>' })
-      blocks.add('text', { label: '文字', category: '文字', content: '<p>双击修改这段文字。</p>' })
-      blocks.add('button', { label: '链接按钮', category: '常用组件', content: '<a href="#" style="display:inline-block;padding:10px 16px;border:1px solid #059669;border-radius:8px;color:#047857;text-decoration:none;font-weight:700;">按钮文字</a>' })
-      blocks.add('image', { label: '网址图片', category: '常用组件', activate: true, content: { type: 'image', attributes: { alt: '图片说明' }, style: { 'max-width': '100%', height: 'auto' } } })
-      blocks.add('list', { label: '列表模块', category: '常用组件', content: '<section style="padding:32px;border:1px solid #e2e8f0;border-radius:12px;"><h2>列表标题</h2><ul><li>列表内容一</li><li>列表内容二</li><li>列表内容三</li></ul></section>' })
-      blocks.add('ad-slot', { label: '广告位', category: '常用组件', content: '<aside aria-label="广告" style="min-height:120px;display:flex;align-items:center;justify-content:center;border:1px dashed #94a3b8;background:#f8fafc;color:#64748b;">广告位 1200 × 120</aside>' })
+      blocks.add('heading', { label: blockLabel(ICON_PATHS.heading, '标题'), category: '文字', content: '<h2>请输入标题</h2>' })
+      blocks.add('text', { label: blockLabel(ICON_PATHS.text, '文字'), category: '文字', content: '<p>双击修改这段文字。</p>' })
+      blocks.add('button', { label: blockLabel(ICON_PATHS.button, '链接按钮'), category: '常用组件', content: '<a href="#" style="display:inline-block;padding:10px 16px;border:1px solid #059669;border-radius:8px;color:#047857;text-decoration:none;font-weight:700;">按钮文字</a>' })
+      blocks.add('list', { label: blockLabel(ICON_PATHS.list, '列表模块'), category: '常用组件', content: '<section style="padding:32px;border:1px solid #e2e8f0;border-radius:12px;"><h2>列表标题</h2><ul><li>列表内容一</li><li>列表内容二</li><li>列表内容三</li></ul></section>' })
+      blocks.add('ad-slot', { label: blockLabel(ICON_PATHS.section, '广告位'), category: '常用组件', content: '<aside aria-label="广告" style="min-height:120px;display:flex;align-items:center;justify-content:center;border:1px dashed #94a3b8;background:#f8fafc;color:#64748b;">广告位 1200 × 120</aside>' })
+
+      blocks.add('image', { label: blockLabel(ICON_PATHS.image, '单张图片'), category: '图片', content: { type: 'image', attributes: { src: STUDIO_IMAGE_PLACEHOLDER, alt: '图片说明' }, style: { display: 'block', 'max-width': '100%', height: 'auto', 'border-radius': '8px' } } })
+      blocks.add('logo-image', { label: blockLabel(ICON_PATHS.image, 'Logo 图片'), category: '图片', content: `<img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="网站 Logo" style="display:block;width:180px;height:64px;object-fit:contain;"/>` })
+      blocks.add('round-image', { label: blockLabel(ICON_PATHS.image, '圆形图片'), category: '图片', content: `<img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="圆形图片" style="display:block;width:96px;height:96px;object-fit:cover;border-radius:999px;"/>` })
+      blocks.add('banner-image', { label: blockLabel(ICON_PATHS.image, '横幅图片'), category: '图片', content: `<img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="横幅图片" style="display:block;width:100%;height:180px;object-fit:cover;border-radius:12px;"/>` })
+      blocks.add('image-card', { label: blockLabel(ICON_PATHS.image, '图片卡片'), category: '图片', content: `<article style="overflow:hidden;border:1px solid #e2e8f0;border-radius:12px;background:#fff;max-width:320px;"><img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="卡片图片" style="display:block;width:100%;height:170px;object-fit:cover;"/><div style="padding:16px;"><h3 style="margin:0 0 8px;">卡片标题</h3><p style="margin:0;color:#64748b;">双击修改卡片说明。</p></div></article>` })
+      blocks.add('image-gallery', { label: blockLabel(ICON_PATHS.columns, '三图网格'), category: '图片', content: `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">${[1, 2, 3].map(index => `<img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="网格图片 ${index}" style="display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;"/>`).join('')}</div>` })
+      blocks.add('image-text-row', { label: blockLabel(ICON_PATHS.image, '图片加文字'), category: '图片', content: `<div style="display:flex;align-items:center;gap:14px;"><img src="${STUDIO_IMAGE_PLACEHOLDER}" alt="图文图片" style="width:72px;height:72px;object-fit:cover;border-radius:12px;flex:0 0 72px;"/><div><h3 style="margin:0 0 6px;">图文标题</h3><p style="margin:0;color:#64748b;">双击修改说明文字。</p></div></div>` })
+
+      ;([
+        ['home-icon', '首页图标', ICON_PATHS.home],
+        ['search-icon', '搜索图标', ICON_PATHS.search],
+        ['download-icon', '下载图标', ICON_PATHS.download],
+        ['heart-icon', '收藏图标', ICON_PATHS.heart],
+        ['refresh-icon', '刷新图标', ICON_PATHS.refresh],
+        ['star-icon', '星标图标', ICON_PATHS.star],
+      ] as const).forEach(([id, label, path]) => blocks.add(id, { label: blockLabel(path, label), category: '图标', content: iconBlock(path, label) }))
+      blocks.add('icon-button', { label: blockLabel(ICON_PATHS.button, '图标按钮'), category: '图标', content: `<a href="#" aria-label="按钮说明" style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;border:1px solid #cbd5e1;border-radius:10px;color:#0f766e;background:#fff;text-decoration:none;">${iconSvg(ICON_PATHS.search, 22)}</a>` })
+      blocks.add('icon-text', { label: blockLabel(ICON_PATHS.star, '图标加文字'), category: '图标', content: `<div style="display:flex;align-items:center;gap:10px;color:#0f172a;"><span style="display:inline-flex;color:#0f766e;">${iconSvg(ICON_PATHS.star, 24)}</span><span>双击修改文字</span></div>` })
 
       const installLayoutGuides = () => {
         const documentValue = editor.Canvas.getDocument()
@@ -229,7 +284,14 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         `
         documentValue.head.appendChild(style)
       }
-      editor.on('load canvas:frame:load', installLayoutGuides)
+      const installCanvasHelpers = () => {
+        installLayoutGuides()
+        const documentValue = editor.Canvas.getDocument()
+        if (!documentValue || documentValue.documentElement.dataset.studioShortcuts === 'true') return
+        documentValue.documentElement.dataset.studioShortcuts = 'true'
+        documentValue.addEventListener('keydown', event => shortcutHandlerRef.current(event), true)
+      }
+      editor.on('load canvas:frame:load', installCanvasHelpers)
       editor.on('block:drag:stop', (component: Component | undefined, block) => {
         if (!component || !block) return
         const blockId = String(block.getId())
@@ -288,7 +350,8 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           editor.Canvas.getDocument()?.documentElement.classList.add('studio-show-interaction-layers')
           setSaved(false)
         }
-        setSelectedComponentName(component.getName() || component.get('tagName') || '区块')
+        const attributes = component.getAttributes()
+        setSelectedComponentName(String(attributes['data-studio-module'] || attributes['data-studio-slot'] || component.getName() || component.get('tagName') || '区块'))
         if (component.parent() && !component.is('text')) {
           component.set('resizable', {
             tl: false,
@@ -321,14 +384,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   }, [projectId])
 
   useEffect(() => {
-    function handleShortcut(event: KeyboardEvent) {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
-      event.preventDefault()
-      if (event.shiftKey) editorRef.current?.UndoManager.redo()
-      else editorRef.current?.UndoManager.undo()
-    }
+    const handleShortcut = (event: KeyboardEvent) => shortcutHandlerRef.current(event)
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [])
@@ -380,6 +436,83 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     if (editor && parent && parent.parent()) editor.select(parent)
   }
 
+  function copySelectedComponent() {
+    const component = editorRef.current?.getSelected()
+    if (!component?.parent()) return
+    componentClipboardRef.current = component.clone()
+    setHasCopiedComponent(true)
+  }
+
+  function pasteSelectedComponent() {
+    const editor = editorRef.current
+    const copied = componentClipboardRef.current
+    if (!editor || !copied) return
+    const selected = editor.getSelected()
+    const parent = selected?.parent() ?? editor.getWrapper()
+    if (!parent) return
+    const siblings = parent.components().models
+    const selectedIndex = selected && selected.parent() === parent ? siblings.indexOf(selected) : siblings.length - 1
+    const [pasted] = parent.append(copied.clone(), { at: selectedIndex + 1 })
+    if (pasted) editor.select(pasted)
+    setSaved(false)
+  }
+
+  function duplicateSelectedComponent() {
+    const editor = editorRef.current
+    const component = editor?.getSelected()
+    const parent = component?.parent()
+    if (!editor || !component || !parent || component.get('copyable') === false) return
+    const index = parent.components().models.indexOf(component)
+    const [duplicate] = parent.append(component.clone(), { at: index + 1 })
+    if (duplicate) editor.select(duplicate)
+    setSaved(false)
+  }
+
+  function deleteSelectedComponent() {
+    const editor = editorRef.current
+    const component = editor?.getSelected()
+    if (!editor || !component?.parent() || component.get('removable') === false) return
+    component.remove()
+    editor.selectRemove(component)
+    setSaved(false)
+  }
+
+  function handleEditorShortcut(event: KeyboardEvent) {
+    const editor = editorRef.current
+    if (!editor) return
+    const target = event.target as HTMLElement | null
+    if (editor.getEditing() || target?.closest('input, textarea, select, [contenteditable="true"]')) return
+
+    const key = event.key.toLowerCase()
+    const modifier = event.ctrlKey || event.metaKey
+    if (modifier && key === 'z') {
+      event.preventDefault()
+      if (event.shiftKey) editor.UndoManager.redo()
+      else editor.UndoManager.undo()
+      return
+    }
+    if (modifier && key === 'c') {
+      event.preventDefault()
+      copySelectedComponent()
+      return
+    }
+    if (modifier && key === 'v') {
+      event.preventDefault()
+      pasteSelectedComponent()
+      return
+    }
+    if (modifier && key === 'd') {
+      event.preventDefault()
+      duplicateSelectedComponent()
+      return
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      deleteSelectedComponent()
+    }
+  }
+  shortcutHandlerRef.current = handleEditorShortcut
+
   function makeSelectedHorizontal() {
     const component = editorRef.current?.getSelected()
     if (!component) return
@@ -406,6 +539,13 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       'flex-grow': '0',
       'box-sizing': 'border-box',
     })
+    setSaved(false)
+  }
+
+  function centerSelectedComponent() {
+    const component = editorRef.current?.getSelected()
+    if (!component) return
+    component.addStyle({ 'margin-left': 'auto', 'margin-right': 'auto' })
     setSaved(false)
   }
 
@@ -794,13 +934,11 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         </div>
 
         <span className="ml-auto inline-flex h-8 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">{activePage.targetDevice === 'mobile' ? 'M端页面 · 375px' : 'PC页面 · 1440px'}</span>
-        <button type="button" aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{leftPanelOpen ? '隐藏模块' : '显示模块'}</button>
-        <button type="button" aria-pressed={rightPanelOpen} onClick={() => setRightPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{rightPanelOpen ? '隐藏属性' : '显示属性'}</button>
-        <button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button>
+        <button type="button" aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{leftPanelOpen ? '隐藏模块' : '选择模块'}</button>
+        <button type="button" aria-pressed={rightPanelOpen} onClick={() => setRightPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{rightPanelOpen ? '隐藏设置' : '显示设置'}</button>
         <button type="button" onClick={showPreview} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">预览</button>
-        <button type="button" onClick={() => setDialog('import-code')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">粘贴代码</button>
-        <button type="button" onClick={() => void openVersions()} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">版本</button>
-        <button type="button" onClick={() => setDialog('changes')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">修改记录</button>
+        {advancedMode && <><button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button><button type="button" onClick={() => setDialog('import-code')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">粘贴代码</button><button type="button" onClick={() => void openVersions()} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">版本</button><button type="button" onClick={() => setDialog('changes')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">修改记录</button></>}
+        <button type="button" aria-pressed={advancedMode} onClick={() => { setAdvancedMode(value => !value); setRightPanel('quick') }} className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium ${advancedMode ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{advancedMode ? '退出高级' : '高级模式'}</button>
         <button type="button" disabled={syncing} onClick={() => void persist(true, '手动保存')} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">{syncing ? '保存中' : '保存'}</button>
         <button type="button" onClick={() => void copyCurrentCode()} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">{copied ? '已复制' : '复制代码'}</button>
         <button type="button" onClick={() => void exportCurrent()} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700">导出当前页</button>
@@ -809,33 +947,39 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       {storageError && <div role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{storageError}</div>}
 
       <div className="flex min-h-0 flex-1">
-        <aside className={`${leftPanelOpen ? 'w-60' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
-          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>添加模块</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>页面结构</button></div>
-          <div className={leftPanel === 'blocks' ? '' : 'hidden'}><div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2"><p className="text-[11px] leading-4 text-slate-500">拖入画布使用；收藏模块会显示在最上方。</p><button type="button" onClick={() => setDialog('module-library')} className="shrink-0 text-[11px] font-medium text-emerald-700 hover:text-emerald-800">管理 {favoriteModules.length}</button></div><div id="page-studio-blocks" className="page-studio-panel" /></div>
+        <aside className={`${leftPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
+          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>选择模块</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>高级结构</button></div>
+          <div className={leftPanel === 'blocks' ? '' : 'hidden'}><PageStudioModuleLibrary editor={editorRef.current} favorites={favoriteModules} onManageFavorites={() => setDialog('module-library')} /><div id="page-studio-blocks" className="hidden" /></div>
           <div id="page-studio-layers" className={`page-studio-panel ${leftPanel === 'layers' ? '' : 'hidden'}`} />
         </aside>
 
         <main className="relative flex min-w-0 flex-1 flex-col gap-2 bg-slate-200 p-4">
           {!ready && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100 text-sm text-slate-500">正在准备编辑画布…</div>}
           {interactionPicking && <div className="flex shrink-0 items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-sm"><strong>请选择下拉层</strong><span>直接点击画布里的目标层；若它被隐藏，请从左侧“页面结构”选择。</span><button type="button" onClick={cancelPickingInteractionTarget} className="ml-auto rounded-md border border-amber-300 bg-white px-2.5 py-1 font-medium hover:bg-amber-100">取消</button></div>}
-          {selectedComponentName && <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 shadow-sm">
+          {selectedComponentName && <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-300 bg-white px-2 shadow-sm">
             <span className="mr-1 max-w-36 truncate text-xs text-slate-500" title={selectedComponentName}>已选：{selectedComponentName}</span>
-            <button type="button" onClick={selectParentComponent} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
-            <button type="button" onClick={makeSelectedHorizontal} className="h-7 rounded-md border border-emerald-300 px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50" title="让这个外框里的子模块左右排列">改为横排</button>
+            <button type="button" onClick={selectParentComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
+            <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+              <button type="button" onClick={copySelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="复制当前元素（Ctrl+C）">复制</button>
+              <button type="button" disabled={!hasCopiedComponent} onClick={pasteSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="粘贴到当前元素后面（Ctrl+V）">粘贴</button>
+              <button type="button" onClick={duplicateSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="直接复制一份（Ctrl+D）">复制一份</button>
+              <button type="button" onClick={deleteSelectedComponent} className="h-7 border-l border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50" title="删除当前元素（Delete）">删除</button>
+            </div>
+            <button type="button" onClick={makeSelectedHorizontal} className="h-7 shrink-0 rounded-md border border-emerald-300 px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50" title="让这个外框里的子模块左右排列">改为横排</button>
             <span className="ml-1 text-[11px] text-slate-400">当前宽度</span>
             <button type="button" onClick={() => setSelectedWidth('33.333%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/3</button>
             <button type="button" onClick={() => setSelectedWidth('50%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/2</button>
             <button type="button" onClick={() => setSelectedWidth('100%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">全宽</button>
-            <button type="button" onClick={openInteractionDialog} className={`h-7 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button>
-            <button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button>
-            <button type="button" onClick={openAnimationDialog} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button>
-            <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">收藏模块</button>
+            <button type="button" onClick={centerSelectedComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">模块居中</button>
+            {advancedMode && <><button type="button" onClick={openInteractionDialog} className={`h-7 shrink-0 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button><button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button><button type="button" onClick={openAnimationDialog} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button></>}
+            <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 shrink-0 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">存为我的模块</button>
           </div>}
           <div id="page-studio-canvas" className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
         </main>
 
         <aside className={`${rightPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
-          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setRightPanel('style')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'style' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>可视化</button><button type="button" onClick={() => setRightPanel('devtools')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'devtools' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>开发者样式</button><button type="button" onClick={() => setRightPanel('traits')} className={`h-8 flex-1 rounded-md text-xs font-medium ${rightPanel === 'traits' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>属性</button></div>
+          <div className={`sticky top-0 z-10 grid ${advancedMode ? 'grid-cols-4' : 'grid-cols-2'} border-b border-slate-200 bg-white p-1.5`}><button type="button" onClick={() => setRightPanel('quick')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'quick' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>常用设置</button><button type="button" onClick={() => setRightPanel('traits')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'traits' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>图片与链接</button>{advancedMode && <><button type="button" onClick={() => setRightPanel('style')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'style' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>详细样式</button><button type="button" onClick={() => setRightPanel('devtools')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'devtools' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>CSS 高级</button></>}</div>
+          <div className={rightPanel === 'quick' ? '' : 'hidden'}><PageStudioQuickStyle editor={editorRef.current} onAdvanced={() => { setAdvancedMode(true); setRightPanel('devtools') }} /></div>
           <div id="page-studio-styles" className={`page-studio-panel ${rightPanel === 'style' ? '' : 'hidden'}`} />
           <div className={rightPanel === 'devtools' ? '' : 'hidden'}><PageStudioDevtools editor={editorRef.current} /></div>
           <div id="page-studio-traits" className={`page-studio-panel ${rightPanel === 'traits' ? '' : 'hidden'}`} />
