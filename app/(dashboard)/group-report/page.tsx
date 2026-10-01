@@ -763,7 +763,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                                               </span>
                                               <span className="text-sm text-gray-700">{device.rank_position != null ? `第${device.rank_position}名` : '—'}</span>
                                               <span className={`text-[10px] ${device.status === '上涨' ? 'text-green-600' : device.status === '下跌' ? 'text-red-400' : 'text-amber-600'}`}>
-                                                {device.status === '同日升跌' ? '升跌同日·按涨计' : device.rank_change != null && device.rank_change !== 0
+                                                {device.status === '同日升跌' ? '升跌同日' : device.rank_change != null && device.rank_change !== 0
                                                   ? `${device.rank_change > 0 ? '↑' : '↓'}${Math.abs(device.rank_change)}`
                                                   : device.status}
                                               </span>
