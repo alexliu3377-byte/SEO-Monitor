@@ -758,7 +758,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const detailCacheRef = useRef<Map<string, { newRows: DetailRow[]; rankRows: DetailRow[]; wordLibSiteKws: { domain: string; keywords: string[] }[]; volumeRisingRows: VolumeRisingDetailRow[] }>>(new Map())
 
   const activeGroup = groups.find(g => g.id === activeGroupId) ?? null
-  const effectiveViewingId = viewingMemberId || currentUserId || ''
+  const currentUserIsMember = !!currentUserId && !!activeGroup?.members.some(member => member.user_id === currentUserId)
+  const viewingMemberIsValid = !!viewingMemberId && !!activeGroup?.members.some(member => member.user_id === viewingMemberId)
+  const effectiveViewingId = viewingMemberIsValid ? viewingMemberId! : currentUserIsMember ? currentUserId! : ''
   const isViewingOwn = effectiveViewingId === currentUserId
 
   const claimedSet = useMemo(() => new Set(claimedKeywords.map(k => k.keyword)), [claimedKeywords])
@@ -1340,6 +1342,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 合并推荐视图（见下方"今日推荐"渲染）每一行知道自己是哪个组员的，双击时
   // 显式传入那一行的 user_id，不受当前"查看谁"的切换影响。
   async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string, targetUserId?: string) {
+    const assigneeId = targetUserId ?? effectiveViewingId
+    if (!assigneeId) {
+      setClaimErrorMsg('请先在左上方选择要代为认领的组员')
+      return
+    }
     // claimedSet covers "already in state"; claimingRef covers "in-flight request"
     if (!activeGroupId || claimedSet.has(keyword) || claimingRef.current.has(keyword)) return
     claimingRef.current.add(keyword)
@@ -1354,7 +1361,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           operation_type: '新增',
           source_rule_id: source_rule_id ?? null,
           claimed_date: selectedDate,
-          userId: targetUserId ?? effectiveViewingId,
+          userId: assigneeId,
         }),
       })
       if (res.status === 409) {
@@ -1369,7 +1376,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         const data = await res.json()
         // 认领的是当前正在查看的组员时才追加进这份"今天已认领"列表——合并推荐
         // 视图代其它组员认领时，这份列表跟那个组员无关，不用管。
-        if ((targetUserId ?? effectiveViewingId) === effectiveViewingId) {
+        if (assigneeId === effectiveViewingId) {
           setClaimedKeywords(prev => [...prev, data.keyword])
           setExpandedClaimIds(new Set<string>([data.keyword.id]))
         }
@@ -1780,7 +1787,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     return () => clearTimeout(t)
   }, [claimErrorMsg])
   useEffect(() => { if (isWorkspaceRoute && activeGroupId && effectiveViewingId) loadClaimed(activeGroupId, effectiveViewingId, selectedDate) }, [isWorkspaceRoute, activeGroupId, effectiveViewingId, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (currentUserId && !viewingMemberId) setViewingMemberId(currentUserId) }, [currentUserId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentUserId || !activeGroup) return
+    setViewingMemberId(current => {
+      if (current && activeGroup.members.some(member => member.user_id === current)) return current
+      return activeGroup.members.some(member => member.user_id === currentUserId) ? currentUserId : null
+    })
+  }, [currentUserId, activeGroup])
   useEffect(() => { if (isWorkspaceRoute && rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown'))) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps

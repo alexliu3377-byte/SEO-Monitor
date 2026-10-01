@@ -201,7 +201,7 @@ export async function POST(
     .eq('user_id', targetUserId)
     .maybeSingle()
   if (!targetMembership) {
-    return NextResponse.json({ error: 'Claims must be assigned to a member of this group' }, { status: 400 })
+    return NextResponse.json({ error: '请先选择该分组内的成员认领任务' }, { status: 400 })
   }
   if (callerRole !== 'super' && callerRole !== 'admin') {
     const { data: membership } = await service
@@ -427,7 +427,7 @@ export async function PUT(
   const { data: targetMembership } = await service
     .from('task_group_members').select('user_id')
     .eq('group_id', groupId).eq('user_id', targetUserId).maybeSingle()
-  if (!targetMembership) return NextResponse.json({ error: 'Target user is not a member of this group' }, { status: 400 })
+  if (!targetMembership) return NextResponse.json({ error: '请选择该分组内的成员操作任务' }, { status: 400 })
 
   let pendingQuery = service
     .from('member_claimed_keywords')
