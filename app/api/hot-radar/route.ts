@@ -4,8 +4,8 @@ import { computeHotRadarPayload } from '@/lib/hot-radar'
 
 export const maxDuration = 60
 
-// 2026-08-11 起改成读 hot_radar_cache（由 .github/workflows/hot-radar-cache.yml
-// 每天 08:00 MYT 调 /api/hot-radar/refresh 算好写入），不再每次现场跑
+// 2026-08-11 起改成读 hot_radar_cache（由 daily-crawl.yml 在关键词重试后
+// 先刷新、收录重试后再完整刷新），不再每次现场跑
 // get_hot_new_words/get_hot_rank_words/get_hot_streak_words 三个RPC——这三个
 // RPC 要扫 rank_changes/site_keyword_ranks 近30天全量数据（永久保留、每天
 // 持续写入），单次2-8秒，用户反馈"热词雷达/分组任务每天打开都很慢"。

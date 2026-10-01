@@ -19,6 +19,10 @@ on:
         required: true
       SUPABASE_SERVICE_ROLE_KEY:
         required: true
+      CRON_SECRET:
+        required: false
+      NEXT_PUBLIC_VERCEL_URL:
+        required: false
   workflow_dispatch:
     inputs:
       step:
@@ -40,8 +44,8 @@ on:
     - cron: '30 17 * * *'  # 01:30 MYT (target ~02:30 MYT after ~1h queue) — rank
     - cron: '30 18 * * *'  # 02:30 MYT — rank-title
     - cron: '30 19 * * *'  # 03:30 MYT — index-pages
-    # tracking no longer waits for a separate cron; retry-crawl.yml invokes it
-    # immediately after the final index-pages retry finishes.
+    # Every scheduled step retries inside this workflow. After index-pages retry,
+    # this workflow continues with tracking and the group effectiveness cache.
 
 jobs:
   setup:
@@ -49,6 +53,8 @@ jobs:
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
       total: ${{ steps.gen.outputs.total }}
+      step: ${{ steps.gen.outputs.step }}
+      site: ${{ steps.gen.outputs.site }}
     steps:
       - name: Compute job matrix
         id: gen
@@ -60,10 +66,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           SITE="$SITE_INPUT"
+          echo "site=${SITE}" >> $GITHUB_OUTPUT
           if [ -n "$SITE" ]; then
+            STEP="${STEP_INPUT:-all}"
+            case "$STEP" in
+              all|keywords|weight|rank|rank-title|index-pages|tracking) ;;
+              *) echo "Invalid crawl step: $STEP" >&2; exit 1 ;;
+            esac
             # 单站运行：1 个 job 即可
             echo 'matrix={"group":[0]}' >> $GITHUB_OUTPUT
             echo 'total=1' >> $GITHUB_OUTPUT
+            echo "step=${STEP}" >> $GITHUB_OUTPUT
             echo "Single-site run ($SITE) → 1 group"
           else
             # 根据 step 决定每组站点上限
@@ -89,6 +102,7 @@ jobs:
               all|keywords|weight|rank|rank-title|index-pages|tracking) ;;
               *) echo "Invalid crawl step: $STEP" >&2; exit 1 ;;
             esac
+            echo "step=${STEP}" >> $GITHUB_OUTPUT
             # 2026-08-28：keywords/rank/weight/默认(all) 这几个步骤共用同一批81个
             # 站点（is_enabled/has_rank_data/has_index_pages 任一开着），SPG从
             # 4-5调到6——账号是GitHub Free，同时最多只能跑20个job，SPG=4时
@@ -132,6 +146,243 @@ jobs:
             echo "total=${TOTAL}" >> $GITHUB_OUTPUT
             echo "Step=${STEP} SPG=${SPG} Sites=${COUNT} → Groups=${TOTAL}"
           fi
+
+  # Retry immediately after the main matrix finishes. This avoids waiting for
+  # a second scheduled workflow, which GitHub can delay by several hours.
+  retry_setup:
+    needs: [setup, crawl]
+    if: ${{ always() && needs.setup.result == 'success' && needs.crawl.result != 'cancelled' && needs.setup.outputs.step != 'all' && needs.setup.outputs.step != 'tracking' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      total: ${{ steps.gen.outputs.total }}
+      retry_all: ${{ steps.gen.outputs.retry_all }}
+    steps:
+      - name: Compute immediate retry matrix
+        id: gen
+        env:
+          STEP: ${{ needs.setup.outputs.step }}
+          MAIN_RESULT: ${{ needs.crawl.result }}
+          ORIGINAL_MATRIX: ${{ needs.setup.outputs.matrix }}
+          ORIGINAL_TOTAL: ${{ needs.setup.outputs.total }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # A job can fail before it writes a per-site failure row. In that
+          # case retrying only logged failures would silently do nothing, so
+          # rerun the complete step with the original matrix.
+          if [ "$MAIN_RESULT" != "success" ]; then
+            echo "Main matrix result is $MAIN_RESULT; retrying the full step"
+            echo "matrix=$ORIGINAL_MATRIX" >> $GITHUB_OUTPUT
+            echo "total=$ORIGINAL_TOTAL" >> $GITHUB_OUTPUT
+            echo "retry_all=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          read TODAY_START TODAY_END <<< $(python3 -c "
+          from datetime import datetime, timezone, timedelta
+          myt = timezone(timedelta(hours=8))
+          now = datetime.now(myt)
+          start = datetime(now.year, now.month, now.day, tzinfo=myt).astimezone(timezone.utc)
+          end = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=myt).astimezone(timezone.utc)
+          print(start.strftime('%Y-%m-%dT%H:%M:%SZ'), end.strftime('%Y-%m-%dT%H:%M:%SZ'))
+          ")
+          ACTS=$(curl -sf \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/activity_log?select=id&step=eq.${STEP}&type=eq.cron_task&logged_at=gte.${TODAY_START}&logged_at=lte.${TODAY_END}")
+          IDS=$(echo "$ACTS" | python3 -c "import json,sys; print(','.join(row['id'] for row in json.load(sys.stdin)))")
+          if [ -z "$IDS" ]; then
+            FAILED_COUNT=0
+          else
+            SITE_LOGS=$(curl -sf \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/activity_site_log?select=domain&activity_id=in.(${IDS})&status=in.(fail,empty,suspect)")
+            FAILED_COUNT=$(echo "$SITE_LOGS" | python3 -c "import json,sys; print(len({row['domain'] for row in json.load(sys.stdin) if row.get('domain')}))")
+          fi
+          TOTAL=$(python3 -c "import math; print(max(1, math.ceil(${FAILED_COUNT}/5)))")
+          MATRIX=$(python3 -c "import json; print(json.dumps({'group': list(range(${TOTAL}))}))")
+          echo "Step=$STEP failed/empty sites=$FAILED_COUNT groups=$TOTAL"
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "retry_all=false" >> $GITHUB_OUTPUT
+
+  retry:
+    needs: [setup, retry_setup]
+    if: ${{ needs.retry_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.retry_setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        if: needs.setup.outputs.step == 'rank' || needs.setup.outputs.step == 'rank-title'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Chromium
+        if: needs.setup.outputs.step == 'rank' || needs.setup.outputs.step == 'rank-title'
+        run: npx playwright install --with-deps chromium
+      - name: Run immediate retry
+        env:
+          STEP: ${{ needs.setup.outputs.step }}
+          RETRY_ALL: ${{ needs.retry_setup.outputs.retry_all }}
+          SITE_INPUT: ${{ inputs.site || github.event.inputs.site }}
+          DATE_INPUT: ${{ inputs.date || github.event.inputs.date }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$RETRY_ALL" != "true" ]; then EXTRA_ARGS="--retry-failed"; fi
+          if [ -n "$SITE_INPUT" ]; then EXTRA_ARGS="$EXTRA_ARGS --site=$SITE_INPUT"; fi
+          if [ -n "$DATE_INPUT" ]; then EXTRA_ARGS="$EXTRA_ARGS --date=$DATE_INPUT"; fi
+          if [ "$STEP" = "rank-title" ]; then
+            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.retry_setup.outputs.total }} $EXTRA_ARGS
+          else
+            npx tsx scripts/crawl.ts --step=$STEP --group=${{ matrix.group }} --total-groups=${{ needs.retry_setup.outputs.total }} $EXTRA_ARGS
+          fi
+
+  # 共新增词只依赖关键词抓取；关键词重试结束就先刷新，不再等待排名、收录和 tracking。
+  post_keywords_refresh:
+    needs: [setup, retry]
+    if: ${{ always() && needs.setup.outputs.step == 'keywords' && needs.retry.result != 'cancelled' && needs.retry.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refresh hot radar cache after keywords
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/hot-radar/refresh")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+  # After the final index retry, refresh complete radar/environment data.
+  # These refreshes do not wait for tracking.
+  post_index_refresh:
+    needs: [setup, retry]
+    if: ${{ always() && needs.setup.outputs.step == 'index-pages' && needs.setup.outputs.site == '' && needs.retry.result != 'cancelled' && needs.retry.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Refresh environment daily snapshot
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/environment/daily-snapshot"
+      - name: Refresh complete hot radar cache
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/hot-radar/refresh")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+  tracking_setup:
+    needs: [setup, retry]
+    if: ${{ always() && needs.setup.outputs.step == 'index-pages' && needs.setup.outputs.site == '' && needs.retry.result != 'cancelled' && needs.retry.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      total: ${{ steps.gen.outputs.total }}
+    steps:
+      - name: Compute tracking matrix
+        id: gen
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          COUNT=$(curl -sf \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/sites?select=id&has_rank_title=eq.true" | \
+            python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          TOTAL=$(python3 -c "import math; print(max(1, math.ceil(${COUNT}/5)))")
+          MATRIX=$(python3 -c "import json; print(json.dumps({'group': list(range(${TOTAL}))}))")
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+  tracking:
+    needs: tracking_setup
+    if: ${{ needs.tracking_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tracking_setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tracking
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/crawl.ts --step=tracking --group=${{ matrix.group }} --total-groups=${{ needs.tracking_setup.outputs.total }}
+
+  tracking_cache_setup:
+    needs: tracking
+    if: ${{ always() && needs.tracking.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - name: Load task groups
+        id: groups
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          TASK_GROUPS_JSON=$(curl --fail-with-body --show-error --silent --max-time 60 \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
+          MATRIX=$(TASK_GROUPS_JSON="$TASK_GROUPS_JSON" python3 -c "import json,os; rows=json.loads(os.environ['TASK_GROUPS_JSON']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  post_tracking_refresh:
+    needs: tracking_cache_setup
+    if: ${{ needs.tracking_cache_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tracking_cache_setup.outputs.matrix) }}
+    steps:
+      - name: Refresh group tracking cache - ${{ matrix.group_name }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+          GROUP_ID: ${{ matrix.group_id }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
 
   crawl:
     needs: setup

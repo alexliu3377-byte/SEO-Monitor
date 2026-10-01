@@ -4,7 +4,7 @@ import { computeHotRadarPayload } from '@/lib/hot-radar'
 
 export const maxDuration = 90
 
-// GitHub Actions（.github/workflows/hot-radar-cache.yml，每天08:00 MYT）调用，
+// GitHub Actions（daily-crawl.yml）在关键词重试后和收录重试后调用，
 // 算好热词雷达数据写进 hot_radar_cache，供 /api/hot-radar 直接读。鉴权方式
 // 跟 /api/environment/daily-snapshot 一致：Bearer CRON_SECRET 或 admin/super session。
 export async function GET(req: Request) {

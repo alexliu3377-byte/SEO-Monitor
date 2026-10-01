@@ -8,12 +8,8 @@ on:
         type: choice
         options: [keywords, weight, rank, rank-title, index-pages]
         default: keywords
-  schedule:
-    - cron: '30 20 * * *'   # 04:30 MYT — keywords 重试
-    - cron: '0 21 * * *'    # 05:00 MYT — weight 重试
-    - cron: '30 21 * * *'   # 05:30 MYT — rank 重试
-    - cron: '0 22 * * *'    # 06:00 MYT — rank-title 重试
-    - cron: '30 22 * * *'   # 06:30 MYT — index-pages 重试
+  # Daily retries now run inside daily-crawl.yml immediately after each main
+  # matrix. This workflow remains as a manual recovery entry point.
 
 jobs:
   setup:

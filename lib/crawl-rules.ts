@@ -20,7 +20,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '关键词抓取',
     badge: 'step=keywords · GitHub Actions · 目标 01:05 MYT（cron 00:05 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每6个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约6个站点（2026-08-28 从每组5个调到6个——账号是 GitHub Free，同时最多跑20个job，站点数涨到81个后每组5个会切出17个job、加上weight/rank同期都在20左右，几个步骤前后脚排队时经常撞上并发上限，导致任务一天比一天晚才跑，用户反馈"8点多才跑"实测确认过；调大分组后单步job数降到约14个，留足余量。用户明确要求分组别调太大（原计划调到10）——单个job处理的站点越多，一旦触发限流或中途异常，一次失败牵连的站点也越多，6个是"job数够低、单job风险也不大"的折中）；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟，也曾因并发超限累积到数小时），实际执行时间约 00:30-01:30 MYT 之间（并发正常时）。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。失败/空站由 retry-crawl.yml (cron 30 20 UTC = 04:30 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每6个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约6个站点（2026-08-28 从每组5个调到6个——账号是 GitHub Free，同时最多跑20个job，站点数涨到81个后每组5个会切出17个job、加上weight/rank同期都在20左右，几个步骤前后脚排队时经常撞上并发上限，导致任务一天比一天晚才跑，用户反馈"8点多才跑"实测确认过；调大分组后单步job数降到约14个，留足余量。用户明确要求分组别调太大（原计划调到10）——单个job处理的站点越多，一旦触发限流或中途异常，一次失败牵连的站点也越多，6个是"job数够低、单job风险也不大"的折中）；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟，也曾因并发超限累积到数小时），实际执行时间约 00:30-01:30 MYT 之间（并发正常时）。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。主抓完成后在同一个 workflow 内立即补抓失败/空站；如果主 job 整体失败且没有写出单站日志，会自动完整重跑一次，避免过去独立 retry cron 的盲区' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 list_url 已填写的站点；is_enabled 由用户在网站管理"关键词数据"开关控制，关闭后跳过关键词抓取但权重/排名照常运行' },
       { label: '文章链接抓取', text: '各来源可在"文章链接CSS选择器"（url_selectors 字段，||| 分隔多来源）填写指定 CSS 选择器；填写后爬虫用该选择器在每条记录的容器内查找 <a> 元素并写入 raw_keywords.source_url；留空则 source_url 为 null；支持完整URL和相对路径（相对路径自动补全域名）' },
       { label: '频率规则', text: '所有站点均为 daily（每天）' },
@@ -38,7 +38,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '权重+收录',
     badge: 'step=weight · GitHub Actions · 目标 01:30 MYT（cron 00:30 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 16 * * * UTC = 00:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 01:30 MYT（并发正常时）。失败站由 retry-crawl.yml (cron 0 21 UTC = 05:00 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 16 * * * UTC = 00:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 01:30 MYT（并发正常时）。主抓完成后在同一个 workflow 内立即重试失败站' },
       { label: '数据来源', text: '爱站 aizhan.com，抓取 PC/移动权重、收录数、来路IP区间' },
       { label: '限流保护', text: '失败后等30秒重试，最多3次（共3次尝试，每次换新UA）；站点间隔3秒' },
       { label: '写入表', text: 'weight_history（pc/mobile权重+IP区间，按 site_id+record_date upsert）/ index_snapshots（收录数，按 site_id+snapshot_date upsert）' },
@@ -50,7 +50,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '排名变动',
     badge: 'step=rank · GitHub Actions · 目标 02:30 MYT（cron 01:30 MYT + 排队约 1h）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT（并发正常时）。失败/空站由 retry-crawl.yml (cron 30 21 UTC = 05:30 MYT) 自动补抓' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT（并发正常时）。主抓完成后在同一个 workflow 内立即重试失败/空站' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关（列表里显示为"涨跌"），cron 不会自动修改该字段' },
       { label: '数据来源', text: '爱站移动端 baidurank.aizhan.com/mobile/…，抓涨入词与跌出词及搜索量' },
       { label: '浏览器验证', text: '爱站的挑战机制自 2026-06 起变过三次，历史记录：① 2026-06-19 起，简单 JS 挑战（响应体内嵌 document.cookie="C3VK=...";window.open(...)，无真实跳转）；② 2026-07 起升级为约2分钟的浏览器指纹深度挑战（_jsc_sbu 环境探测，纯 fetch 无法通过），抓取一度改用 Playwright headless Chromium（createAizhanBrowserSession()，job 开始时过一次约2分钟验证，全 job 复用同一浏览器 context；若150秒内未通过则 AIZHAN_CHALLENGE_TIMEOUT 直接崩溃退出，且这类崩溃发生在任何单站日志写入之前，导致 retry-crawl.yml 的"按失败站点重试"完全查不到失败记录、白跑一次——2026-08-02 实测 07-31/08-01 两个 MYT 日期的 rank+rank-title 全站数据因此双双丢失且未被自动补上）；③ 2026-08 起验证又变简单，退回① 那种量级（一次请求内含 302+Set-Cookie 或内嵌 document.cookie 两种形式之一，均无需执行JS，一次额外往返即可拿到有效 cookie）。当前实现（lib/crawler-aizhan-http.ts，createAizhanHttpSession()）是纯 fetch，同时处理这两种 cookie 下发形式，整个抓取过程复用同一个 session（cookie 会随每次响应的 Set-Cookie / 内嵌值持续刷新，不会中途过期）。lib/crawler-browser.ts 的 Playwright 方案保留未删，若爱站之后重新上强度，换回来只需改 scripts/crawl.ts / scripts/crawl-rank.ts 里这一行 import' },
@@ -91,7 +91,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '收录页面追踪',
     badge: 'step=index-pages · GitHub Actions · 03:30 MYT（cron 19:30 UTC）',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 19 * * * UTC = 03:30 MYT)，setup job 仅查询 has_index_pages=true 的站点数决定 job 数，每站一个 job（SPG=1）；retry-crawl.yml (cron 30 22 UTC = 06:30 MYT) 自动补抓；页面手动重抓通过 /api/trigger-crawl 排入同一个 daily-crawl.yml 单站任务' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 19 * * * UTC = 03:30 MYT)，setup job 仅查询 has_index_pages=true 的站点数决定 job 数，每站一个 job（SPG=1）；主抓完成后在同一个 workflow 内立即补抓；页面手动重抓通过 /api/trigger-crawl 排入同一个 daily-crawl.yml 单站任务' },
       { label: '抓取对象', text: '仅 has_index_pages=true 的站点（在收录页面追踪页面逐站开关，默认 false）；setup 阶段已精确过滤，不会为其他类型站点创建多余 job' },
       { label: '抓取方式', text: '百度 site:domain 搜索，时间窗口分批策略：周(7天)+日(1天) 每天为全部站点运行；月(31天) 窗口按 3 天轮转批次（MYT 天数 mod 3 = 批次号，每站按其在站点数组的下标 idx%3 决定当天是否跑月度窗口），每天约 1/3 站点跑月度，3 天内覆盖所有站点；gpc=stf={now-Nd},{now}|stftype=1 + tfflag=1 + ct=2097152/si=domain/fenlei=256；pn=0/10/20... 翻页，无页数上限；停止条件：空页、被拦截（captcha 则中止当站）、或整页URL相同；翻页间隔 5-8 秒随机' },
       { label: 'Cookie 来源', text: 'app_settings.baidu_index_cookie 手动 Cookie 池（JSON 数组，从已登录/长期使用的浏览器复制账号 cookie，"分组任务"页面右上角"管理 Cookie 池"维护，所有登录用户都可查看和维护，非仅管理员），每次抓取随机取一个使用；翻页过程中沿用 fetchBaiduIndexPages() 原有逻辑：每页 Referer 指向上一页、Cookie 随每页 Set-Cookie 滚动更新。2026-07-27 曾短暂尝试用 Playwright headless Chromium 自动访问百度现拿匿名 cookie 替代手动池，但真实 GitHub Actions A/B 对比显示效果明显更差（匿名新 cookie 首次请求就100%被拦截，而手动池里"资历更老"的账号 cookie 能连续拿到3-5页真实数据）——判断是 Baidu 反爬会评估 cookie 的"资历"（关联的浏览历史/账号信息越老越可信），不是单纯看请求是否来自真实浏览器，因此改回手动池为唯一来源，不再自动获取' },
@@ -105,9 +105,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'rank-title',
     title: '排名抓取（全站点）',
-    badge: 'step=rank-title · daily-crawl.yml · GitHub Actions · 02:30 MYT（cron 18:30 UTC）；retry 06:00 MYT',
+    badge: 'step=rank-title · daily-crawl.yml · 02:30 MYT；完成后立即重试',
     items: [
-      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 18 * * * UTC = 02:30 MYT)，动态 matrix job 并行（每2个站点1个job）；retry-crawl.yml (cron 0 22 UTC = 06:00 MYT) 智能重试：setup job 查询 activity_site_log 统计今日失败/空站数，按5个失败站点1个job创建（2026-08-28 从每站1个job调整——平时失败站少（≤5个）体感不变还是1个job，只在某天大批量站点同时失败/超时时才会自动收敛job数，避免跟主抓取一起挤爆账号20个并发job的上限），scripts/crawl-rank.ts 以 --retry-failed 模式运行只处理当日失败站点；脚本：scripts/crawl-rank.ts；支持手动 workflow_dispatch 选 step=rank-title' },
+      { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 18 * * * UTC = 02:30 MYT)，动态 matrix job 并行（每2个站点1个job）；主抓完成后立即在同一个 workflow 内查询 activity_site_log，把失败/空站按每5站一组重试。若主 job 在写出单站日志前整体失败，则完整重跑该步骤一次，避免静默漏抓；脚本：scripts/crawl-rank.ts；支持手动 workflow_dispatch 选 step=rank-title' },
       { label: '抓取对象', text: 'sites 表中 has_rank_title=true 的站点（网站管理列表里显示为"排名"）；动态读取，每次运行重新查询' },
       { label: '数据来源', text: '爱站 baidurank.aizhan.com，移动端（/mobile/）默认必抓；PC端（/baidu/）按站点 sites.track_pc_rank 决定抓不抓（2026-08-26 新增，网站管理"排名"开关旁边有个小"PC"按钮可以逐站开关——默认关闭，全站只有 platform=mobile 的数据被"成效追踪"/竞品追踪等任何功能读取过，PC端此前一直白抓白占IO；用户自己的3个站点（sjwyx.com/qtvcd.com/f71.com）手动开了PC，配合成效追踪M/PC合并判定用，其余全部竞品站点保持关闭，同一天顺带把这13个竞品站点历史PC数据也删了，site_keyword_ranks从123万行降到90万行）；各抓涨入和跌出，开启PC时共4个组合、只抓M时2个组合；含标题（title）和排名页 URL（url）' },
       { label: '浏览器验证', text: '与 rank 步骤相同（详见 rank 小节"浏览器验证"完整历史），job 开始时用 createAizhanHttpSession() 拿一次会话 cookie（纯 fetch，一次额外往返，非 2026-07 那版约2分钟的 Playwright 验证），本 job 内全部站点/平台/涨跌组合复用同一 session；支持 --date=YYYY-MM-DD 补抓历史日期，用法同 rank 步骤' },
@@ -136,7 +136,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '成效追踪（竞品 + 自己站点）',
     badge: 'step=tracking · GitHub Actions · index-pages 最后重试完成后立即运行',
     items: [
-      { label: '触发方式', text: 'retry-crawl.yml 的 index-pages 最后重试完成后，立即通过可复用的 daily-crawl.yml 运行 tracking，不再等待原来 06:45 MYT 的独立 cron；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可；tracking 步骤按竞品站点数分片（SPG=5）' },
+      { label: '触发方式', text: 'daily-crawl.yml 的 index-pages 重试完成后立即运行 tracking，不再等待独立 cron；脚本：scripts/crawl.ts --step=tracking；不设 retry，因为记录是持久化的，漏一天次日补跑即可；tracking 步骤按竞品站点数分片（SPG=5）' },
       { label: '自己站点提交查询（2026-08-26 修复两处问题）', text: '① 分页：查全站90天内 status=submitted 的提交之前没分页，全站量超3000行会被 Supabase 硬顶截断，且没有排序时被截的偏偏是最近提交的部分（回补前实测92%的近两周提交从未写入 site_tracking_records）——已改成 fetchAllRows 真分页；② 分片重复：这部分处理的是全站claims、不是按分片的sites参数过滤，之前每个分片都会重新处理一遍全量claims（tracking步骤SPG=5，有几个分片就重复写几次同样的数据）——手动回补当天5194条积压时被5个分片并发放大、直接打出一波 Supabase Postgres/API Gateway 错误尖峰，已改成只由 group 0 处理一次，跟同一天 rank/rank-title 步骤那次同款修复一样' },
       { label: '竞品追踪对象', text: '仅 has_rank_title=true 的竞品站点（与 rank-title 步骤相同；网站管理列表里显示为"排名"）' },
       { label: '竞品信号来源', text: '① 排名信号（by keyword + by URL）：site_keyword_ranks 表中 stat_date=today + platform=mobile 的当日涨跌词；还通过 site_keyword_ranks.url 与 raw_keywords.source_url 交叉匹配（URL 优先级高，能捕获 keyword 名称不一致的案例）；② 收录信号：site_indexed_pages 表中 first_seen_date=today 的新收录 URL，通过 source_url 反查 raw_keywords 得到关键词' },
@@ -198,9 +198,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'environment-snapshot',
     title: '环境快照',
-    badge: 'retry-crawl.yml · index-pages 最后重试完成后立即运行（可手动补跑）',
+    badge: 'daily-crawl.yml · index-pages 重试后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 在 index-pages 最后重试完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），与 tracking 并行、不再等待 tracking 全部完成，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
+      { label: '触发方式', text: '每日由 daily-crawl.yml 在 index-pages 重试完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），与 tracking 并行、不再等待 tracking 全部完成，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
       { label: '计算来源', text: '① rank_changes：统计目标日期全站涨/跌排名词总数及有数据站点数；② index_snapshots：对比目标日期与前一日各站收录数，计算平均变化百分比；③ 日期本身：计算星期几、是否中国大陆法定节假日、是否学生放假期间（暑假7-8月、寒假1月20日-2月底）' },
       { label: '写入表', text: 'environment_daily（按 date 唯一 upsert；字段：date, weekday, is_holiday, is_school_holiday, total_rankup, total_rankdown, sites_with_rank_data, avg_index_change_pct, sites_with_index_data, crawl_anomaly；永久保留）' },
       { label: 'crawl_anomaly 判定', text: '当日 total_rankup + total_rankdown = 0 时标记为 true，表示排名数据疑似未抓取到；用于在评分时排除异常日期的数据' },
@@ -211,9 +211,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'hot-radar-cache',
     title: '热词雷达缓存',
-    badge: 'retry-crawl.yml · 环境快照完成后立即运行（可手动补跑）',
+    badge: 'daily-crawl.yml · 关键词重试后先刷新，收录重试后完整刷新',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 的 post-index-refresh job 在 index-pages 最后重试完成后调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET），与 tracking 并行，避免某一组 tracking 过慢时热词雷达和任务提交一直停在昨天；hot-radar-cache.yml 保留 workflow_dispatch 手动补跑入口' },
+      { label: '触发方式', text: '每日由 daily-crawl.yml 在 keywords 重试完成后先调用 GET /api/hot-radar/refresh（Bearer CRON_SECRET），让任务提交的“共新增词”尽早更新；index-pages 重试完成后再刷新一次完整缓存。hot-radar-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-11 新增）', text: '热词雷达（研究中心/分组任务共用同一个 /api/hot-radar 接口）之前每次打开页面都现场跑 get_hot_new_words/get_hot_rank_words/get_hot_streak_words 三个 RPC，各自要扫 rank_changes/site_keyword_ranks 近30天全量数据——这两张表永久保留、每天持续写入，随数据量增长单次调用要2-8秒，实测 get_hot_rank_words 通过真实 PostgREST 接口（8秒默认超时）会直接超时报错，页面表现为"暂无数据"（用户反馈"每天打开都很慢"）；已同时给 site_keyword_ranks 补上覆盖索引（跟 rank_changes 那边已有的同款）、调大这三个函数的 work_mem/statement_timeout，但即使修好索引这类"扫全量近30天数据"的查询仍会随表继续增长而变慢，遂改成定时预算好+缓存' },
       { label: '计算逻辑', text: 'lib/hot-radar.ts 的 computeHotRadarPayload()——原本写在 /api/hot-radar/route.ts 里的聚合逻辑原样抽出来，供读接口（缓存未命中兜底）和刷新接口共用同一份代码，不会出现两边逻辑长出差异' },
       { label: '写入表', text: 'hot_radar_cache（单行，id 固定为 \'latest\'，upsert；字段 payload 存完整JSON结果，computed_at 记录算的时间）' },
@@ -228,9 +228,9 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'group-tracking-cache',
     title: '分组报告缓存',
-    badge: 'retry-crawl.yml · tracking 完成后立即运行（可手动补跑）',
+    badge: 'daily-crawl.yml · tracking 成功后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 retry-crawl.yml 在 tracking 全部完成后读取分组清单，每个分组各自并行调用 GET /api/tracking-cache/refresh?groupId=...（Bearer CRON_SECRET），避免三个分组串在同一个 Vercel 请求内触发504；它不再阻塞环境快照和热词缓存，两者会在 index-pages 最后重试后并行刷新；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
+      { label: '触发方式', text: '每日由 daily-crawl.yml 在 tracking 全部批次成功后读取分组清单，每个分组各自并行调用 GET /api/tracking-cache/refresh?groupId=...（Bearer CRON_SECRET），避免多个分组串在同一个 Vercel 请求内触发504；环境快照和完整热词缓存会在 index-pages 重试后先刷新，不受 tracking 耗时影响；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
       { label: '背景（2026-08-18 新增）', text: '分组报告"成效追踪"（/api/task-groups/[id]/outcomes）和"追踪汇总"（/api/task-groups/[id]/tracking-summary）之前每次打开页面都现场对 site_tracking_records 做全量扫描（这张表永久保留，接口本身不带时间范围限制）+ 批量查认领来源/排名匹配词 + "更新"型claim的真新排名历史判断，多轮查询叠加导致打开很慢（用户反馈）。用户明确接受"数据只到当天早上、当天新提交的记录要等第二天才反映"这个延迟，换成定时预算好+缓存，跟热词雷达同一套思路' },
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
       { label: '写入表', text: '2026-09-04 起使用分页缓存：group_tracking_cache_rows 每个claim一行并保存可索引的筛选/排序字段，group_tracking_cache_state 只保存更新时间、行数和小型月度汇总；replace_group_tracking_paged_cache RPC 在一个事务里原子替换。旧 group_tracking_cache 大JSON暂时继续同步，作为迁移期间的兼容兜底' },

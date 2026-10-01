@@ -871,6 +871,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       .sort((a, b) => b.localeCompare(a))
   }, [rightTab, volumeRisingWordsSorted, crossWords, rankWordsSorted, streakWords, allNewWords, wordLibWords])
 
+  // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
+  // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
+  const effectiveRadarDate = radarDate && radarAvailableDates.includes(radarDate) ? radarDate : ''
+
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
 
   async function loadSiteRankdown(force = false) {
@@ -2438,7 +2442,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (!radarLoaded || radarLoading) return <Spinner />
 
     if (rightTab === 'volumeRising') {
-      const base_vr = filterByRadarDate(volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword)), radarDate)
+      const base_vr = filterByRadarDate(volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? (getNetGrowthRate(a) ?? -1) : sortCol === 'change' ? (a.change??0) : 0
@@ -2493,7 +2497,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'cross') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const base_cross = filterByRadarDate(crossWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+      const base_cross = filterByRadarDate(crossWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
         .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_cross = sortCol && sortDir ? [...base_cross].sort((a: any, b: any) => {
@@ -2541,7 +2545,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'rank') {
-      const base_rank = filterByRadarDate(rankWordsSorted.filter(w => !submittedSet.has(w.keyword)), radarDate)
+      const base_rank = filterByRadarDate(rankWordsSorted.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
         .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_rank = sortCol && sortDir ? [...base_rank].sort((a: any, b: any) => {
@@ -2584,7 +2588,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'streak') {
-      const base_streak = filterByRadarDate(streakWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+      const base_streak = filterByRadarDate(streakWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
         .filter(w => badgeFilter === 'all' || getStreakBadge(w.streak, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_streak = sortCol && sortDir ? [...base_streak].sort((a: any, b: any) => {
@@ -2628,7 +2632,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'newWords') {
-      const base_new = filterByRadarDate(allNewWords.filter(w => !submittedSet.has(w.keyword)), radarDate)
+      const base_new = filterByRadarDate(allNewWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
         .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_new = sortCol && sortDir ? [...base_new].sort((a: any, b: any) => {
@@ -2643,7 +2647,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         }
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_new
-      const slice = sorted_new.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      // 切换分组后保留了上一个分组的页码时，新分组资料较少会被切到空页；
+      // 将页码收敛到当前结果范围，确保“近30天全部”有资料时一定能看到。
+      const safePage = Math.min(pg, Math.max(0, Math.ceil(sorted_new.length / PAGE_SIZE) - 1))
+      const slice = sorted_new.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2669,14 +2676,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={sorted_new.length} onPage={p => setPage('newWords', p)} />
+          <Pager page={safePage} total={sorted_new.length} onPage={p => setPage('newWords', p)} />
         </>
       )
     }
 
     if (rightTab === 'wordLib') {
       if (wordLibLoading) return <Spinner />
-      const datedWordLibWords = filterByRadarDate(wordLibWords, radarDate)
+      const datedWordLibWords = filterByRadarDate(wordLibWords, effectiveRadarDate)
       const sorted_wl = sortCol && sortDir ? [...datedWordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.longTailCount??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.longTailCount??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -3328,7 +3335,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-gray-50/60 px-4 py-2.5">
                     <label className="flex items-center gap-1.5 text-xs text-gray-400">
                       资料日期
-                      <select aria-label="筛选资料日期" value={radarDate}
+                      <select aria-label="筛选资料日期" value={effectiveRadarDate}
                         onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
                         className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
                         <option value="">近30天全部</option>
