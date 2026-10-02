@@ -31,6 +31,7 @@ type FormState = {
   name: string; platform: string; packageIdentifier: string
   sourceName: string; sourceType: string; sourceUrl: string
 }
+type DiscoveryTarget = 'app_store' | 'google_play' | 'taptap'
 
 const EMPTY_FORM: FormState = {
   name: '', platform: 'android', packageIdentifier: '', sourceName: '官方网站', sourceType: 'official', sourceUrl: '',
@@ -83,6 +84,8 @@ export default function AppUpdateCenterClient() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
+  const [discovering, setDiscovering] = useState<DiscoveryTarget | null>(null)
+  const [manualMenuOpen, setManualMenuOpen] = useState(false)
 
   const pageSize = 25
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -215,6 +218,25 @@ export default function AppUpdateCenterClient() {
     }
   }
 
+  async function startDiscovery(target: DiscoveryTarget) {
+    const labels: Record<DiscoveryTarget, string> = {
+      app_store: 'App Store', google_play: 'Google Play', taptap: 'TapTap',
+    }
+    setDiscovering(target); setError(''); setNotice('')
+    try {
+      const response = await fetch('/api/app-updates/discover', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '任务启动失败')
+      setNotice(`${labels[target]} 新应用发现任务已加入队列。任务会在后台运行，完成后刷新“应用与来源”查看结果。`)
+    } catch (discoveryError) {
+      setError(discoveryError instanceof Error ? discoveryError.message : '任务启动失败')
+    } finally {
+      setDiscovering(null)
+    }
+  }
+
   function openNewTarget() {
     setSourceApp(null); setForm(EMPTY_FORM); setTargetOpen(true)
   }
@@ -240,12 +262,15 @@ export default function AppUpdateCenterClient() {
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">应用更新中心</h1>
             <p className="mt-2 text-sm text-slate-500">集中发现应用新版本、审核更新日志并批量导出。</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-store-discovery.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Apple 目录扩展</a>
-            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/marketplace-discovery.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">安卓目录扩展</a>
-            <a href="https://github.com/alexliu3377-byte/SEO-Monitor/actions/workflows/app-update-crawl.yml" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">打开抓取任务</a>
-            <button type="button" onClick={() => { setError(''); setNotice(''); setAppStoreImportOpen(true) }} className="h-10 rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50">批量导入 App Store</button>
-            <button type="button" onClick={openNewTarget} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">＋ 新增应用</button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {([['app_store', '发现AppStore新应用'], ['google_play', '发现GooglePlay新应用'], ['taptap', '发现TapTap新应用']] as const).map(([target, label]) => <button key={target} type="button" disabled={discovering !== null} onClick={() => startDiscovery(target)} className="h-10 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:border-blue-400 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-50">{discovering === target ? '正在启动…' : label}</button>)}
+            <div className="relative">
+              <button type="button" onClick={() => setManualMenuOpen(open => !open)} aria-expanded={manualMenuOpen} className="h-10 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">手动添加 ▾</button>
+              {manualMenuOpen && <div className="absolute right-0 top-12 z-30 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-left shadow-xl">
+                <button type="button" onClick={() => { setManualMenuOpen(false); setError(''); setNotice(''); setAppStoreImportOpen(true) }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-blue-50"><span className="block text-sm font-semibold text-slate-800">导入指定AppStore应用</span><span className="mt-0.5 block text-xs text-slate-500">粘贴应用链接或从公开榜单补全</span></button>
+                <button type="button" onClick={() => { setManualMenuOpen(false); openNewTarget() }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-blue-50"><span className="block text-sm font-semibold text-slate-800">手工建立应用</span><span className="mt-0.5 block text-xs text-slate-500">填写名称、平台和更新来源</span></button>
+              </div>}
+            </div>
           </div>
         </div>
       </header>
