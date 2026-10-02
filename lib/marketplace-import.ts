@@ -25,25 +25,30 @@ export async function importMarketplaceApps(
       skipped += 1
       continue
     }
-    let { data: app, error: appError } = await service.from('app_update_apps')
-      .select('id').eq('platform', item.platform).eq('package_identifier', item.packageIdentifier).maybeSingle()
+    const { data: app, error: appError } = await service.from('app_update_apps')
+      .select('id, status').eq('platform', item.platform).eq('package_identifier', item.packageIdentifier).maybeSingle()
     if (appError) throw new Error(`检查已有应用失败：${appError.message}`)
-    if (!app) {
+    if (app?.status === 'archived') {
+      skipped += 1
+      continue
+    }
+    let appId = app?.id as string | undefined
+    if (!appId) {
       const created = await service.from('app_update_apps').insert({
         name, platform: item.platform,
         package_identifier: item.packageIdentifier.slice(0, 255), created_by: actor,
       }).select('id').single()
       if (created.error || !created.data) throw new Error(`新增应用失败：${created.error?.message ?? '未知错误'}`)
-      app = created.data
+      appId = created.data.id as string
       appsCreated += 1
     }
 
     let { data: source, error: sourceError } = await service.from('app_update_sources')
-      .select('id').eq('app_id', app.id).eq('source_type', item.sourceType).limit(1).maybeSingle()
+      .select('id').eq('app_id', appId).eq('source_type', item.sourceType).limit(1).maybeSingle()
     if (sourceError) throw new Error(`检查应用来源失败：${sourceError.message}`)
     if (!source) {
       const created = await service.from('app_update_sources').insert({
-        app_id: app.id, source_name: item.sourceName, source_type: item.sourceType,
+        app_id: appId, source_name: item.sourceName, source_type: item.sourceType,
         source_url: item.sourceUrl, created_by: actor,
       }).select('id').single()
       if (created.error || !created.data) throw new Error(`新增应用来源失败：${created.error?.message ?? '未知错误'}`)
@@ -57,7 +62,7 @@ export async function importMarketplaceApps(
     const existingVersions = new Set((existing.data ?? []).map(row => row.normalized_version as string))
     const now = new Date().toISOString()
     const rows = item.releases.slice(0, 5).map(release => ({
-      app_id: app.id, source_id: source.id, version: release.version,
+      app_id: appId, source_id: source.id, version: release.version,
       normalized_version: release.normalizedVersion, changelog: release.changelog,
       release_date: release.releaseDate, package_size: null, download_url: null,
       source_url: item.sourceUrl, extraction_confidence: release.confidence,

@@ -1702,6 +1702,7 @@ function ReportDetailView({ reportId }: { reportId: string }) {
     highlighted: (s.momentum_keywords?.length ?? 0) > 0,
   }))
   const expandedSite = analyzedSites.find(s => s.site_id === expandedSiteId) ?? null
+  const competitorTopClaims = report.competitor_effectiveness?.topClaims.filter(claim => claim.score > 0) ?? []
 
   const sections = report.report_sections
   const envNote = sections?.environmentNote ?? sections?.environment ?? null
@@ -1731,6 +1732,7 @@ function ReportDetailView({ reportId }: { reportId: string }) {
           <div className="space-y-4">
             {report.own_effectiveness.map((g, i) => {
               const note = ownNoteFor(g.group_name)
+              const effectiveTopClaims = g.topClaims.filter(claim => claim.score > 0)
               return (
                 <div key={g.group_id} className={i > 0 ? 'pt-4 border-t border-gray-100' : ''}>
                   <div className="flex items-center justify-between mb-1">
@@ -1738,14 +1740,14 @@ function ReportDetailView({ reportId }: { reportId: string }) {
                     <span className="text-xs text-gray-400">获取排名{g.ranked} · 获取收录{g.indexed} · 追踪中{g.tracking}</span>
                   </div>
                   {note && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-1.5">{note}</p>}
-                  {g.topClaims.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400 mb-0.5">本周发力最多的词（按评分，非搜索量）</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        {g.topClaims.slice(0, 5).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、')}
-                      </p>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-xs text-gray-400 mb-0.5">本期成效最高的词（按评分，非搜索量）</p>
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      {effectiveTopClaims.length > 0
+                        ? effectiveTopClaims.slice(0, 5).map(c => `${c.keyword}(第${c.rank_position ?? '未排名'}名/量${c.volume}/分${c.score})`).join('、')
+                        : '本期暂无取得实际成效的关键词'}
+                    </p>
+                  </div>
                 </div>
               )
             })}
@@ -1767,14 +1769,14 @@ function ReportDetailView({ reportId }: { reportId: string }) {
             </p>
           )}
           {competitorNote && <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-2">{competitorNote}</p>}
-          {report.competitor_effectiveness.topClaims.length > 0 && (
-            <div>
-              <p className="text-xs text-gray-400 mb-0.5">本周发力最多的词（按评分，非搜索量）</p>
-              <p className="text-xs text-gray-600 leading-relaxed">
-                {report.competitor_effectiveness.topClaims.slice(0, 5).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')}
-              </p>
-            </div>
-          )}
+          <div>
+            <p className="text-xs text-gray-400 mb-0.5">本期成效最高的词（按评分，非搜索量）</p>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              {competitorTopClaims.length > 0
+                ? competitorTopClaims.slice(0, 5).map(c => `${c.domain}·${c.keyword}(第${c.rank_position}名/量${c.volume}/分${c.score})`).join('、')
+                : '本期暂无取得实际成效的关键词'}
+            </p>
+          </div>
         </div>
       )}
 

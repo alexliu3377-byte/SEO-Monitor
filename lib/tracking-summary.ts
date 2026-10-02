@@ -248,6 +248,7 @@ export async function fetchGroupEffectivenessSummary(service: any, groupId: stri
         score: computeRowScore(r.rank_position, r.prev_rank_position, r.rank_volume, isIndexed, r.operation_type, r.submit_date, r.index_first_seen),
       }
     })
+    .filter(claim => claim.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 15)
 

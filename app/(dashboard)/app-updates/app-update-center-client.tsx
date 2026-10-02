@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useDeferredValue, useEffect, useState } from 'react'
+import Link from 'next/link'
 
 type AppRow = {
   id: string; name: string; platform: string; package_identifier: string | null
@@ -57,7 +58,7 @@ function formatTime(value: string | null) {
   }).format(date)
 }
 
-export default function AppUpdateCenterClient() {
+export default function AppUpdateCenterClient({ canManage }: { canManage: boolean }) {
   const [tab, setTab] = useState<'updates' | 'apps' | 'runs'>('updates')
   const [apps, setApps] = useState<AppRow[]>([])
   const [sources, setSources] = useState<SourceRow[]>([])
@@ -68,7 +69,7 @@ export default function AppUpdateCenterClient() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search)
-  const [reviewFilter, setReviewFilter] = useState('')
+  const [reviewFilter, setReviewFilter] = useState('pending')
   const [sourceFilter, setSourceFilter] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -165,6 +166,23 @@ export default function AppUpdateCenterClient() {
     }
   }
 
+  async function deleteApp(appId: string, appName: string) {
+    if (!window.confirm(`确定删除「${appName}」吗？\n\n该应用的全部来源、版本和抓取记录都会一起删除，无法恢复。`)) return
+    setSaving(true); setError(''); setNotice('')
+    try {
+      const response = await fetch(`/api/app-updates/${appId}`, { method: 'DELETE' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '删除应用失败')
+      setDetail(null)
+      setNotice(`已删除应用「${appName}」及其全部资料。`)
+      await load()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除应用失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function exportSelected(allMatching = false) {
     setSaving(true); setError('')
     try {
@@ -217,7 +235,7 @@ export default function AppUpdateCenterClient() {
     setSourceApp(null); setForm(EMPTY_FORM); setTargetOpen(true)
   }
   function changeTab(nextTab: 'updates' | 'apps' | 'runs') {
-    setTab(nextTab); setPage(1); setSearch(''); setReviewFilter(''); setSourceFilter(''); setSelectedIds([])
+    setTab(nextTab); setPage(1); setSearch(''); setReviewFilter(nextTab === 'updates' ? 'pending' : ''); setSourceFilter(''); setSelectedIds([])
   }
   function toggleCurrentPage(checked: boolean) {
     const pageIds = releases.map(release => release.app_id)
@@ -234,14 +252,14 @@ export default function AppUpdateCenterClient() {
       <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
         <div className="mx-auto flex max-w-[1500px] flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="flex items-center gap-2"><p className="text-xs font-semibold tracking-[0.18em] text-blue-600">V4.0.0 · 超管实验</p><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-600">未正式发布</span></div>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">应用更新中心</h1>
+            <Link href="/" className="text-xs font-semibold text-blue-700 hover:underline">← 返回系统首页</Link>
+            <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">应用更新中心</h1>
             <p className="mt-2 text-sm text-slate-500">集中发现应用新版本、审核更新日志并批量导出。</p>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          {canManage && <div className="flex flex-wrap items-center justify-end gap-2">
             {([['app_store', '发现AppStore新应用'], ['google_play', '发现GooglePlay新应用'], ['taptap', '发现TapTap新应用']] as const).map(([target, label]) => <button key={target} type="button" disabled={discovering !== null} onClick={() => { setDiscoveryOpen(target); setDiscoveryCountry(target === 'app_store' ? 'cn' : 'us'); setDiscoveryEntries(''); setError(''); setNotice('') }} className="h-10 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50">{label}</button>)}
             <button type="button" onClick={openNewTarget} className="h-10 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">手工建立应用</button>
-          </div>
+          </div>}
         </div>
       </header>
 
@@ -308,7 +326,7 @@ export default function AppUpdateCenterClient() {
         <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
             <div><p className="text-xs text-slate-400">{PLATFORM_LABELS[detail.app_platform] ?? detail.app_platform}</p><h2 className="mt-1 text-xl font-bold text-slate-950">{detail.app_name}</h2><p className="mt-1 text-xs text-slate-500">{detailLoading ? '正在读取历史版本…' : `共保留 ${detail.release_count} 个版本，最新版本排在前面`}</p></div>
-            <button onClick={() => setDetail(null)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
+            <div className="flex items-center gap-2">{canManage && <button type="button" disabled={saving} onClick={() => deleteApp(detail.app_id, detail.app_name)} className="h-9 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">删除应用</button>}<button onClick={() => setDetail(null)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="关闭">✕</button></div>
           </div>
           <div className="space-y-4 overflow-y-auto bg-slate-50/70 px-6 py-5">
             {detailLoading && <p className="py-12 text-center text-sm text-slate-500">正在读取历史版本…</p>}

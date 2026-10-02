@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { appUpdateDatabaseError, requireAppUpdateSuper } from '@/lib/app-update-server'
+import { appUpdateDatabaseError, requireAppUpdateAccess } from '@/lib/app-update-server'
 import {
   fetchAppStoreChartIds,
   isAppStoreChart,
@@ -11,7 +11,7 @@ import { importAppStoreResults } from '@/lib/app-store-import'
 export const maxDuration = 60
 
 export async function POST(request: Request) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess({ managerOnly: true })
   if (!access.ok) return access.response
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null

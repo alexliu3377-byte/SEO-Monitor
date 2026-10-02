@@ -130,7 +130,6 @@ const APP_UPDATE_ITEMS: NavItem[] = [
   {
     href: '/app-updates',
     label: '更新工作台',
-    superOnly: true,
     icon: <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 7l2-3h12l2 3M5 7v12a1 1 0 001 1h12a1 1 0 001-1V7M9 11h6m-6 4h4" /></svg>,
   },
 ]
@@ -386,9 +385,9 @@ export default function Sidebar() {
             <p className="text-white font-semibold text-sm leading-tight">
               {isAppUpdateCenter ? '奇心应用更新中心' : isPageStudio ? '奇心页面设计工作室' : '奇心内容发布系统'}
             </p>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              {isAppUpdateCenter ? 'V4.0 超管实验' : isPageStudio ? '可视化网页原型' : '内容运营后台'}
-            </p>
+            {!isAppUpdateCenter && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              {isPageStudio ? '可视化网页原型' : '内容运营后台'}
+            </p>}
           </div>
           <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>

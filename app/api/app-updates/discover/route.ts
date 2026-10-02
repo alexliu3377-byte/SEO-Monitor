@@ -1,7 +1,7 @@
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { requireAppUpdateSuper } from '@/lib/app-update-server'
+import { requireAppUpdateAccess } from '@/lib/app-update-server'
 import { fetchAppStoreChartIds, lookupAppStoreApps, parseAppStoreIds } from '@/lib/app-store'
 import { importAppStoreResults } from '@/lib/app-store-import'
 import {
@@ -27,7 +27,7 @@ function inputLines(value: unknown, maxItems = 30) {
 }
 
 export async function POST(request: Request) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess({ managerOnly: true })
   if (!access.ok) return access.response
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null

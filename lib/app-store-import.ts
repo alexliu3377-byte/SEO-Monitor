@@ -24,20 +24,26 @@ export async function importAppStoreResults(
   country: string,
   actor: string | null
 ): Promise<ImportStats> {
-  const uniqueResults = Array.from(new Map(results.map(result => [result.bundleId, result])).values())
-  if (uniqueResults.length === 0) return { imported: 0, existing: 0, releasesCreated: 0, releasesExisting: 0 }
+  const requestedResults = Array.from(new Map(results.map(result => [result.bundleId, result])).values())
+  if (requestedResults.length === 0) return { imported: 0, existing: 0, releasesCreated: 0, releasesExisting: 0 }
 
-  const bundleIds = uniqueResults.map(result => result.bundleId)
+  const bundleIds = requestedResults.map(result => result.bundleId)
   const appIdByBundle = new Map<string, string>()
+  const archivedBundles = new Set<string>()
   for (const batch of chunks(bundleIds)) {
     const { data: existingApps, error } = await service
       .from('app_update_apps')
-      .select('id, package_identifier')
+      .select('id, package_identifier, status')
       .eq('platform', 'ios')
       .in('package_identifier', batch)
     if (error) throw new Error(`检查已有应用失败：${error.message}`)
-    for (const app of existingApps ?? []) appIdByBundle.set(app.package_identifier as string, app.id as string)
+    for (const app of existingApps ?? []) {
+      if (app.status === 'archived') archivedBundles.add(app.package_identifier as string)
+      else appIdByBundle.set(app.package_identifier as string, app.id as string)
+    }
   }
+  const uniqueResults = requestedResults.filter(result => !archivedBundles.has(result.bundleId))
+  if (uniqueResults.length === 0) return { imported: 0, existing: requestedResults.length, releasesCreated: 0, releasesExisting: 0 }
   const missingResults = uniqueResults.filter(result => !appIdByBundle.has(result.bundleId))
   for (const batch of chunks(missingResults)) {
     const { data: createdApps, error } = await service.from('app_update_apps').insert(batch.map(result => ({
@@ -134,7 +140,7 @@ export async function importAppStoreResults(
   const releasesExisting = releaseRows.filter(row => existingReleaseKeys.has(`${row.source_id}:${row.normalized_version}`)).length
   return {
     imported: missingResults.length,
-    existing: uniqueResults.length - missingResults.length,
+    existing: requestedResults.length - missingResults.length,
     releasesCreated: releaseRows.length - releasesExisting,
     releasesExisting,
   }

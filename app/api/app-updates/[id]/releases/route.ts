@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { appUpdateDatabaseError, requireAppUpdateSuper } from '@/lib/app-update-server'
+import { appUpdateDatabaseError, requireAppUpdateAccess } from '@/lib/app-update-server'
 
 type JoinedRow = Record<string, unknown> & {
   id: string
@@ -20,7 +20,7 @@ function oneRelation(value: unknown): Record<string, unknown> {
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess()
   if (!access.ok) return access.response
 
   const { id } = await params

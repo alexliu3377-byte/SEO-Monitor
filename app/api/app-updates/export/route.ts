@@ -1,4 +1,4 @@
-import { requireAppUpdateSuper } from '@/lib/app-update-server'
+import { requireAppUpdateAccess } from '@/lib/app-update-server'
 import { cleanAppUpdateText, csvCell } from '@/lib/app-updates'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 
@@ -27,7 +27,7 @@ function oneRelation(value: unknown): Record<string, unknown> {
 }
 
 export async function POST(request: Request) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess()
   if (!access.ok) return access.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   const allMatching = body?.allMatching === true

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { assertSafeRemoteUrl } from '@/lib/safe-remote-url'
-import { appUpdateDatabaseError, requireAppUpdateSuper } from '@/lib/app-update-server'
+import { appUpdateDatabaseError, requireAppUpdateAccess } from '@/lib/app-update-server'
 import { cleanAppUpdateText, isAppUpdatePlatform, isAppUpdateSourceType } from '@/lib/app-updates'
 
 const TABS = ['updates', 'apps', 'runs'] as const
@@ -17,7 +17,7 @@ function oneRelation(value: unknown): Record<string, unknown> {
 }
 
 export async function GET(request: Request) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess()
   if (!access.ok) return access.response
   const { service } = access
   const params = new URL(request.url).searchParams
@@ -98,7 +98,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess({ managerOnly: true })
   if (!access.ok) return access.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ error: '请求内容格式错误' }, { status: 400 })

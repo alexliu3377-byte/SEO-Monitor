@@ -3,8 +3,8 @@ import 'server-only'
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from './supabase-server'
 
-export async function requireAppUpdateSuper(): Promise<
-  | { ok: true; userId: string; service: any }
+export async function requireAppUpdateAccess(options: { managerOnly?: boolean } = {}): Promise<
+  | { ok: true; userId: string; role: 'normal' | 'admin' | 'super'; service: any }
   | { ok: false; response: NextResponse }
 > {
   const auth = await createClient()
@@ -17,10 +17,13 @@ export async function requireAppUpdateSuper(): Promise<
     .select('role, is_active')
     .eq('id', user.id)
     .maybeSingle()
-  if (!profile || profile.is_active === false || profile.role !== 'super') {
-    return { ok: false, response: NextResponse.json({ error: '仅超管可以使用应用更新中心' }, { status: 403 }) }
+  if (!profile || profile.is_active === false || !['normal', 'admin', 'super'].includes(profile.role)) {
+    return { ok: false, response: NextResponse.json({ error: '当前账号无法使用应用更新中心' }, { status: 403 }) }
   }
-  return { ok: true, userId: user.id, service }
+  if (options.managerOnly && profile.role === 'normal') {
+    return { ok: false, response: NextResponse.json({ error: '只有管理员可以新增应用或来源' }, { status: 403 }) }
+  }
+  return { ok: true, userId: user.id, role: profile.role, service }
 }
 
 export function appUpdateDatabaseError(error: { code?: string } | null, fallback: string) {

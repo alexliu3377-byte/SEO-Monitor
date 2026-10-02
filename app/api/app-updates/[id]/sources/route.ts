@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import { assertSafeRemoteUrl } from '@/lib/safe-remote-url'
-import { appUpdateDatabaseError, requireAppUpdateSuper } from '@/lib/app-update-server'
+import { appUpdateDatabaseError, requireAppUpdateAccess } from '@/lib/app-update-server'
 import { cleanAppUpdateText, isAppUpdateSourceType } from '@/lib/app-updates'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const access = await requireAppUpdateSuper()
+  const access = await requireAppUpdateAccess()
   if (!access.ok) return access.response
   const { id } = await context.params
   if (!UUID_PATTERN.test(id)) return NextResponse.json({ error: '应用编号无效' }, { status: 400 })
