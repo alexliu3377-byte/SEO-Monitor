@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useDeferredValue, useEffect, useState } from 'react'
-import Link from 'next/link'
 
 type AppRow = {
   id: string; name: string; platform: string; package_identifier: string | null
@@ -252,8 +251,7 @@ export default function AppUpdateCenterClient({ canManage }: { canManage: boolea
       <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
         <div className="mx-auto flex max-w-[1500px] flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <Link href="/" className="text-xs font-semibold text-blue-700 hover:underline">← 返回系统首页</Link>
-            <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">应用更新中心</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">应用更新中心</h1>
             <p className="mt-2 text-sm text-slate-500">集中发现应用新版本、审核更新日志并批量导出。</p>
           </div>
           {canManage && <div className="flex flex-wrap items-center justify-end gap-2">

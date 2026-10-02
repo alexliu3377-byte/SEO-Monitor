@@ -385,9 +385,9 @@ export default function Sidebar() {
             <p className="text-white font-semibold text-sm leading-tight">
               {isAppUpdateCenter ? '奇心应用更新中心' : isPageStudio ? '奇心页面设计工作室' : '奇心内容发布系统'}
             </p>
-            {!isAppUpdateCenter && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              {isPageStudio ? '可视化网页原型' : '内容运营后台'}
-            </p>}
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              {isAppUpdateCenter ? '应用更新后台' : isPageStudio ? '可视化网页原型' : '内容运营后台'}
+            </p>
           </div>
           <button type="button" aria-label="关闭导航菜单" onClick={() => setMobileOpen(false)} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded text-white/70 hover:text-white lg:hidden">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
