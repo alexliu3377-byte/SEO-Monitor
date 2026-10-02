@@ -9,6 +9,7 @@ export const CONTENT_LEGACY_ROOTS = [
   '/group-report',
   '/research',
   '/hot-keywords',
+  '/keyword-classification',
   '/trend-discovery',
   '/site-intel',
   '/weight-monitor',
