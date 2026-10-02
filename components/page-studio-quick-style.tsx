@@ -17,6 +17,21 @@ function ChoiceRow({ title, choices, onChoose }: { title: string; choices: Array
   return <div className="border-b border-slate-100 px-3 py-3"><p className="mb-2 text-[11px] font-semibold text-slate-600">{title}</p><div className="grid grid-cols-4 gap-1.5">{choices.map(choice => <button key={choice.value} type="button" onClick={() => onChoose(choice.value)} className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] text-slate-700 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800">{choice.label}</button>)}</div></div>
 }
 
+function findNumberGroup(component: Component | null) {
+  let current = component
+  while (current) {
+    if (current.getAttributes()['data-studio-number-group']) return current
+    current = current.parent() ?? null
+  }
+  return null
+}
+
+const NUMBER_PRESETS = {
+  top3: { end: 3, featured: '#f97316', normal: '#f1f5f9', normalText: '#475569' },
+  top5: { end: 5, featured: '#2563eb', normal: '#f1f5f9', normalText: '#475569' },
+  same: { end: 10, featured: '#475569', normal: '#475569', normalText: '#ffffff' },
+} as const
+
 export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: Editor | null; onAdvanced: () => void }) {
   const [, setRevision] = useState(0)
   useEffect(() => {
@@ -29,6 +44,7 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
   const selected = editor?.getSelected() ?? null
   if (!editor || !selected) return <div className="p-6 text-center text-xs leading-5 text-slate-500">先点击画布中的文字、图片或区块，这里会出现常用修改按钮。</div>
   const component = selected
+  const numberGroup = findNumberGroup(component)
 
   const apply = (style: Record<string, string>) => component.addStyle(style)
   const tagName = String(component.get('tagName') || '').toLowerCase()
@@ -45,6 +61,37 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
     reader.readAsDataURL(file)
   }
 
+  function updateNumbers(options: { preset?: keyof typeof NUMBER_PRESETS; selected?: number; featured?: string; normal?: string; selectedColor?: string }) {
+    if (!numberGroup) return
+    const attributes = numberGroup.getAttributes()
+    const presetName = options.preset ?? (String(attributes['data-studio-number-group'] || 'top3') as keyof typeof NUMBER_PRESETS)
+    const preset = NUMBER_PRESETS[presetName] ?? NUMBER_PRESETS.top3
+    const selectedNumber = options.selected ?? Number(attributes['data-studio-selected-number'] || 1)
+    const featuredColor = options.featured ?? (options.preset ? preset.featured : String(attributes['data-studio-featured-color'] || preset.featured))
+    const normalColor = options.normal ?? (options.preset ? preset.normal : String(attributes['data-studio-normal-color'] || preset.normal))
+    const selectedColor = options.selectedColor ?? String(attributes['data-studio-selected-color'] || '#059669')
+    numberGroup.addAttributes({
+      'data-studio-number-group': presetName,
+      'data-studio-selected-number': String(selectedNumber),
+      'data-studio-featured-color': featuredColor,
+      'data-studio-normal-color': normalColor,
+      'data-studio-selected-color': selectedColor,
+    })
+    numberGroup.components().forEach((child: Component) => {
+      const number = Number(child.getAttributes()['data-studio-number'])
+      if (!number) return
+      const isSelected = number === selectedNumber
+      const isFeatured = number <= preset.end
+      const background = isSelected ? selectedColor : isFeatured ? featuredColor : normalColor
+      child.addStyle({
+        background,
+        color: isSelected || isFeatured || presetName === 'same' ? '#ffffff' : preset.normalText,
+        border: isSelected ? `2px solid ${selectedColor}` : '1px solid #cbd5e1',
+        'box-shadow': isSelected ? '0 0 0 3px #a7f3d0' : 'none',
+      })
+    })
+  }
+
   return (
     <div className="bg-white">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
@@ -58,6 +105,22 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
       {isEditableText ? <div className="border-b border-slate-100 px-3 py-3"><label className="block text-[11px] font-semibold text-slate-600">文字内容<textarea value={visibleText} onChange={event => component.components(event.target.value)} rows={3} className="mt-2 w-full resize-y rounded-md border border-slate-300 bg-white p-2 text-sm leading-5 text-slate-800 outline-none focus:border-emerald-500" /></label>{isLink && <label className="mt-3 block text-[11px] font-semibold text-slate-600">点击后前往<input value={String(component.getAttributes().href || '')} onChange={event => component.addAttributes({ href: event.target.value })} placeholder="https://… 或 /页面地址" className="mt-1.5 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-none focus:border-emerald-500" /></label>}</div> : null}
 
       {!isImage && !isEditableText ? <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">先选中模块里面的文字或图片，就能直接修改内容；要改整个模块的大小和背景，则选中外框。</div> : null}
+
+      {numberGroup ? <div className="border-b border-emerald-100 bg-emerald-50/60 px-3 py-3">
+        <p className="text-xs font-semibold text-emerald-950">数字显示规则</p>
+        <p className="mt-1 text-[11px] leading-4 text-emerald-800">排名颜色与当前选中颜色可以分别设置。</p>
+        <div className="mt-3 grid grid-cols-3 gap-1.5">
+          {([['前 3 不同色', 'top3'], ['前 5 不同色', 'top5'], ['10 个同色', 'same']] as const).map(([label, value]) => <button key={value} type="button" onClick={() => updateNumbers({ preset: value })} className="h-9 rounded-md border border-emerald-200 bg-white px-1 text-[11px] font-medium text-emerald-800 hover:border-emerald-500 hover:bg-emerald-100">{label}</button>)}
+        </div>
+        <label className="mt-3 block text-[11px] font-semibold text-slate-600">当前选中数字
+          <select value={String(numberGroup.getAttributes()['data-studio-selected-number'] || '1')} onChange={event => updateNumbers({ selected: Number(event.target.value) })} className="mt-1.5 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700 outline-none focus:border-emerald-500">
+            {Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 个</option>)}
+          </select>
+        </label>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {[['突出颜色', 'featured'], ['普通颜色', 'normal'], ['选中颜色', 'selectedColor']].map(([label, key]) => <label key={key} className="text-[10px] font-medium text-slate-600">{label}<input type="color" defaultValue={key === 'featured' ? '#f97316' : key === 'normal' ? '#f1f5f9' : '#059669'} onChange={event => updateNumbers({ [key]: event.target.value })} className="mt-1 block h-8 w-full cursor-pointer rounded border border-slate-300 bg-white p-0.5" /></label>)}
+        </div>
+      </div> : null}
 
       <ChoiceRow title="宽度" choices={[{ label: '自动', value: 'auto' }, { label: '1/3', value: '33.333%' }, { label: '一半', value: '50%' }, { label: '全宽', value: '100%' }]} onChoose={value => apply({ width: value, 'max-width': value === 'auto' ? 'none' : value })} />
       <ChoiceRow title="高度" choices={[{ label: '自动', value: 'auto' }, { label: '小 44', value: '44px' }, { label: '中 64', value: '64px' }, { label: '大 96', value: '96px' }]} onChoose={value => apply({ height: value })} />
