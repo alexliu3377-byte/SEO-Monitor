@@ -77,15 +77,14 @@ export default function AppUpdateCenterClient() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
   const [targetOpen, setTargetOpen] = useState(false)
-  const [appStoreImportOpen, setAppStoreImportOpen] = useState(false)
-  const [appStoreEntries, setAppStoreEntries] = useState('')
-  const [appStoreCountry, setAppStoreCountry] = useState('cn')
+  const [discoveryOpen, setDiscoveryOpen] = useState<DiscoveryTarget | null>(null)
+  const [discoveryEntries, setDiscoveryEntries] = useState('')
+  const [discoveryCountry, setDiscoveryCountry] = useState('cn')
   const [sourceApp, setSourceApp] = useState<AppRow | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [discovering, setDiscovering] = useState<DiscoveryTarget | null>(null)
-  const [manualMenuOpen, setManualMenuOpen] = useState(false)
 
   const pageSize = 25
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -191,47 +190,24 @@ export default function AppUpdateCenterClient() {
     }
   }
 
-  async function importAppStoreApps(chart?: 'top-free' | 'top-paid') {
-    setSaving(true); setError(''); setNotice('')
-    try {
-      const response = await fetch('/api/app-updates/import-app-store', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entries: chart ? '' : appStoreEntries,
-          country: appStoreCountry,
-          chart: chart ?? null,
-          limit: 100,
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'App Store 批量导入失败')
-      const missing = Array.isArray(data.missingIds) && data.missingIds.length > 0
-        ? `；${data.missingIds.length} 个 ID 未找到`
-        : ''
-      setNotice(`App Store 导入完成：新增应用 ${data.imported} 个，已有 ${data.existing} 个，新增版本资料 ${data.releasesCreated} 条${missing}`)
-      setAppStoreImportOpen(false); setAppStoreEntries(''); await load()
-    } catch (importError) {
-      setError(importError instanceof Error ? importError.message : 'App Store 批量导入失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function startDiscovery(target: DiscoveryTarget) {
+  async function startDiscovery() {
+    if (!discoveryOpen) return
+    const target = discoveryOpen
     const labels: Record<DiscoveryTarget, string> = {
       app_store: 'App Store', google_play: 'Google Play', taptap: 'TapTap',
     }
     setDiscovering(target); setError(''); setNotice('')
     try {
       const response = await fetch('/api/app-updates/discover', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, country: discoveryCountry, entries: discoveryEntries }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || '任务启动失败')
-      setNotice(`${labels[target]} 新应用发现任务已加入队列。任务会在后台运行，完成后刷新“应用与来源”查看结果。`)
+      if (!response.ok) throw new Error(data.error || '应用发现失败')
+      setNotice(`${labels[target]} 发现完成：找到 ${Number(data.found ?? 0)} 个应用，新增 ${Number(data.appsCreated ?? 0)} 个应用，新增 ${Number(data.releasesCreated ?? 0)} 条版本资料。`)
+      setDiscoveryOpen(null); setDiscoveryEntries(''); await load()
     } catch (discoveryError) {
-      setError(discoveryError instanceof Error ? discoveryError.message : '任务启动失败')
+      setError(discoveryError instanceof Error ? discoveryError.message : '应用发现失败')
     } finally {
       setDiscovering(null)
     }
@@ -263,14 +239,8 @@ export default function AppUpdateCenterClient() {
             <p className="mt-2 text-sm text-slate-500">集中发现应用新版本、审核更新日志并批量导出。</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {([['app_store', '发现AppStore新应用'], ['google_play', '发现GooglePlay新应用'], ['taptap', '发现TapTap新应用']] as const).map(([target, label]) => <button key={target} type="button" disabled={discovering !== null} onClick={() => startDiscovery(target)} className="h-10 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:border-blue-400 hover:bg-blue-50 disabled:cursor-wait disabled:opacity-50">{discovering === target ? '正在启动…' : label}</button>)}
-            <div className="relative">
-              <button type="button" onClick={() => setManualMenuOpen(open => !open)} aria-expanded={manualMenuOpen} className="h-10 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">手动添加 ▾</button>
-              {manualMenuOpen && <div className="absolute right-0 top-12 z-30 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-left shadow-xl">
-                <button type="button" onClick={() => { setManualMenuOpen(false); setError(''); setNotice(''); setAppStoreImportOpen(true) }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-blue-50"><span className="block text-sm font-semibold text-slate-800">导入指定AppStore应用</span><span className="mt-0.5 block text-xs text-slate-500">粘贴应用链接或从公开榜单补全</span></button>
-                <button type="button" onClick={() => { setManualMenuOpen(false); openNewTarget() }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-blue-50"><span className="block text-sm font-semibold text-slate-800">手工建立应用</span><span className="mt-0.5 block text-xs text-slate-500">填写名称、平台和更新来源</span></button>
-              </div>}
-            </div>
+            {([['app_store', '发现AppStore新应用'], ['google_play', '发现GooglePlay新应用'], ['taptap', '发现TapTap新应用']] as const).map(([target, label]) => <button key={target} type="button" disabled={discovering !== null} onClick={() => { setDiscoveryOpen(target); setDiscoveryCountry(target === 'app_store' ? 'cn' : 'us'); setDiscoveryEntries(''); setError(''); setNotice('') }} className="h-10 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50">{label}</button>)}
+            <button type="button" onClick={openNewTarget} className="h-10 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">手工建立应用</button>
           </div>
         </div>
       </header>
@@ -317,7 +287,20 @@ export default function AppUpdateCenterClient() {
         </section>
       </main>
 
-      {appStoreImportOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"><div className="flex items-start justify-between border-b border-slate-100 px-6 py-4"><div><h2 className="text-lg font-bold text-slate-950">批量补全 App Store 应用</h2><p className="mt-1 text-xs leading-5 text-slate-400">可以直接从 Apple 公开榜单建档，也可以粘贴指定应用。导入时会一并取得当前版本和更新日志。</p></div><button onClick={() => setAppStoreImportOpen(false)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button></div><div className="space-y-4 px-6 py-5"><label className="block text-sm font-medium text-slate-700">商店地区<select value={appStoreCountry} onChange={event => setAppStoreCountry(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3"><option value="cn">中国大陆</option><option value="my">马来西亚</option><option value="us">美国</option><option value="hk">中国香港</option><option value="tw">中国台湾</option></select></label><div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><p className="text-sm font-semibold text-slate-800">无需填写 Apple ID</p><p className="mt-1 text-xs leading-5 text-slate-500">自动读取所选地区榜单前 100 名，重复应用会跳过，版本资料会更新。</p><div className="mt-3 grid grid-cols-2 gap-2"><button type="button" disabled={saving} onClick={() => importAppStoreApps('top-free')} className="h-10 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white disabled:opacity-50">{saving ? '补全中…' : '补全免费榜 100 个'}</button><button type="button" disabled={saving} onClick={() => importAppStoreApps('top-paid')} className="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-700 disabled:opacity-50">{saving ? '补全中…' : '补全付费榜 100 个'}</button></div></div><div className="flex items-center gap-3"><span className="h-px flex-1 bg-slate-200" /><span className="text-xs text-slate-400">或导入指定应用</span><span className="h-px flex-1 bg-slate-200" /></div><label className="block text-sm font-medium text-slate-700">应用链接或 ID<textarea value={appStoreEntries} onChange={event => setAppStoreEntries(event.target.value)} rows={6} placeholder={'https://apps.apple.com/cn/app/.../id123456789\n987654321'} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-3 font-mono text-sm outline-none focus:border-blue-400" /></label><p className="text-xs leading-5 text-slate-400">资料来自 Apple 的公开榜单和 Lookup 接口，不需要登录 Apple 开发者账号。</p></div><div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button onClick={() => setAppStoreImportOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm">取消</button><button disabled={saving || !appStoreEntries.trim()} onClick={() => importAppStoreApps()} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? '导入中…' : '导入指定应用'}</button></div></div></div>}
+      {discoveryOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true">
+        <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+            <div><h2 className="text-lg font-bold text-slate-950">{{ app_store: '发现AppStore新应用', google_play: '发现GooglePlay新应用', taptap: '发现TapTap新应用' }[discoveryOpen]}</h2><p className="mt-1 text-xs leading-5 text-slate-500">不填写链接会扫描排行榜；填写后只导入指定应用。点击下方按钮后才会开始执行。</p></div>
+            <button type="button" onClick={() => setDiscoveryOpen(null)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="关闭">✕</button>
+          </div>
+          <div className="space-y-4 px-6 py-5">
+            {discoveryOpen !== 'taptap' && <label className="block text-sm font-medium text-slate-700">商店地区<select value={discoveryCountry} onChange={event => setDiscoveryCountry(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3"><option value={discoveryOpen === 'app_store' ? 'cn' : 'us'}>{discoveryOpen === 'app_store' ? '中国大陆' : '美国'}</option><option value="my">马来西亚</option><option value="sg">新加坡</option>{discoveryOpen === 'app_store' && <><option value="us">美国</option><option value="hk">中国香港</option><option value="tw">中国台湾</option></>}</select></label>}
+            <label className="block text-sm font-medium text-slate-700">{{ app_store: 'App Store 链接或 Apple ID（可不填）', google_play: 'Google Play 链接或包名（可不填）', taptap: 'TapTap 链接或应用 ID（可不填）' }[discoveryOpen]}<textarea value={discoveryEntries} onChange={event => setDiscoveryEntries(event.target.value)} rows={6} placeholder={{ app_store: 'https://apps.apple.com/.../id123456789\n987654321', google_play: 'https://play.google.com/store/apps/details?id=com.example.app\ncom.example.app', taptap: 'https://www.taptap.cn/app/123456\n123456' }[discoveryOpen]} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-3 font-mono text-sm outline-none focus:border-blue-400" /></label>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs leading-5 text-blue-800">{discoveryEntries.trim() ? '本次只会查询并导入上面填写的应用。' : '本次会从该商店排行榜自动发现新应用，已有应用会跳过，并更新版本资料。'}</div>
+          </div>
+          <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button type="button" disabled={discovering !== null} onClick={() => setDiscoveryOpen(null)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm">取消</button><button type="button" disabled={discovering !== null} onClick={startDiscovery} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-50">{discovering ? '正在发现…' : discoveryEntries.trim() ? '导入指定应用' : '开始扫描排行榜'}</button></div>
+        </div>
+      </div>}
 
       {targetOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 px-6 py-4"><div><h2 className="text-lg font-bold text-slate-950">{sourceApp ? `为 ${sourceApp.name} 添加来源` : '新增实验应用'}</h2><p className="mt-1 text-xs text-slate-400">先填写公开更新页面，GitHub Actions 会尝试自动识别资料。</p></div><button onClick={() => setTargetOpen(false)} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100">✕</button></div><div className="grid gap-4 px-6 py-5 sm:grid-cols-2">{!sourceApp && <><label className="text-sm font-medium text-slate-700">应用名称<input value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label><label className="text-sm font-medium text-slate-700">平台<select value={form.platform} onChange={event => setForm(current => ({ ...current, platform: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">包名或应用标识（可不填）<input value={form.packageIdentifier} onChange={event => setForm(current => ({ ...current, packageIdentifier: event.target.value }))} placeholder="例如 com.example.app" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label></>}<label className="text-sm font-medium text-slate-700">来源名称<input value={form.sourceName} onChange={event => setForm(current => ({ ...current, sourceName: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label><label className="text-sm font-medium text-slate-700">来源类型<select value={form.sourceType} onChange={event => setForm(current => ({ ...current, sourceType: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3">{Object.entries(SOURCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">更新页面 URL<input value={form.sourceUrl} onChange={event => setForm(current => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://..." className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-blue-400" /></label></div><div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4"><button onClick={() => setTargetOpen(false)} className="h-10 rounded-lg border border-slate-200 px-4 text-sm">取消</button><button disabled={saving} onClick={saveTarget} className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? '保存中…' : '保存'}</button></div></div></div>}
 
