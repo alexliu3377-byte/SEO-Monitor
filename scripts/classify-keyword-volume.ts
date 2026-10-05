@@ -8,7 +8,9 @@ import {
   APP_SUBCATEGORIES,
   GAME_SUBCATEGORIES,
   KEYWORD_PRIMARY_CATEGORIES,
+  inferredAppSubcategory,
   isKeywordPrimaryCategory,
+  isRankingKeyword,
   isValidKeywordSubcategory,
 } from '../lib/keyword-classification'
 
@@ -59,10 +61,10 @@ function promptFor(rows: { keyword: string; volume: number }[]) {
 
 判断规则：
 1. 游戏：主要寻找游戏、某类游戏或游戏下载，必须填写游戏二级分类。
-2. 应用：主要寻找应用、某类软件或软件下载，必须填写应用二级分类。
+2. 应用：主要寻找应用、某类软件或软件下载，必须填写应用二级分类。AI、人工智能、ChatGPT、DeepSeek、豆包、千问、Kimi、Claude、Gemini、Copilot、Codex 等归“AI工具”；浏览器、Chrome、Safari、Firefox、Edge、UC、夸克、Opera 等归“浏览器”。
 3. 专题：明确是主题聚合、系列汇总或专题落地页。“合集”“大全”只是弱信号，不能仅凭这两个词判断。
 4. 资讯：攻略、教程、玩法、怎么过、更新消息、新闻等阅读意图。
-5. 排行榜：明确寻找排行、榜单、前十、推荐比较或“哪个好”等排序结果。
+5. 排行榜：只有关键词原文包含“排行榜”“榜单”“前10”“前十”“前20”“前二十”“十大”或“10大”之一才可归入。仅有“排行”“排名”“热搜榜”“推荐”“哪个好”等表达不算排行榜，应按意图归入专题或其他分类。
 6. -：信息不足、歧义明显或不属于上述方向。不要硬猜。
 7. 优先按完整搜索意图分类：“塔防游戏排行榜”是排行榜；“原神攻略”是资讯；“仙侠手游”才是游戏/仙侠手游。
 8. 专题、资讯、排行榜、- 的二级分类编号必须是 -1。
@@ -109,13 +111,15 @@ async function runBatch(index: number) {
     const valid = (parsed.items ?? []).flatMap(item => {
       const { i: rowIndex, c: categoryIndex, s: subcategoryIndex } = item
       if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= rows.length || seen.has(rowIndex)) return []
-      const category = KEYWORD_PRIMARY_CATEGORIES[categoryIndex]
+      let category = KEYWORD_PRIMARY_CATEGORIES[categoryIndex]
       if (!isKeywordPrimaryCategory(category)) return []
-      const subcategory = category === '游戏'
+      if (category === '排行榜' && !isRankingKeyword(rows[rowIndex].keyword)) category = '专题'
+      let subcategory = category === '游戏'
         ? GAME_SUBCATEGORIES[subcategoryIndex] ?? ''
         : category === '应用'
           ? APP_SUBCATEGORIES[subcategoryIndex] ?? ''
           : ''
+      if (category === '应用') subcategory = inferredAppSubcategory(rows[rowIndex].keyword) ?? subcategory
       if (category !== '游戏' && category !== '应用' && subcategoryIndex !== -1) return []
       if (!isValidKeywordSubcategory(category, subcategory)) return []
       seen.add(rowIndex)

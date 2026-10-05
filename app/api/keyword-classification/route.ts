@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isProjectOwner } from '@/lib/project-owner'
 import {
   isKeywordPrimaryCategory,
+  isRankingKeyword,
   isValidKeywordSubcategory,
   type KeywordClassificationStatus,
 } from '@/lib/keyword-classification'
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = access.service as any
   let query = service.from('keyword_volume')
-    .select('keyword, volume, volume_change, net_volume_change, stat_date, content_category, content_subcategory, classification_status, classification_source, classification_confidence, classification_reason, classification_queued_at, classified_at, reviewed_at', { count: 'exact' })
+    .select('keyword, volume, volume_change, net_volume_change, stat_date, content_category, content_subcategory, classification_status, classification_source, classification_reason, classification_queued_at, classified_at, reviewed_at', { count: 'exact' })
 
   if (STATUSES.includes(status as KeywordClassificationStatus)) query = query.eq('classification_status', status)
   if (category) query = category === '待分类'
@@ -79,6 +80,9 @@ export async function PATCH(request: Request) {
   }
   const category = body.category
   const subcategory = typeof body?.subcategory === 'string' ? body.subcategory.trim() : ''
+  if (category === '排行榜' && !isRankingKeyword(keyword)) {
+    return NextResponse.json({ error: '只有包含排行榜、榜单、前10、前十、前20、前二十、十大或10大的关键词才能设为排行榜' }, { status: 400 })
+  }
   if (!isValidKeywordSubcategory(category, subcategory)) {
     return NextResponse.json({ error: category === '游戏' || category === '应用' ? '请选择有效的二级分类' : '该一级分类不应设置二级分类' }, { status: 400 })
   }

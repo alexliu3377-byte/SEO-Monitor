@@ -20,7 +20,6 @@ type Row = {
   content_subcategory: string | null
   classification_status: KeywordClassificationStatus
   classification_source: 'codex' | 'manual' | null
-  classification_confidence: number | null
   classification_reason: string | null
   classification_queued_at: string
   classified_at: string | null
@@ -275,29 +274,29 @@ export function KeywordClassificationClient() {
             <option value="">全部二级分类</option>
             {availableSubcategories.map(value => <option key={value} value={value}>{value}</option>)}
           </select>}
-          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex min-w-[240px] flex-1 gap-2">
+          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[280px] flex-1 items-stretch gap-2">
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索关键词" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-emerald-500" />
-            <button type="submit" className="btn-secondary h-9 px-3 text-sm">查询</button>
+            <button type="submit" className="inline-flex h-9 min-h-0 w-16 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1">查询</button>
           </form>
-          <span className="text-xs text-slate-500">共 {formatNumber(total)} 个词</span>
+          <span className="ml-auto inline-flex h-9 shrink-0 items-center whitespace-nowrap text-xs text-slate-500">共 {formatNumber(total)} 个词</span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1100px] table-fixed" aria-label="关键词分类列表">
-            <colgroup><col className="w-64" /><col className="w-24" /><col className="w-36" /><col className="w-44" /><col /><col className="w-28" /><col className="w-24" /></colgroup>
+            <colgroup><col className="w-64" /><col className="w-24" /><col className="w-36" /><col className="w-44" /><col /><col className="w-44" /><col className="w-24" /></colgroup>
             <thead className="bg-slate-50"><tr><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">Codex 判断依据</th><th className="table-th">状态／日期</th><th className="table-th text-right">操作</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">正在读取分类资料…</td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
                 const draft = drafts[row.keyword] ?? { category: '', subcategory: '' }
                 const subOptions = subcategoriesFor(draft.category)
                 return <tr key={row.keyword} className="hover:bg-slate-50/70">
-                  <td className="table-td"><span className="block truncate font-medium text-slate-900" title={row.keyword}>{row.keyword}</span></td>
-                  <td className="table-td text-right font-semibold tabular-nums text-slate-800">{formatNumber(row.volume)}</td>
-                  <td className="table-td"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value}</option>)}</select></td>
-                  <td className="table-td">{subOptions.length > 0 ? <select aria-label={`${row.keyword}二级分类`} value={draft.subcategory} onChange={event => updateDraft(row.keyword, { subcategory: event.target.value })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{subOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> : <span className="text-slate-300">—</span>}</td>
-                  <td className="table-td"><span className="line-clamp-2 text-xs text-slate-600" title={row.classification_reason ?? ''}>{row.classification_reason || (row.classification_status === 'pending' ? '等待 Codex 分批处理' : '—')}</span>{row.classification_confidence != null && <span className="mt-0.5 block text-[10px] text-slate-400">信心 {Math.round(Number(row.classification_confidence) * 100)}%</span>}</td>
-                  <td className="table-td"><span className={`text-xs font-medium ${row.classification_status === 'pending' ? 'text-amber-600' : row.classification_status === 'processing' ? 'text-violet-600' : row.classification_source === 'manual' ? 'text-emerald-600' : 'text-blue-600'}`}>{row.classification_status === 'pending' ? '待分类' : row.classification_status === 'processing' ? 'Codex 处理中' : row.classification_source === 'manual' ? '已修改' : 'Codex 分类'}</span><span className="mt-0.5 block text-[10px] text-slate-400">{formatDate(row.reviewed_at || row.classified_at || row.classification_queued_at)}</span></td>
-                  <td className="table-td text-right"><button type="button" disabled={saving === row.keyword} onClick={() => void confirm(row)} className="btn-primary h-8 whitespace-nowrap px-3 text-xs disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存修改'}</button></td>
+                  <td className="table-td align-middle"><span className="block truncate font-medium text-slate-900" title={row.keyword}>{row.keyword}</span></td>
+                  <td className="table-td align-middle text-right font-semibold tabular-nums text-slate-800">{formatNumber(row.volume)}</td>
+                  <td className="table-td align-middle"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value}</option>)}</select></td>
+                  <td className="table-td align-middle">{subOptions.length > 0 ? <select aria-label={`${row.keyword}二级分类`} value={draft.subcategory} onChange={event => updateDraft(row.keyword, { subcategory: event.target.value })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{subOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> : <span className="text-slate-300">—</span>}</td>
+                  <td className="table-td align-middle"><span className="block truncate text-xs text-slate-600" title={row.classification_reason ?? ''}>{row.classification_reason || (row.classification_status === 'pending' ? '等待 Codex 分批处理' : '—')}</span></td>
+                  <td className="table-td align-middle"><span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className={`text-xs font-medium ${row.classification_status === 'pending' ? 'text-amber-600' : row.classification_status === 'processing' ? 'text-violet-600' : row.classification_source === 'manual' ? 'text-emerald-600' : 'text-blue-600'}`}>{row.classification_status === 'pending' ? '待分类' : row.classification_status === 'processing' ? 'Codex 处理中' : row.classification_source === 'manual' ? '已修改' : 'Codex 分类'}</span><span className="text-[11px] text-slate-400">· {formatDate(row.reviewed_at || row.classified_at || row.classification_queued_at)}</span></span></td>
+                  <td className="table-td align-middle text-right"><button type="button" disabled={saving === row.keyword} onClick={() => void confirm(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存修改'}</button></td>
                 </tr>
               })}
             </tbody>
