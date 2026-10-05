@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SimplePagination } from '@/components/simple-pagination'
 import {
   APP_SUBCATEGORIES,
@@ -41,6 +41,23 @@ type SiteGroup = {
 }
 
 type Draft = { category: KeywordPrimaryCategory | ''; subcategory: string }
+type LayoutFilter = 'all' | 'unassigned' | 'assigned' | 'issue'
+
+const LAYOUT_FILTER_OPTIONS: { value: LayoutFilter; label: string }[] = [
+  { value: 'all', label: '全部状态' },
+  { value: 'unassigned', label: '未布局' },
+  { value: 'assigned', label: '已布局' },
+  { value: 'issue', label: '有问题' },
+]
+
+const SITE_STYLES = [
+  { chip: 'border-blue-200 bg-blue-50 text-blue-700', text: '#1d4ed8' },
+  { chip: 'border-violet-200 bg-violet-50 text-violet-700', text: '#6d28d9' },
+  { chip: 'border-cyan-200 bg-cyan-50 text-cyan-700', text: '#0e7490' },
+  { chip: 'border-orange-200 bg-orange-50 text-orange-700', text: '#c2410c' },
+  { chip: 'border-pink-200 bg-pink-50 text-pink-700', text: '#be185d' },
+  { chip: 'border-teal-200 bg-teal-50 text-teal-700', text: '#0f766e' },
+] as const
 
 const CARD_ORDER = ['待分类', ...KEYWORD_PRIMARY_CATEGORIES] as const
 const CARD_STYLE: Record<string, string> = {
@@ -57,6 +74,11 @@ function formatNumber(value: number) {
   return Number(value || 0).toLocaleString('zh-CN')
 }
 
+function siteStyle(domain: string) {
+  const hash = Array.from(domain).reduce((total, character) => total + character.charCodeAt(0), 0)
+  return SITE_STYLES[hash % SITE_STYLES.length]
+}
+
 export function KeywordClassificationClient({ canDelete }: { canDelete: boolean }) {
   const [items, setItems] = useState<Row[]>([])
   const [summary, setSummary] = useState<SummaryRow[]>([])
@@ -64,8 +86,8 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [classificationStatus, setClassificationStatus] = useState('confirmed')
-  const [selectedSite, setSelectedSite] = useState('')
-  const [problemOnly, setProblemOnly] = useState(false)
+  const [selectedSite, setSelectedSite] = useState('all')
+  const [layoutFilter, setLayoutFilter] = useState<LayoutFilter>('all')
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
   const [query, setQuery] = useState('')
@@ -75,6 +97,9 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   const [deleting, setDeleting] = useState('')
   const [error, setError] = useState('')
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  const [layoutEditor, setLayoutEditor] = useState<Row | null>(null)
+  const [layoutDraft, setLayoutDraft] = useState<string[]>([])
+  const layoutDialogRef = useRef<HTMLElement>(null)
   const pageSize = 50
 
   const load = useCallback(async () => {
@@ -86,7 +111,8 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
         pageSize: String(pageSize),
         classificationStatus,
       })
-      if (problemOnly) params.set('problem', 'true')
+      if (selectedSite !== 'all') params.set('site', selectedSite)
+      if (layoutFilter !== 'all') params.set('layout', layoutFilter)
       if (category) params.set('category', category)
       if (subcategory) params.set('subcategory', subcategory)
       if (search) params.set('q', search)
@@ -100,9 +126,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       setSiteGroups(nextSiteGroups)
       setSelectedSite(current => {
         const availableSites = nextSiteGroups.flatMap(group => group.sites)
-        if (current && availableSites.includes(current)) return current
-        const remembered = window.localStorage.getItem('keyword-layout-site') || ''
-        return availableSites.includes(remembered) ? remembered : availableSites[0] ?? ''
+        return current === 'all' || availableSites.includes(current) ? current : 'all'
       })
       setTotal(Number(body.total) || 0)
       setDrafts(Object.fromEntries(rows.map(row => [row.keyword, {
@@ -114,13 +138,45 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
     } finally {
       setLoading(false)
     }
-  }, [category, classificationStatus, page, problemOnly, search, subcategory])
+  }, [category, classificationStatus, layoutFilter, page, search, selectedSite, subcategory])
 
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    if (selectedSite) window.localStorage.setItem('keyword-layout-site', selectedSite)
-  }, [selectedSite])
+    if (!layoutEditor) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusableItems = () => Array.from(layoutDialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) ?? [])
+    requestAnimationFrame(() => focusableItems()[0]?.focus())
+    const handleDialogKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setLayoutEditor(null)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusableItems()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleDialogKeys)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleDialogKeys)
+      previouslyFocused?.focus()
+    }
+  }, [layoutEditor])
 
   const primarySummary = useMemo(() => {
     const totals = new Map<string, SummaryRow>()
@@ -148,8 +204,15 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   }, [category, summary])
 
   const allowedSiteDomains = useMemo(() => new Set(siteGroups.flatMap(group => group.sites)), [siteGroups])
+  const availableSites = useMemo(() => siteGroups.flatMap(group => group.sites), [siteGroups])
   const selectedCategory = (category === '游戏' || category === '应用') ? category : ''
-  const availableSubcategories = selectedCategory === '游戏' ? GAME_SUBCATEGORIES : selectedCategory === '应用' ? APP_SUBCATEGORIES : []
+  const availableSubcategories = selectedCategory === '游戏'
+    ? GAME_SUBCATEGORIES
+    : selectedCategory === '应用'
+      ? APP_SUBCATEGORIES
+      : category === ''
+        ? Array.from(new Set([...GAME_SUBCATEGORIES, ...APP_SUBCATEGORIES]))
+        : []
 
   function chooseCard(value: string) {
     setPage(0)
@@ -202,14 +265,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
     }
   }
 
-  async function toggleCurrentSite(row: Row) {
-    if (!selectedSite || !allowedSiteDomains.has(selectedSite)) return
-    const accessibleAssignments = (row.layout_site_domains ?? []).filter(domain => allowedSiteDomains.has(domain))
-    const alreadyAssigned = accessibleAssignments.includes(selectedSite)
-    const nextAssignments = alreadyAssigned
-      ? accessibleAssignments.filter(domain => domain !== selectedSite)
-      : [...accessibleAssignments, selectedSite]
-
+  async function saveSiteAssignments(row: Row, nextAssignments: string[], closeEditor = false) {
     setSaving(row.keyword)
     setError('')
     try {
@@ -220,12 +276,32 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || '站点布局保存失败')
+      if (closeEditor) setLayoutEditor(null)
       await load()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '站点布局保存失败')
     } finally {
       setSaving('')
     }
+  }
+
+  async function layoutCurrentSite(row: Row) {
+    if (selectedSite === 'all' || !allowedSiteDomains.has(selectedSite)) return
+    const accessibleAssignments = (row.layout_site_domains ?? []).filter(domain => allowedSiteDomains.has(domain))
+    if (accessibleAssignments.includes(selectedSite)) return
+    await saveSiteAssignments(row, [...accessibleAssignments, selectedSite])
+  }
+
+  function openLayoutEditor(row: Row) {
+    setLayoutEditor(row)
+    setLayoutDraft((row.layout_site_domains ?? []).filter(domain => allowedSiteDomains.has(domain)))
+    setError('')
+  }
+
+  function toggleLayoutDraft(domain: string) {
+    setLayoutDraft(current => current.includes(domain)
+      ? current.filter(value => value !== domain)
+      : [...current, domain])
   }
 
   async function toggleProblem(row: Row) {
@@ -272,7 +348,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
     <div className="p-6">
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-slate-950">词库布局</h1>
-        <p className="mt-1 text-sm text-slate-500">先选择当前负责的站点，再逐词标记该站是否已经布局；其他站点的记录不会影响你的判断。</p>
+        <p className="mt-1 text-sm text-slate-500">查看全部站点的布局情况，或切换到单个站点后直接完成该站布局。</p>
       </div>
 
       {error && <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -302,25 +378,27 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-3">
-          <label className="flex h-9 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5">
-            <span className="shrink-0 text-xs font-semibold text-emerald-700">当前站点</span>
-            <select aria-label="当前负责站点" value={selectedSite} onChange={event => { setSelectedSite(event.target.value); setPage(0) }} className="min-w-[180px] border-0 bg-transparent pr-2 text-sm font-medium text-slate-800 outline-none">
-              {siteGroups.length === 0 && <option value="">暂无可用站点</option>}
-              {siteGroups.map(group => <optgroup key={group.id} label={group.name}>{group.sites.map(domain => <option key={domain} value={domain}>{domain}</option>)}</optgroup>)}
+          <label className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5">
+            <span className="shrink-0 text-xs text-slate-500">当前站点</span>
+            <select aria-label="当前站点" value={selectedSite} onChange={event => { setSelectedSite(event.target.value); setPage(0) }} style={{ color: selectedSite === 'all' ? '#334155' : siteStyle(selectedSite).text }} className="min-w-[150px] border-0 bg-transparent pr-2 text-sm font-semibold outline-none">
+              <option value="all" className="text-slate-700">全部</option>
+              {availableSites.map(domain => <option key={domain} value={domain} style={{ color: siteStyle(domain).text }}>{domain}</option>)}
             </select>
           </label>
           <select aria-label="一级分类" value={category} onChange={event => { setClassificationStatus(event.target.value ? 'all' : 'confirmed'); setCategory(event.target.value); setSubcategory(''); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
             <option value="">全部一级分类</option>
             {KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value === '-' ? '未能判断' : value}</option>)}
           </select>
-          {availableSubcategories.length > 0 && <select aria-label="二级分类" value={subcategory} onChange={event => { setSubcategory(event.target.value); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
-            <option value="">全部二级分类</option>
+          <select aria-label="二级分类" value={subcategory} disabled={availableSubcategories.length === 0} onChange={event => { setSubcategory(event.target.value); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400">
+            <option value="">{availableSubcategories.length > 0 ? '全部二级分类' : '无二级分类'}</option>
             {availableSubcategories.map(value => <option key={value} value={value}>{value}</option>)}
-          </select>}
-          <button type="button" aria-pressed={problemOnly} onClick={() => { setProblemOnly(value => !value); setPage(0) }} className={`inline-flex h-9 items-center whitespace-nowrap rounded-lg border px-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 ${problemOnly ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{problemOnly ? '正在查看问题词' : '只看问题词'}</button>
+          </select>
+          <select aria-label="布局状态" value={layoutFilter} onChange={event => { setLayoutFilter(event.target.value as LayoutFilter); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
+            {LAYOUT_FILTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
           <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[280px] flex-1 items-stretch gap-2">
-            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索关键词" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-emerald-500" />
-            <button type="submit" className="inline-flex h-9 min-h-0 w-16 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1">查询</button>
+            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+            <button type="submit" disabled={loading} className="inline-flex h-9 min-h-0 shrink-0 items-center justify-center rounded-lg bg-green-500 px-4 text-sm font-medium text-white transition-colors hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:opacity-50">{loading ? '查询中...' : '查询'}</button>
           </form>
           <span className="ml-auto inline-flex h-9 shrink-0 items-center whitespace-nowrap text-xs text-slate-500">共 {formatNumber(total)} 个词</span>
         </div>
@@ -334,15 +412,16 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
                 const draft = drafts[row.keyword] ?? { category: '', subcategory: '' }
                 const subOptions = subcategoriesFor(draft.category)
                 const assignedSites = row.layout_site_domains ?? []
-                const currentSiteAssigned = Boolean(selectedSite) && assignedSites.includes(selectedSite)
+                const currentSiteAssigned = selectedSite !== 'all' && assignedSites.includes(selectedSite)
+                const visibleSites = selectedSite === 'all' ? assignedSites : currentSiteAssigned ? [selectedSite] : []
                 const classificationChanged = isClassificationChanged(row, draft)
                 return <tr key={row.keyword} className={row.layout_status === 'issue' ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-slate-50/70'}>
                   <td className="table-td align-middle"><span className="block truncate font-medium text-slate-900" title={row.keyword}>{row.keyword}</span></td>
                   <td className="table-td align-middle text-right font-semibold tabular-nums text-slate-800">{formatNumber(row.volume)}</td>
                   <td className="table-td align-middle"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs focus:border-emerald-500 focus:outline-none"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value === '-' ? '未能判断' : value}</option>)}</select></td>
                   <td className="table-td align-middle">{subOptions.length > 0 ? <select aria-label={`${row.keyword}二级分类`} value={draft.subcategory} onChange={event => updateDraft(row.keyword, { subcategory: event.target.value })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs focus:border-emerald-500 focus:outline-none"><option value="">请选择</option>{subOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> : <span className="text-slate-300">—</span>}</td>
-                  <td className="table-td align-middle"><button type="button" disabled={!selectedSite || saving === row.keyword} onClick={() => void toggleCurrentSite(row)} title={!selectedSite ? '请先选择当前站点' : currentSiteAssigned ? `点击取消 ${selectedSite} 的已布局标记` : `点击标记 ${selectedSite} 已布局`} className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${currentSiteAssigned ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-slate-300 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50/50'}`}>{currentSiteAssigned && <svg aria-hidden="true" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 5.296a1 1 0 0 1 0 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 1.414-1.414L8 12.586l7.296-7.29a1 1 0 0 1 1.408 0Z" clipRule="evenodd" /></svg>}<span className="truncate">{!selectedSite ? '请先选择站点' : currentSiteAssigned ? `${selectedSite} 已布局` : '标记本站已布局'}</span></button></td>
-                  <td className="table-td align-middle text-right"><span className="inline-flex items-center justify-end gap-1.5">{classificationChanged && <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void confirmClassification(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存分类'}</button>}<button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleProblem(row)} className={`inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${row.layout_status === 'issue' ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{row.layout_status === 'issue' ? '取消问题' : '标记问题'}</button>{canDelete && row.layout_status === 'issue' && <button type="button" disabled={Boolean(deleting) || saving === row.keyword} onClick={() => void removeKeyword(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{deleting === row.keyword ? '删除中' : '永久删除'}</button>}</span></td>
+                  <td className="table-td align-middle"><div className="flex min-w-0 items-center gap-1 overflow-hidden" title={visibleSites.join('、')}>{visibleSites.length === 0 ? <span className="text-slate-300">—</span> : <>{visibleSites.slice(0, 4).map(domain => <span key={domain} className={`inline-flex max-w-36 shrink-0 truncate rounded-md border px-2 py-1 text-xs font-medium ${siteStyle(domain).chip}`}>{domain}</span>)}{visibleSites.length > 4 && <span className="shrink-0 text-xs text-slate-500">+{visibleSites.length - 4}</span>}</>}</div></td>
+                  <td className="table-td align-middle text-right"><span className="inline-flex items-center justify-end gap-1.5">{classificationChanged && <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void confirmClassification(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存分类'}</button>}{selectedSite === 'all' ? <button type="button" disabled={saving === row.keyword || deleting === row.keyword || availableSites.length === 0} onClick={() => openLayoutEditor(row)} className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">布局</button> : <button type="button" disabled={currentSiteAssigned || saving === row.keyword || deleting === row.keyword} onClick={() => void layoutCurrentSite(row)} className={`inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed ${currentSiteAssigned ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{currentSiteAssigned ? '已布局' : '布局'}</button>}<button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleProblem(row)} className={`inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${row.layout_status === 'issue' ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{row.layout_status === 'issue' ? '取消问题' : '标记问题'}</button>{canDelete && row.layout_status === 'issue' && <button type="button" disabled={Boolean(deleting) || saving === row.keyword} onClick={() => void removeKeyword(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{deleting === row.keyword ? '删除中' : '永久删除'}</button>}</span></td>
                 </tr>
               })}
             </tbody>
@@ -351,6 +430,31 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
 
         <SimplePagination page={page} total={total} pageSize={pageSize} disabled={loading} onChange={setPage} />
       </section>
+
+      {layoutEditor && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button type="button" aria-label="关闭站点选择" className="absolute inset-0 bg-slate-950/45" onClick={() => { if (!saving) setLayoutEditor(null) }} />
+          <section ref={layoutDialogRef} role="dialog" aria-modal="true" aria-labelledby="layout-editor-title" className="relative flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0 flex-1">
+                <h2 id="layout-editor-title" className="text-lg font-semibold text-slate-950">选择布局站点</h2>
+                <p className="mt-1 truncate text-sm text-slate-500" title={layoutEditor.keyword}>{layoutEditor.keyword}</p>
+              </div>
+              <button type="button" aria-label="关闭站点选择" disabled={Boolean(saving)} onClick={() => setLayoutEditor(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50">×</button>
+            </div>
+            <div className="grid gap-2 overflow-y-auto p-5 sm:grid-cols-2">
+              {availableSites.map(domain => <label key={domain} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:brightness-95 ${siteStyle(domain).chip}`}><input type="checkbox" checked={layoutDraft.includes(domain)} onChange={() => toggleLayoutDraft(domain)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /><span className="min-w-0 truncate" title={domain}>{domain}</span></label>)}
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <span className="text-xs text-slate-500">已选择 {layoutDraft.length} 个站点</span>
+              <div className="flex gap-2">
+                <button type="button" disabled={Boolean(saving)} onClick={() => setLayoutEditor(null)} className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">取消</button>
+                <button type="button" disabled={Boolean(saving)} onClick={() => void saveSiteAssignments(layoutEditor, layoutDraft, true)} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">{saving ? '保存中…' : '保存布局'}</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

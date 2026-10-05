@@ -76,7 +76,8 @@ export async function GET(request: Request) {
   const page = Math.max(0, Number.parseInt(searchParams.get('page') || '0', 10) || 0)
   const pageSize = Math.min(100, Math.max(20, Number.parseInt(searchParams.get('pageSize') || '50', 10) || 50))
   const classificationStatus = searchParams.get('classificationStatus') || 'confirmed'
-  const problemOnly = searchParams.get('problem') === 'true'
+  const site = normalizeDomain(searchParams.get('site') || '')
+  const layout = searchParams.get('layout') || 'all'
   const category = searchParams.get('category') || ''
   const subcategory = searchParams.get('subcategory') || ''
   const search = (searchParams.get('q') || '').trim().slice(0, 100)
@@ -94,7 +95,18 @@ export async function GET(request: Request) {
       : query.eq('content_category', category)
   }
   if (subcategory) query = query.eq('content_subcategory', subcategory)
-  if (problemOnly) query = query.eq('layout_status', 'issue')
+  if (layout === 'issue') {
+    query = query.eq('layout_status', 'issue')
+  } else if (layout === 'assigned' || layout === 'unassigned') {
+    query = query.neq('layout_status', 'issue')
+    if (site) {
+      query = layout === 'assigned'
+        ? query.contains('layout_site_domains', [site])
+        : query.not('layout_site_domains', 'cs', `{${site}}`)
+    } else {
+      query = query.eq('layout_status', layout)
+    }
+  }
   if (search) query = query.ilike('keyword', `%${search}%`)
 
   query = query.order('volume', { ascending: false }).order('keyword', { ascending: true })
