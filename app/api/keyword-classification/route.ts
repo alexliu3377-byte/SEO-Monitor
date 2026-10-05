@@ -10,8 +10,7 @@ import { filterTaskGroupsForCaller, getAssignedSiteDomains } from '@/lib/task-gr
 import type { UserRole } from '@/lib/user-context'
 
 const CLASSIFICATION_STATUSES: KeywordClassificationStatus[] = ['pending', 'confirmed']
-const LAYOUT_STATUSES = ['unassigned', 'assigned', 'issue'] as const
-type LayoutStatus = typeof LAYOUT_STATUSES[number]
+type LayoutStatus = 'unassigned' | 'assigned' | 'issue'
 
 interface TaskGroupRow {
   id: string
@@ -77,7 +76,7 @@ export async function GET(request: Request) {
   const page = Math.max(0, Number.parseInt(searchParams.get('page') || '0', 10) || 0)
   const pageSize = Math.min(100, Math.max(20, Number.parseInt(searchParams.get('pageSize') || '50', 10) || 50))
   const classificationStatus = searchParams.get('classificationStatus') || 'confirmed'
-  const layoutStatus = searchParams.get('layoutStatus') || 'all'
+  const problemOnly = searchParams.get('problem') === 'true'
   const category = searchParams.get('category') || ''
   const subcategory = searchParams.get('subcategory') || ''
   const search = (searchParams.get('q') || '').trim().slice(0, 100)
@@ -95,7 +94,7 @@ export async function GET(request: Request) {
       : query.eq('content_category', category)
   }
   if (subcategory) query = query.eq('content_subcategory', subcategory)
-  if (LAYOUT_STATUSES.includes(layoutStatus as LayoutStatus)) query = query.eq('layout_status', layoutStatus)
+  if (problemOnly) query = query.eq('layout_status', 'issue')
   if (search) query = query.ilike('keyword', `%${search}%`)
 
   query = query.order('volume', { ascending: false }).order('keyword', { ascending: true })
