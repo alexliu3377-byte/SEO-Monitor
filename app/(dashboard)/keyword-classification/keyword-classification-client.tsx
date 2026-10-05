@@ -36,21 +36,10 @@ type SummaryRow = {
   rising_count: number
 }
 
-type BatchRow = {
-  id: string
-  status: 'running' | 'completed' | 'failed'
-  requested_count: number
-  saved_count: number
-  model: string
-  error_message: string | null
-  started_at: string
-  completed_at: string | null
-}
-
 type Draft = { category: KeywordPrimaryCategory | ''; subcategory: string }
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: 'pending', label: '待 Codex 分类' },
+  { value: 'pending', label: '待分类' },
   { value: 'confirmed', label: '已分类' },
   { value: 'all', label: '全部状态' },
 ]
@@ -75,10 +64,9 @@ function formatDate(value: string | null) {
   return value.slice(0, 10).replaceAll('-', '/')
 }
 
-export function KeywordClassificationClient() {
+export function KeywordClassificationClient({ canDelete }: { canDelete: boolean }) {
   const [items, setItems] = useState<Row[]>([])
   const [summary, setSummary] = useState<SummaryRow[]>([])
-  const [batches, setBatches] = useState<BatchRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [status, setStatus] = useState('confirmed')
@@ -88,6 +76,7 @@ export function KeywordClassificationClient() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
+  const [deleting, setDeleting] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
@@ -107,7 +96,6 @@ export function KeywordClassificationClient() {
       const rows = (body.items ?? []) as Row[]
       setItems(rows)
       setSummary((body.summary ?? []) as SummaryRow[])
-      setBatches((body.batches ?? []) as BatchRow[])
       setTotal(Number(body.total) || 0)
       setDrafts(Object.fromEntries(rows.map(row => [row.keyword, {
         category: row.content_category ?? '',
@@ -136,15 +124,15 @@ export function KeywordClassificationClient() {
 
   const statusSummary = useMemo(() => {
     const counts: Record<KeywordClassificationStatus, number> = { pending: 0, processing: 0, confirmed: 0 }
-    let codex = 0
+    let automatic = 0
     let manual = 0
     for (const row of summary) counts[row.status] += Number(row.keyword_count) || 0
     for (const row of summary) {
       if (row.status !== 'confirmed') continue
       if (row.source === 'manual') manual += Number(row.keyword_count) || 0
-      else codex += Number(row.keyword_count) || 0
+      else automatic += Number(row.keyword_count) || 0
     }
-    return { ...counts, codex, manual }
+    return { ...counts, automatic, manual }
   }, [summary])
 
   const secondarySummary = useMemo(() => {
@@ -213,12 +201,35 @@ export function KeywordClassificationClient() {
     }
   }
 
+  async function removeKeyword(row: Row) {
+    if (!canDelete || deleting) return
+    if (!window.confirm(`确定删除“${row.keyword}”吗？删除后会加入排除名单，后续抓取也不会重新入库。`)) return
+    setDeleting(row.keyword)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch('/api/keyword-classification', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: row.keyword }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || '删除失败')
+      setNotice(`已删除“${row.keyword}”，并阻止它再次进入词库`)
+      await load()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除失败')
+    } finally {
+      setDeleting('')
+    }
+  }
+
   return (
     <div className="p-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-950">词库分类</h1>
-          <p className="mt-1 text-sm text-slate-500">Codex 分批完成正式分类；发现不准确时，你可以直接修改。当前仅你的账号可见。</p>
+          <p className="mt-1 text-sm text-slate-500">按内容类型整理词库；发现分类不准确时可以直接修改。</p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
           处理顺序：高搜索量优先 · 每批完成即保存 · 可随时续跑
@@ -228,14 +239,10 @@ export function KeywordClassificationClient() {
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div>}
 
-      <section className="mb-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_2fr]">
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="text-xs text-slate-500">待 Codex 分类</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{formatNumber(statusSummary.pending)}</strong></div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="text-xs text-slate-500">Codex 已分类</span><strong className="mt-1 block text-xl tabular-nums text-blue-700">{formatNumber(statusSummary.codex)}</strong></div>
+      <section className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="text-xs text-slate-500">待分类</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{formatNumber(statusSummary.pending)}</strong></div>
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="text-xs text-slate-500">系统已分类</span><strong className="mt-1 block text-xl tabular-nums text-blue-700">{formatNumber(statusSummary.automatic)}</strong></div>
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"><span className="text-xs text-slate-500">已人工修改</span><strong className="mt-1 block text-xl tabular-nums text-emerald-700">{formatNumber(statusSummary.manual)}</strong></div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <span className="text-xs text-slate-500">最近处理批次</span>
-          {batches.length === 0 ? <p className="mt-2 text-sm text-slate-400">尚未运行 Codex 分类</p> : <div className="mt-1 flex items-center justify-between gap-3"><div><strong className="text-sm text-slate-800">{batches[0].status === 'completed' ? `已保存 ${formatNumber(batches[0].saved_count)} 个建议` : batches[0].status === 'running' ? '正在处理' : '处理失败'}</strong><p className="mt-0.5 text-[11px] text-slate-400">{batches[0].model} · {formatDate(batches[0].completed_at || batches[0].started_at)}</p></div><span className={`h-2.5 w-2.5 rounded-full ${batches[0].status === 'completed' ? 'bg-emerald-500' : batches[0].status === 'running' ? 'bg-amber-400' : 'bg-red-500'}`} /></div>}
-        </div>
       </section>
 
       <section aria-label="分类总览" className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
@@ -283,8 +290,8 @@ export function KeywordClassificationClient() {
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1100px] table-fixed" aria-label="关键词分类列表">
-            <colgroup><col className="w-64" /><col className="w-24" /><col className="w-36" /><col className="w-44" /><col /><col className="w-44" /><col className="w-24" /></colgroup>
-            <thead className="bg-slate-50"><tr><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">Codex 判断依据</th><th className="table-th">状态／日期</th><th className="table-th text-right">操作</th></tr></thead>
+            <colgroup><col className="w-64" /><col className="w-24" /><col className="w-36" /><col className="w-44" /><col /><col className="w-44" /><col className={canDelete ? 'w-40' : 'w-24'} /></colgroup>
+            <thead className="bg-slate-50"><tr><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">分类依据</th><th className="table-th">状态／日期</th><th className="table-th text-right">操作</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">正在读取分类资料…</td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
                 const draft = drafts[row.keyword] ?? { category: '', subcategory: '' }
@@ -294,9 +301,9 @@ export function KeywordClassificationClient() {
                   <td className="table-td align-middle text-right font-semibold tabular-nums text-slate-800">{formatNumber(row.volume)}</td>
                   <td className="table-td align-middle"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value}</option>)}</select></td>
                   <td className="table-td align-middle">{subOptions.length > 0 ? <select aria-label={`${row.keyword}二级分类`} value={draft.subcategory} onChange={event => updateDraft(row.keyword, { subcategory: event.target.value })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"><option value="">请选择</option>{subOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> : <span className="text-slate-300">—</span>}</td>
-                  <td className="table-td align-middle"><span className="block truncate text-xs text-slate-600" title={row.classification_reason ?? ''}>{row.classification_reason || (row.classification_status === 'pending' ? '等待 Codex 分批处理' : '—')}</span></td>
-                  <td className="table-td align-middle"><span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className={`text-xs font-medium ${row.classification_status === 'pending' ? 'text-amber-600' : row.classification_status === 'processing' ? 'text-violet-600' : row.classification_source === 'manual' ? 'text-emerald-600' : 'text-blue-600'}`}>{row.classification_status === 'pending' ? '待分类' : row.classification_status === 'processing' ? 'Codex 处理中' : row.classification_source === 'manual' ? '已修改' : 'Codex 分类'}</span><span className="text-[11px] text-slate-400">· {formatDate(row.reviewed_at || row.classified_at || row.classification_queued_at)}</span></span></td>
-                  <td className="table-td align-middle text-right"><button type="button" disabled={saving === row.keyword} onClick={() => void confirm(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存修改'}</button></td>
+                  <td className="table-td align-middle"><span className="block truncate text-xs text-slate-600" title={row.classification_reason ?? ''}>{row.classification_reason || (row.classification_status === 'pending' ? '等待自动分类' : '—')}</span></td>
+                  <td className="table-td align-middle"><span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className={`text-xs font-medium ${row.classification_status === 'pending' ? 'text-amber-600' : row.classification_status === 'processing' ? 'text-violet-600' : row.classification_source === 'manual' ? 'text-emerald-600' : 'text-blue-600'}`}>{row.classification_status === 'pending' ? '待分类' : row.classification_status === 'processing' ? '处理中' : row.classification_source === 'manual' ? '已修改' : '系统分类'}</span><span className="text-[11px] text-slate-400">· {formatDate(row.reviewed_at || row.classified_at || row.classification_queued_at)}</span></span></td>
+                  <td className="table-td align-middle text-right"><span className="inline-flex items-center justify-end gap-1.5"><button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void confirm(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-3 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存修改'}</button>{canDelete && <button type="button" disabled={Boolean(deleting)} onClick={() => void removeKeyword(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{deleting === row.keyword ? '删除中' : '删除'}</button>}</span></td>
                 </tr>
               })}
             </tbody>

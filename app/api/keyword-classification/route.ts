@@ -15,7 +15,11 @@ async function requireOwner() {
   const { data: { user } } = await auth.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   if (!isProjectOwner(user.id)) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-  return { service: createServiceClient() }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = createServiceClient() as any
+  const { data: profile } = await service.from('user_profiles').select('role, is_active').eq('id', user.id).maybeSingle()
+  if (!profile || profile.is_active === false) return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  return { service, userId: user.id, role: profile.role as 'normal' | 'admin' | 'super' }
 }
 
 export async function GET(request: Request) {
@@ -32,8 +36,7 @@ export async function GET(request: Request) {
 
   // The checked-in database type is intentionally partial; this migration is
   // newer than that historical snapshot.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = access.service as any
+  const service = access.service
   let query = service.from('keyword_volume')
     .select('keyword, volume, volume_change, net_volume_change, stat_date, content_category, content_subcategory, classification_status, classification_source, classification_reason, classification_queued_at, classified_at, reviewed_at', { count: 'exact' })
 
@@ -49,21 +52,17 @@ export async function GET(request: Request) {
     : query.order('volume', { ascending: false }).order('keyword', { ascending: true })
 
   const from = page * pageSize
-  const [{ data, count, error }, summaryResult, batchResult] = await Promise.all([
+  const [{ data, count, error }, summaryResult] = await Promise.all([
     query.range(from, from + pageSize - 1),
     service.rpc('keyword_classification_summary'),
-    service.from('keyword_classification_batches')
-      .select('id, status, requested_count, saved_count, model, error_message, started_at, completed_at')
-      .order('started_at', { ascending: false })
-      .limit(5),
   ])
 
-  if (error || summaryResult.error || batchResult.error) {
-    console.error('Keyword classification load failed:', error?.message || summaryResult.error?.message || batchResult.error?.message)
+  if (error || summaryResult.error) {
+    console.error('Keyword classification load failed:', error?.message || summaryResult.error?.message)
     return NextResponse.json({ error: '分类资料尚未建立或读取失败' }, { status: 500 })
   }
 
-  return NextResponse.json({ items: data ?? [], total: count ?? 0, summary: summaryResult.data ?? [], batches: batchResult.data ?? [] })
+  return NextResponse.json({ items: data ?? [], total: count ?? 0, summary: summaryResult.data ?? [] })
 }
 
 export async function PATCH(request: Request) {
@@ -87,8 +86,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: category === '游戏' || category === '应用' ? '请选择有效的二级分类' : '该一级分类不应设置二级分类' }, { status: 400 })
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = access.service as any
+  const service = access.service
   const { error } = await service.from('keyword_volume').update({
     content_category: category,
     content_subcategory: subcategory || null,
@@ -99,5 +97,25 @@ export async function PATCH(request: Request) {
     reviewed_at: new Date().toISOString(),
   }).eq('keyword', keyword)
   if (error) return NextResponse.json({ error: '保存分类失败' }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}
+
+export async function DELETE(request: Request) {
+  const access = await requireOwner()
+  if ('error' in access) return access.error
+  if (access.role !== 'super') return NextResponse.json({ error: '仅超管可以删除词库资料' }, { status: 403 })
+
+  const body = await request.json().catch(() => null) as { keyword?: unknown } | null
+  const keyword = typeof body?.keyword === 'string' ? body.keyword.trim() : ''
+  if (!keyword) return NextResponse.json({ error: '关键词无效' }, { status: 400 })
+
+  const { error } = await access.service.rpc('exclude_keyword_volume', {
+    p_keyword: keyword,
+    p_user_id: access.userId,
+  })
+  if (error) {
+    console.error('Keyword exclusion failed:', error.message)
+    return NextResponse.json({ error: '删除词库资料失败' }, { status: 500 })
+  }
   return NextResponse.json({ ok: true })
 }
