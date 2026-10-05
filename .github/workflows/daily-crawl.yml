@@ -23,6 +23,8 @@ on:
         required: false
       NEXT_PUBLIC_VERCEL_URL:
         required: false
+      GEMINI_API_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       step:
@@ -383,6 +385,33 @@ jobs:
             "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
           echo "$RESPONSE"
           RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+  # Keyword classification is deliberately last. Crawls, retries, tracking,
+  # environment/hot-radar refreshes and every group cache must finish first.
+  classify_new_keywords:
+    needs: [setup, post_index_refresh, post_tracking_refresh]
+    if: >-
+      always() &&
+      needs.setup.outputs.step == 'index-pages' &&
+      needs.setup.outputs.site == '' &&
+      needs.post_index_refresh.result == 'success' &&
+      needs.post_tracking_refresh.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Classify pending keywords with Gemini
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run keywords:classify -- --provider=gemini --batch-size=100 --batches=20
 
   crawl:
     needs: setup

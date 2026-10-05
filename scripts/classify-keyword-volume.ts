@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadEnvConfig } from '@next/env'
 import { createClient } from '@supabase/supabase-js'
+import { BULK_MODELS, callGeminiJSON } from '../lib/gemini'
 import {
   APP_SUBCATEGORIES,
   GAME_SUBCATEGORIES,
@@ -19,6 +20,7 @@ loadEnvConfig(process.cwd())
 const getArg = (name: string) => process.argv.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1)
 const batchSize = Math.min(1000, Math.max(20, Number(getArg('--batch-size')) || 500))
 const batchCount = Math.min(1000, Math.max(1, Number(getArg('--batches')) || 1))
+const provider = getArg('--provider') === 'gemini' ? 'gemini' : 'codex'
 const selectedModel = getArg('--model') || ''
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
@@ -76,7 +78,7 @@ ${JSON.stringify(rows.map((row, index) => [index, row.keyword]))}`
 }
 
 async function runBatch(index: number) {
-  const modelLabel = selectedModel || 'Codex 默认模型'
+  const modelLabel = selectedModel || (provider === 'gemini' ? 'Gemini 自动分类' : 'Codex 默认模型')
   const { data: batch, error: batchError } = await service.from('keyword_classification_batches')
     .insert({ requested_count: 0, model: modelLabel }).select('id').single()
   if (batchError || !batch) throw new Error(`建立批次记录失败：${batchError?.message ?? '未知错误'}`)
@@ -91,22 +93,32 @@ async function runBatch(index: number) {
     }
     await service.from('keyword_classification_batches').update({ requested_count: rows.length }).eq('id', batch.id)
 
-    const args = ['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', schemaPath, '--output-last-message', outputPath]
-    if (selectedModel) args.push('--model', selectedModel)
-    args.push('-')
-    console.log(`[批次 ${index + 1}/${batchCount}] 交给 Codex 分类 ${rows.length} 个词…`)
-    const child = spawnSync('codex', args, {
-      cwd: process.cwd(),
-      input: promptFor(rows),
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-    })
-    if (child.error) throw child.error
-    if (child.status !== 0) throw new Error(`Codex 退出码 ${child.status}：${String(child.stderr || child.stdout || '').slice(-1500)}`)
-
-    const parsed = JSON.parse(readFileSync(outputPath, 'utf8')) as { items?: ResultItem[] }
+    console.log(`[批次 ${index + 1}/${batchCount}] 交给 ${provider === 'gemini' ? 'Gemini' : 'Codex'} 分类 ${rows.length} 个词…`)
+    let parsed: { items?: ResultItem[] }
+    if (provider === 'gemini') {
+      const { result, error } = await callGeminiJSON<{ items?: ResultItem[] }>(promptFor(rows), {
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+        models: selectedModel ? [selectedModel] : BULK_MODELS,
+      })
+      if (!result) throw new Error(error || 'Gemini 没有返回分类结果')
+      parsed = result
+    } else {
+      const args = ['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', schemaPath, '--output-last-message', outputPath]
+      if (selectedModel) args.push('--model', selectedModel)
+      args.push('-')
+      const child = spawnSync('codex', args, {
+        cwd: process.cwd(),
+        input: promptFor(rows),
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+      })
+      if (child.error) throw child.error
+      if (child.status !== 0) throw new Error(`Codex 退出码 ${child.status}：${String(child.stderr || child.stdout || '').slice(-1500)}`)
+      parsed = JSON.parse(readFileSync(outputPath, 'utf8')) as { items?: ResultItem[] }
+    }
     const seen = new Set<number>()
     const valid = (parsed.items ?? []).flatMap(item => {
       const { i: rowIndex, c: categoryIndex, s: subcategoryIndex } = item
@@ -130,11 +142,12 @@ async function runBatch(index: number) {
         confidence: null,
         reason: '',
         model: modelLabel,
+        source: provider === 'gemini' ? 'ai' : 'codex',
       }]
     })
-    if (valid.length === 0) throw new Error(`Codex 没有返回有效结果；本批没有写入`)
+    if (valid.length === 0) throw new Error(`AI 没有返回有效结果；本批没有写入`)
 
-    const { data: saved, error: saveError } = await service.rpc('apply_keyword_codex_classifications', { p_items: valid })
+    const { data: saved, error: saveError } = await service.rpc('apply_keyword_ai_classifications', { p_items: valid })
     if (saveError) throw new Error(`写入分类失败：${saveError.message}`)
     await service.rpc('release_keyword_classification_batch', { p_batch_id: batch.id })
     const omitted = rows.length - valid.length
