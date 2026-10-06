@@ -2692,7 +2692,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
           || (b.longTailCount ?? 0) - (a.longTailCount ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
-      }) : datedWordLibWords
+      }) : wordLibWords
       const filtered_wl = wordLibSearch ? sorted_wl.filter(w => w.keyword.includes(wordLibSearch)) : sorted_wl
       if (wordLibWords.length === 0) return <div className="text-center py-10 text-gray-400 text-sm">暂无词库数据</div>
       const slice = filtered_wl.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)

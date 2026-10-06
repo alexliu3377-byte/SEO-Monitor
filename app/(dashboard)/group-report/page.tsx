@@ -55,7 +55,7 @@ interface OutcomeRow {
   source?: string | null
   rank_matches?: { keyword: string; rank_position: number | null; prev_rank_position: number | null; volume: number; isNewRank?: boolean }[]
   device_rankings?: {
-    platform: 'mobile' | 'pc'; status: '上涨' | '下跌' | '同日升跌'
+    platform: 'mobile' | 'pc'; status: '上涨' | '下跌' | '同日升跌' | '升跌同日'
     keyword: string; rank_position: number | null; prev_rank_position: number | null
     rank_change: number | null; volume: number; confirmed_date: string
     evidence_types: Array<'rankup' | 'rankdown'>; is_new_rank: boolean; score: number
@@ -97,6 +97,12 @@ function fmtVol(v: number) {
   return v.toLocaleString()
 }
 function fmtDate(d: string) { return d ? d.slice(0, 10) : '' }
+
+function isMixedRankStatus(device: NonNullable<OutcomeRow['device_rankings']>[number]) {
+  return device.status === '同日升跌'
+    || device.status === '升跌同日'
+    || (device.evidence_types.includes('rankup') && device.evidence_types.includes('rankdown'))
+}
 
 async function readResponse<T>(response: Response, fallback: string): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: string }
@@ -763,7 +769,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                                               </span>
                                               <span className="text-sm text-gray-700">{device.rank_position != null ? `第${device.rank_position}名` : '—'}</span>
                                               <span className={`text-[10px] ${device.status === '上涨' ? 'text-green-600' : device.status === '下跌' ? 'text-red-400' : 'text-amber-600'}`}>
-                                                {device.status === '同日升跌' ? '升跌' : device.rank_change != null && device.rank_change !== 0
+                                                {isMixedRankStatus(device) ? '升跌' : device.rank_change != null && device.rank_change !== 0
                                                   ? `${device.rank_change > 0 ? '↑' : '↓'}${Math.abs(device.rank_change)}`
                                                   : device.status}
                                               </span>
@@ -1249,7 +1255,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                         <div className="flex items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${device.platform === 'mobile' ? 'bg-violet-50 text-violet-600' : 'bg-sky-50 text-sky-600'}`}>{device.platform === 'mobile' ? 'M端' : 'PC端'}</span><span className="text-sm font-medium text-gray-800">{device.rank_position != null ? `第 ${device.rank_position} 名` : '未确认排名'}</span></div>
                         <span className="font-bold tabular-nums text-green-600">{device.score.toFixed(1)} 分</span>
                       </div>
-                      <div className="mt-2 text-xs text-gray-500">{device.status === '同日升跌' ? '升跌' : device.status}</div>
+                      <div className="mt-2 text-xs text-gray-500">{isMixedRankStatus(device) ? '升跌' : device.status}</div>
                       <p className="mt-1 truncate text-xs text-gray-400" title={device.keyword}>{device.keyword}{device.rank_change != null && device.rank_change !== 0 ? ` · ${device.rank_change > 0 ? '上涨' : '下跌'} ${Math.abs(device.rank_change)} 位` : ''}</p>
                     </div>
                   ))}
