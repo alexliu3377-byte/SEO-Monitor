@@ -874,6 +874,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
   // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
   const effectiveRadarDate = radarDate && radarAvailableDates.includes(radarDate) ? radarDate : ''
+  const showRadarDateFilter = (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
+  const showRadarTypeFilter = (['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
 
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
 
@@ -2683,8 +2685,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'wordLib') {
       if (wordLibLoading) return <Spinner />
-      const datedWordLibWords = filterByRadarDate(wordLibWords, effectiveRadarDate)
-      const sorted_wl = sortCol && sortDir ? [...datedWordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      const sorted_wl = sortCol && sortDir ? [...wordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.longTailCount??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
         const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.longTailCount??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
         if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
@@ -3324,25 +3325,27 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' || tab === 'wordLib' ? yesterday : ''); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' ? yesterday : ''); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}
                     </button>
                   ))}
                 </div>
-                {radarAvailableDates.length > 0 && (
+                {(showRadarDateFilter || rightTab === 'wordLib') && (
                   <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-gray-50/60 px-4 py-2.5">
-                    <label className="flex items-center gap-1.5 text-xs text-gray-400">
-                      资料日期
-                      <select aria-label="筛选资料日期" value={effectiveRadarDate}
-                        onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
-                        className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-                        <option value="">近30天全部</option>
-                        {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
-                      </select>
-                    </label>
-                    {(['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab) && (
+                    {showRadarDateFilter && (
+                      <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                        资料日期
+                        <select aria-label="筛选资料日期" value={effectiveRadarDate}
+                          onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
+                          className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
+                          <option value="">近30天全部</option>
+                          {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    {showRadarTypeFilter && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-400">
                         类型
                         <div className="inline-flex overflow-hidden rounded border border-gray-200 bg-white">

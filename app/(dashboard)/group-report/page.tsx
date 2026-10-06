@@ -763,7 +763,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                                               </span>
                                               <span className="text-sm text-gray-700">{device.rank_position != null ? `第${device.rank_position}名` : '—'}</span>
                                               <span className={`text-[10px] ${device.status === '上涨' ? 'text-green-600' : device.status === '下跌' ? 'text-red-400' : 'text-amber-600'}`}>
-                                                {device.status === '同日升跌' ? '升跌同日' : device.rank_change != null && device.rank_change !== 0
+                                                {device.status === '同日升跌' ? '升跌' : device.rank_change != null && device.rank_change !== 0
                                                   ? `${device.rank_change > 0 ? '↑' : '↓'}${Math.abs(device.rank_change)}`
                                                   : device.status}
                                               </span>
@@ -772,9 +772,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                                         </div>
                                         <div className="flex flex-col gap-1.5 min-w-0">
                                           {devices.map(device => (
-                                            <div key={device.platform} className="truncate text-sm text-gray-700" title={device.keyword}>
-                                              {device.keyword}<span className="ml-1 text-[10px] text-gray-400">{device.confirmed_date.slice(5).replace('-', '/')}确认</span>
-                                            </div>
+                                            <div key={device.platform} className="truncate text-sm text-gray-700" title={device.keyword}>{device.keyword}</div>
                                           ))}
                                         </div>
                                         <div className="flex flex-col gap-1.5">
@@ -1251,14 +1249,14 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                         <div className="flex items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${device.platform === 'mobile' ? 'bg-violet-50 text-violet-600' : 'bg-sky-50 text-sky-600'}`}>{device.platform === 'mobile' ? 'M端' : 'PC端'}</span><span className="text-sm font-medium text-gray-800">{device.rank_position != null ? `第 ${device.rank_position} 名` : '未确认排名'}</span></div>
                         <span className="font-bold tabular-nums text-green-600">{device.score.toFixed(1)} 分</span>
                       </div>
-                      <div className="mt-2 flex items-center justify-between text-xs text-gray-500"><span>{device.status === '同日升跌' ? '同日有升有跌，本次按上涨证据计分' : device.status}</span><span>{device.confirmed_date.slice(5).replace('-', '/')} 确认</span></div>
+                      <div className="mt-2 text-xs text-gray-500">{device.status === '同日升跌' ? '升跌' : device.status}</div>
                       <p className="mt-1 truncate text-xs text-gray-400" title={device.keyword}>{device.keyword}{device.rank_change != null && device.rank_change !== 0 ? ` · ${device.rank_change > 0 ? '上涨' : '下跌'} ${Math.abs(device.rank_change)} 位` : ''}</p>
                     </div>
                   ))}
                   {(row.page_index_score ?? 0) > 0 && <div className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2 text-sm"><span className="text-blue-700">页面收录分（只计算一次）</span><span className="font-bold tabular-nums text-blue-700">+{row.page_index_score?.toFixed(1)}</span></div>}
                   <div className="flex items-center justify-between border-t border-gray-100 pt-3"><span className="font-semibold text-gray-700">M + PC 合计</span><span className="text-lg font-bold tabular-nums text-green-600">{row.score.toFixed(1)} 分</span></div>
-                  <p className="rounded-lg bg-gray-50 px-3 py-2 text-[11px] leading-5 text-gray-500">某端当天未进入爱站前 15 页采集范围时，继续保留该端最后一次确认资料，并显示确认日期；不会因为“未抓到”自动判定脱排或清零。同日同时出现涨跌时保留两种证据，计分优先采用上涨记录。</p>
-                  {row.env_excluded && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-600">确认日期环境异常，本条不计入汇总得分。</p>}
+                  <p className="rounded-lg bg-gray-50 px-3 py-2 text-[11px] leading-5 text-gray-500">某端未进入爱站前 15 页采集范围时，继续保留该端最近一次确认资料；不会因为“未抓到”自动判定脱排或清零。同时出现上涨、下跌时保留两种证据，计分采用上涨记录。</p>
+                  {row.env_excluded && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-600">抓取环境异常，本条不计入汇总得分。</p>}
                 </div>
               </div>
             </div>
