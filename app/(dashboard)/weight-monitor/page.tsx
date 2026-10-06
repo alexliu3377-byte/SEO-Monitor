@@ -19,6 +19,26 @@ interface HistoryRow {
   mobile_ip_max: number
 }
 
+interface AizhanHistorySummary {
+  site_id: string
+  pc_current_weight: number
+  pc_current_keywords: number
+  pc_max_weight: number
+  pc_max_keywords: number
+  pc_max_date: string | null
+  pc_min_weight: number
+  pc_min_keywords: number
+  pc_min_date: string | null
+  mobile_current_weight: number
+  mobile_current_keywords: number
+  mobile_max_weight: number
+  mobile_max_keywords: number
+  mobile_max_date: string | null
+  mobile_min_weight: number
+  mobile_min_keywords: number
+  mobile_min_date: string | null
+}
+
 interface WeightRow {
   site_id: string
   domain: string
@@ -37,10 +57,33 @@ interface WeightRow {
   mobileIpMax: number
   mobileIpAvgChange: number
   trend: { date: string; pcAvg: number; mobileAvg: number }[]
+  historySummary: AizhanHistorySummary | null
 }
 
 function fmt(n: number) {
   return n.toLocaleString()
+}
+
+function currentMYMonth() {
+  return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
+}
+
+function shiftMonth(month: string, offset: number) {
+  const [year, value] = month.split('-').map(Number)
+  const date = new Date(Date.UTC(year, value - 1 + offset, 1))
+  return date.toISOString().slice(0, 7)
+}
+
+function monthBounds(month: string) {
+  return { start: `${month}-01`, next: `${shiftMonth(month, 1)}-01` }
+}
+
+function shortDate(date: string) {
+  return date ? date.slice(5).replace('-', '/') : '—'
+}
+
+function fullDate(date: string | null) {
+  return date ? date.replaceAll('-', '/') : '—'
 }
 
 function WeightCell({ value, change }: { value: number; change: number }) {
@@ -70,6 +113,10 @@ function IpChangeCell({ change }: { change: number }) {
   )
 }
 
+function ChangeText({ value }: { value: number }) {
+  return <strong className={value > 0 ? 'text-green-600' : value < 0 ? 'text-red-500' : 'text-gray-500'}>{value > 0 ? '+' : ''}{fmt(value)}</strong>
+}
+
 function Sparkline({ data }: { data: { date: string; pcAvg: number; mobileAvg: number }[] }) {
   if (data.length < 2) return <span className="text-gray-300 text-sm">暂无趋势</span>
   return (
@@ -88,6 +135,10 @@ export default function WeightMonitorPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<WeightRow | null>(null)
+  const [detailMonth, setDetailMonth] = useState(currentMYMonth())
+  const [detailHistory, setDetailHistory] = useState<HistoryRow[]>([])
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
   const [page, setPage] = useState(0)
   const [filterSite, setFilterSite] = useState('')
   const [filterFocus, setFilterFocus] = useState('')
@@ -104,6 +155,31 @@ export default function WeightMonitorPage() {
 
   useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!selected) return
+    let active = true
+    const { start, next } = monthBounds(detailMonth)
+    setDetailLoading(true)
+    setDetailError('')
+    getBrowserClient().from('weight_history')
+      .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+      .eq('site_id', selected.site_id)
+      .gte('record_date', start)
+      .lt('record_date', next)
+      .order('record_date', { ascending: true })
+      .then(({ data, error: queryError }) => {
+        if (!active) return
+        if (queryError) {
+          setDetailHistory([])
+          setDetailError('读取该月历史失败，请重试')
+        } else {
+          setDetailHistory((data || []) as HistoryRow[])
+        }
+        setDetailLoading(false)
+      })
+    return () => { active = false }
+  }, [detailMonth, selected])
+
   async function loadData() {
     setLoading(true)
     setError(null)
@@ -111,12 +187,13 @@ export default function WeightMonitorPage() {
       const supabase = getBrowserClient()
       const d30ago = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-      const [sitesApiRes, { data: historyRaw }] = await Promise.all([
+      const [sitesApiRes, { data: historyRaw }, summariesApiRes] = await Promise.all([
         fetch('/api/sites').then(r => r.json() as Promise<{ sites: SiteRow[] }>),
         supabase.from('weight_history')
           .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
           .gte('record_date', d30ago)
           .order('record_date', { ascending: true }),
+        fetch('/api/sites/history-summary').then(r => r.ok ? r.json() as Promise<{ summaries: AizhanHistorySummary[] }> : { summaries: [] as AizhanHistorySummary[] }),
       ])
 
       const allSites = (sitesApiRes.sites || []) as SiteRow[]
@@ -124,6 +201,7 @@ export default function WeightMonitorPage() {
         ? allSites.filter(s => accessibleSiteIds.includes(s.id))
         : allSites
       const history = (historyRaw || []) as HistoryRow[]
+      const summaryMap = new Map((summariesApiRes.summaries || []).map(summary => [summary.site_id, summary]))
 
       const result: WeightRow[] = sites.map((site) => {
         // history is ascending by date
@@ -160,6 +238,7 @@ export default function WeightMonitorPage() {
             pcAvg: Math.round((h.pc_ip + h.pc_ip_max) / 2),
             mobileAvg: Math.round((h.mobile_ip + h.mobile_ip_max) / 2),
           })),
+          historySummary: summaryMap.get(site.id) ?? null,
         }
       })
 
@@ -209,6 +288,32 @@ export default function WeightMonitorPage() {
     )
   }
 
+  const detailTrend = detailHistory.map(row => ({
+    date: row.record_date,
+    pcAvg: Math.round((row.pc_ip + row.pc_ip_max) / 2),
+    mobileAvg: Math.round((row.mobile_ip + row.mobile_ip_max) / 2),
+  }))
+  const validPc = detailTrend.filter(row => row.pcAvg > 0)
+  const validMobile = detailTrend.filter(row => row.mobileAvg > 0)
+  const pcHighest = validPc.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.pcAvg > best.pcAvg ? row : best, null)
+  const pcLowest = validPc.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.pcAvg < best.pcAvg ? row : best, null)
+  const mobileHighest = validMobile.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.mobileAvg > best.mobileAvg ? row : best, null)
+  const mobileLowest = validMobile.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.mobileAvg < best.mobileAvg ? row : best, null)
+  const firstDetail = detailTrend[0]
+  const latestDetail = detailTrend[detailTrend.length - 1]
+  const historical = selected?.historySummary
+  const detailCards = historical ? [
+    { label: 'PC历史最高', value: `权重 ${historical.pc_max_weight}`, detail: `${fmt(historical.pc_max_keywords)}词 · ${fullDate(historical.pc_max_date)}`, color: 'text-blue-600' },
+    { label: 'PC历史最低', value: `权重 ${historical.pc_min_weight}`, detail: `${fmt(historical.pc_min_keywords)}词 · ${fullDate(historical.pc_min_date)}`, color: 'text-blue-600' },
+    { label: '移动历史最高', value: `权重 ${historical.mobile_max_weight}`, detail: `${fmt(historical.mobile_max_keywords)}词 · ${fullDate(historical.mobile_max_date)}`, color: 'text-orange-500' },
+    { label: '移动历史最低', value: `权重 ${historical.mobile_min_weight}`, detail: `${fmt(historical.mobile_min_keywords)}词 · ${fullDate(historical.mobile_min_date)}`, color: 'text-orange-500' },
+  ] : [
+    { label: 'PC月内最高均值', value: pcHighest ? fmt(pcHighest.pcAvg) : '—', detail: pcHighest ? shortDate(pcHighest.date) : '', color: 'text-blue-600' },
+    { label: 'PC月内最低均值', value: pcLowest ? fmt(pcLowest.pcAvg) : '—', detail: pcLowest ? shortDate(pcLowest.date) : '', color: 'text-blue-600' },
+    { label: '移动月内最高均值', value: mobileHighest ? fmt(mobileHighest.mobileAvg) : '—', detail: mobileHighest ? shortDate(mobileHighest.date) : '', color: 'text-orange-500' },
+    { label: '移动月内最低均值', value: mobileLowest ? fmt(mobileLowest.mobileAvg) : '—', detail: mobileLowest ? shortDate(mobileLowest.date) : '', color: 'text-orange-500' },
+  ]
+
   return (
     <div className="p-6">
       <div className="mb-5">
@@ -219,39 +324,35 @@ export default function WeightMonitorPage() {
       {/* Detail modal */}
       {selected && (
         <div role="dialog" aria-modal="true" aria-label="权重详情" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">{selected.domain} · 来路IP趋势</h2>
-                <p className="text-sm text-gray-400">近30天PC/移动来路IP均值变化</p>
+                <p className="text-sm text-gray-400">按月查看PC／移动来路IP均值变化</p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-            </div>
-            <div className="flex gap-8 mb-4">
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">PC当前均值</p>
-                <p className="text-2xl font-bold text-blue-600">{fmt(selected.pcIpAvgChange !== 0 || selected.pcIpMin > 0 ? Math.round((selected.pcIpMin + selected.pcIpMax) / 2) : 0)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">移动当前均值</p>
-                <p className="text-2xl font-bold text-orange-500">{fmt(Math.round((selected.mobileIpMin + selected.mobileIpMax) / 2))}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">PC均值变化</p>
-                <p className={`text-xl font-bold ${selected.pcIpAvgChange > 0 ? 'text-green-600' : selected.pcIpAvgChange < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                  {selected.pcIpAvgChange === 0 ? '-' : (selected.pcIpAvgChange > 0 ? '+' : '') + fmt(selected.pcIpAvgChange)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">移动均值变化</p>
-                <p className={`text-xl font-bold ${selected.mobileIpAvgChange > 0 ? 'text-green-600' : selected.mobileIpAvgChange < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                  {selected.mobileIpAvgChange === 0 ? '-' : (selected.mobileIpAvgChange > 0 ? '+' : '') + fmt(selected.mobileIpAvgChange)}
-                </p>
+              <div className="flex items-center gap-2">
+                <button aria-label="上一个月" onClick={() => setDetailMonth(month => shiftMonth(month, -1))} className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:bg-gray-50">上一月</button>
+                <input aria-label="选择月份" type="month" value={detailMonth} max={currentMYMonth()} onChange={event => setDetailMonth(event.target.value)} className="h-9 rounded-lg border border-gray-200 px-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none" />
+                <button aria-label="下一个月" disabled={detailMonth >= currentMYMonth()} onClick={() => setDetailMonth(month => shiftMonth(month, 1))} className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">下一月</button>
+                <button aria-label="关闭" onClick={() => setSelected(null)} className="ml-1 h-9 w-9 rounded-lg text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-600">×</button>
               </div>
             </div>
-            {selected.trend.length >= 2 ? (
+            <div className="grid grid-cols-2 gap-2 mb-4 sm:grid-cols-4">
+              {detailCards.map(card => (
+                <div key={card.label} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+                  <p className="text-xs text-gray-500">{card.label}</p>
+                  <strong className={`mt-1 block text-lg tabular-nums ${card.color}`}>{card.value}</strong>
+                  <span className="mt-0.5 block whitespace-nowrap text-xs text-gray-400">{card.detail}</span>
+                </div>
+              ))}
+            </div>
+            {detailLoading ? (
+              <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">读取该月资料中…</div>
+            ) : detailError ? (
+              <div role="alert" className="flex h-[220px] items-center justify-center text-sm text-red-500">{detailError}</div>
+            ) : detailTrend.length >= 2 ? (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={selected.trend}>
+                <LineChart data={detailTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
                   <YAxis tick={{ fontSize: 11 }} width={70} tickFormatter={(v: number) => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : v.toLocaleString()} />
@@ -261,11 +362,17 @@ export default function WeightMonitorPage() {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-40 text-gray-400 text-sm">数据积累中，每天跑 cron 后会有更多数据点</div>
+              <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">这个月份暂无足够的历史资料</div>
             )}
-            <div className="flex gap-4 mt-3 text-xs text-gray-400">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500 inline-block"></span>PC均值</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-orange-500 inline-block"></span>移动均值</span>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 pt-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-0.5 w-3 bg-blue-500" />PC均值</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-0.5 w-3 bg-orange-500" />移动均值</span>
+              {firstDetail && latestDetail && <>
+                <span>PC月变化：<ChangeText value={latestDetail.pcAvg - firstDetail.pcAvg} /></span>
+                <span>移动月变化：<ChangeText value={latestDetail.mobileAvg - firstDetail.mobileAvg} /></span>
+              </>}
+              {historical && <span>当前爱站词数：PC {fmt(historical.pc_current_keywords)}／移动 {fmt(historical.mobile_current_keywords)}</span>}
+              <span className="ml-auto text-gray-400">{detailHistory.length} 个记录日</span>
             </div>
           </div>
         </div>
@@ -358,7 +465,11 @@ export default function WeightMonitorPage() {
                       </td>
                       <td className="table-td text-sm text-center">
                         <button
-                          onClick={() => setSelected(row)}
+                          onClick={() => {
+                            setDetailHistory([])
+                            setDetailMonth(row.trend[row.trend.length - 1]?.date.slice(0, 7) || currentMYMonth())
+                            setSelected(row)
+                          }}
                           className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors"
                         >
                           查看

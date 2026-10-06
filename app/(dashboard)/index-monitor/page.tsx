@@ -43,12 +43,33 @@ function Sparkline({ data }: { data: { date: string; count: number }[] }) {
   )
 }
 
+function currentMYMonth() {
+  return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 7)
+}
+
+function shiftMonth(month: string, offset: number) {
+  const [year, value] = month.split('-').map(Number)
+  return new Date(Date.UTC(year, value - 1 + offset, 1)).toISOString().slice(0, 7)
+}
+
+function monthBounds(month: string) {
+  return { start: `${month}-01`, next: `${shiftMonth(month, 1)}-01` }
+}
+
+function shortDate(date: string) {
+  return date ? date.slice(5).replace('-', '/') : '—'
+}
+
 export default function IndexMonitorPage() {
   const { role, accessibleSiteIds } = useUser()
   const [rows, setRows] = useState<IndexRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedSite, setSelectedSite] = useState<IndexRow | null>(null)
+  const [detailMonth, setDetailMonth] = useState(currentMYMonth())
+  const [detailSnaps, setDetailSnaps] = useState<SnapRow[]>([])
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
   const [crawling, setCrawling] = useState<string | null>(null)
   const [crawlMsg, setCrawlMsg] = useState<{ domain: string; text: string; ok: boolean } | null>(null)
   const [page, setPage] = useState(0)
@@ -93,6 +114,31 @@ export default function IndexMonitorPage() {
   }
 
   useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!selectedSite) return
+    let active = true
+    const { start, next } = monthBounds(detailMonth)
+    setDetailLoading(true)
+    setDetailError('')
+    getBrowserClient().from('index_snapshots')
+      .select('site_id, snapshot_date, index_count')
+      .eq('site_id', selectedSite.site_id)
+      .gte('snapshot_date', start)
+      .lt('snapshot_date', next)
+      .order('snapshot_date', { ascending: true })
+      .then(({ data, error: queryError }) => {
+        if (!active) return
+        if (queryError) {
+          setDetailSnaps([])
+          setDetailError('读取该月历史失败，请重试')
+        } else {
+          setDetailSnaps((data || []) as SnapRow[])
+        }
+        setDetailLoading(false)
+      })
+    return () => { active = false }
+  }, [detailMonth, selectedSite])
 
   async function loadData() {
     setLoading(true)
@@ -184,6 +230,12 @@ export default function IndexMonitorPage() {
       </span>
     )
   }
+
+  const detailTrend = detailSnaps.map(row => ({ date: row.snapshot_date, count: row.index_count }))
+  const firstDetail = detailTrend[0]
+  const latestDetail = detailTrend[detailTrend.length - 1]
+  const highestDetail = detailTrend.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.count > best.count ? row : best, null)
+  const lowestDetail = detailTrend.reduce<(typeof detailTrend)[number] | null>((best, row) => !best || row.count < best.count ? row : best, null)
 
   return (
     <div className="p-6">
@@ -284,7 +336,11 @@ export default function IndexMonitorPage() {
                         <td className="table-td text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
-                              onClick={() => setSelectedSite(row)}
+                              onClick={() => {
+                                setDetailSnaps([])
+                                setDetailMonth(row.trend[row.trend.length - 1]?.date.slice(0, 7) || currentMYMonth())
+                                setSelectedSite(row)
+                              }}
                               className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors"
                             >
                               查看
@@ -314,37 +370,58 @@ export default function IndexMonitorPage() {
 
       {/* Detail Chart Modal */}
       {selectedSite && (
-        <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <div role="dialog" aria-modal="true" aria-label="收录历史" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedSite(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl" onClick={event => event.stopPropagation()}>
+            <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-4 border-b border-gray-200">
               <div>
                 <h3 className="font-semibold text-gray-900">{selectedSite.domain} · 收录趋势</h3>
-                <p className="text-xs text-gray-400 mt-0.5">近30天百度收录变化</p>
+                <p className="text-xs text-gray-400 mt-0.5">按月查看百度收录变化</p>
               </div>
-              <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-2">
+                <button aria-label="上一个月" onClick={() => setDetailMonth(month => shiftMonth(month, -1))} className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:bg-gray-50">上一月</button>
+                <input aria-label="选择月份" type="month" value={detailMonth} max={currentMYMonth()} onChange={event => setDetailMonth(event.target.value)} className="h-9 rounded-lg border border-gray-200 px-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none" />
+                <button aria-label="下一个月" disabled={detailMonth >= currentMYMonth()} onClick={() => setDetailMonth(month => shiftMonth(month, 1))} className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">下一月</button>
+                <button aria-label="关闭" onClick={() => setSelectedSite(null)} className="ml-1 h-9 w-9 rounded-lg text-xl leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-600">×</button>
+              </div>
             </div>
             <div className="p-6">
-              <div className="flex gap-6 mb-4 text-sm">
-                <div><span className="text-gray-400">当前收录</span><p className="text-xl font-bold text-gray-900">{selectedSite.latest.toLocaleString()}</p></div>
-                <div><span className="text-gray-400">周变化</span><p className={`text-xl font-bold ${selectedSite.weeklyChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>{selectedSite.weeklyChange !== 0 ? (selectedSite.weeklyChange >= 0 ? '+' : '') + selectedSite.weeklyChange.toLocaleString() : '-'}</p></div>
+              <div className="grid grid-cols-2 gap-2 mb-4 sm:grid-cols-4">
+                {[
+                  { label: '月初收录', value: firstDetail?.count, date: firstDetail?.date },
+                  { label: '最新收录', value: latestDetail?.count, date: latestDetail?.date },
+                  { label: '月内最高', value: highestDetail?.count, date: highestDetail?.date },
+                  { label: '月内最低', value: lowestDetail?.count, date: lowestDetail?.date },
+                ].map(card => (
+                  <div key={card.label} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+                    <p className="text-xs text-gray-500">{card.label}</p>
+                    <div className="mt-1 flex items-baseline justify-between gap-2">
+                      <strong className="text-lg tabular-nums text-gray-900">{card.value == null ? '—' : card.value.toLocaleString()}</strong>
+                      <span className="text-xs text-gray-400">{card.date ? shortDate(card.date) : ''}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {selectedSite.trend.length >= 2 ? (
+              {detailLoading ? (
+                <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">读取该月资料中…</div>
+              ) : detailError ? (
+                <div role="alert" className="flex h-[220px] items-center justify-center text-sm text-red-500">{detailError}</div>
+              ) : detailTrend.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={selectedSite.trend}>
+                  <LineChart data={detailTrend}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(value: string) => value.slice(5)} />
                     <YAxis tick={{ fontSize: 11 }} width={60} tickFormatter={(v) => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : v} />
-                    <Tooltip formatter={(v) => typeof v === 'number' ? v.toLocaleString() : v} />
-                    <Line type="monotone" dataKey="count" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
+                    <Tooltip labelFormatter={(value) => String(value)} formatter={(v) => typeof v === 'number' ? v.toLocaleString() : v} />
+                    <Line type="monotone" dataKey="count" name="百度收录" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="flex items-center justify-center h-40 text-gray-400 text-sm">数据积累中，每天跑 cron 后会有更多数据点</div>
+                <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">这个月份暂无足够的历史资料</div>
               )}
+              <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
+                {firstDetail && latestDetail && <span>月变化：<strong className={latestDetail.count > firstDetail.count ? 'text-green-600' : latestDetail.count < firstDetail.count ? 'text-red-500' : 'text-gray-500'}>{latestDetail.count > firstDetail.count ? '+' : ''}{(latestDetail.count - firstDetail.count).toLocaleString()}</strong></span>}
+                <span className="ml-auto text-gray-400">{detailSnaps.length} 个记录日</span>
+              </div>
             </div>
           </div>
         </div>
