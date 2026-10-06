@@ -79,7 +79,7 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
       ? selectedTable.find('tbody tr')
       : selectedTable.find('tr').slice(1)
     bodyRows.each((_, tr) => {
-      const cells = $(tr).children('td')
+      const cells = $(tr).find('td')
       if (cells.length === 0) return
       // Aizhan's directory cell uses an unusual rowspan layout and can be
       // emitted as its own row. The stable identifiers are the destination
