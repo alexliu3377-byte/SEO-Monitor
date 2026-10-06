@@ -8,6 +8,24 @@ type VolRow = { keyword: string; volume: number; latest_trend?: string; stat_dat
 
 type DatabaseResult<TData = unknown> = { data: TData | null; error: { message?: string } | null }
 
+function buildLookupBatches(rows: VolRow[]): VolRow[][] {
+  const batches: VolRow[][] = []
+  let current: VolRow[] = []
+  let encodedLength = 0
+  for (const row of rows) {
+    const rowLength = encodeURIComponent(row.keyword).length + 3
+    if (current.length > 0 && (current.length >= 50 || encodedLength + rowLength > 4000)) {
+      batches.push(current)
+      current = []
+      encodedLength = 0
+    }
+    current.push(row)
+    encodedLength += rowLength
+  }
+  if (current.length > 0) batches.push(current)
+  return batches
+}
+
 async function retryDatabaseRequest<TData = unknown>(
   label: string,
   operation: () => PromiseLike<DatabaseResult<TData>>,
@@ -28,9 +46,9 @@ export async function upsertKeywordVolumeWithChange(
 ) {
   if (rows.length === 0) return
 
-  // CJK keywords get %XX-percent-encoded in the .in() query string — 150/batch
-  // keeps requests under the ~16KB header limit (see the header-overflow fix
-  // applied elsewhere in this codebase for the same reason).
+  // CJK keywords get heavily percent-encoded in the .in() query string. Batch
+  // by encoded length as well as count so unusually long imported keywords do
+  // not overflow the HTTP request target/header limits.
   type ExistingVolume = {
     volume: number
     stat_date: string | null
@@ -38,8 +56,8 @@ export async function upsertKeywordVolumeWithChange(
     baseline_date: string | null
   }
   const oldVolMap = new Map<string, ExistingVolume>()
-  for (let i = 0; i < rows.length; i += 150) {
-    const chunk = rows.slice(i, i + 150).map(r => r.keyword)
+  for (const batch of buildLookupBatches(rows)) {
+    const chunk = batch.map(r => r.keyword)
     const { data, error } = await retryDatabaseRequest<(ExistingVolume & { keyword: string })[]>('keyword_volume baseline lookup', () => supabase
       .from('keyword_volume')
       .select('keyword, volume, stat_date, baseline_volume, baseline_date')
