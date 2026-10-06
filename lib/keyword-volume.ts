@@ -6,6 +6,21 @@
 // in migration 20260929_keyword_volume_net_growth; history is not invented.
 type VolRow = { keyword: string; volume: number; latest_trend?: string; stat_date: string }
 
+type DatabaseResult<TData = unknown> = { data: TData | null; error: { message?: string } | null }
+
+async function retryDatabaseRequest<TData = unknown>(
+  label: string,
+  operation: () => PromiseLike<DatabaseResult<TData>>,
+): Promise<DatabaseResult<TData>> {
+  let result = await operation()
+  for (let attempt = 2; result.error && attempt <= 4; attempt += 1) {
+    console.warn(`${label} failed (${result.error.message || 'unknown error'}), retry ${attempt}/4`)
+    await new Promise(resolve => setTimeout(resolve, 1500 * (attempt - 1)))
+    result = await operation()
+  }
+  return result
+}
+
 export async function upsertKeywordVolumeWithChange(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
@@ -25,9 +40,10 @@ export async function upsertKeywordVolumeWithChange(
   const oldVolMap = new Map<string, ExistingVolume>()
   for (let i = 0; i < rows.length; i += 150) {
     const chunk = rows.slice(i, i + 150).map(r => r.keyword)
-    const { data, error } = await supabase.from('keyword_volume')
+    const { data, error } = await retryDatabaseRequest<(ExistingVolume & { keyword: string })[]>('keyword_volume baseline lookup', () => supabase
+      .from('keyword_volume')
       .select('keyword, volume, stat_date, baseline_volume, baseline_date')
-      .in('keyword', chunk)
+      .in('keyword', chunk))
     if (error) throw new Error(`keyword_volume baseline lookup failed: ${error.message}`)
     for (const r of (data ?? []) as (ExistingVolume & { keyword: string })[]) oldVolMap.set(r.keyword, r)
   }
@@ -46,7 +62,9 @@ export async function upsertKeywordVolumeWithChange(
 
   for (let i = 0; i < withChange.length; i += 500) {
     const chunk = withChange.slice(i, i + 500)
-    const { error } = await supabase.from('keyword_volume').upsert(chunk, { onConflict: 'keyword' })
+    const { error } = await retryDatabaseRequest('keyword_volume upsert', () => supabase
+      .from('keyword_volume')
+      .upsert(chunk, { onConflict: 'keyword' }))
     if (error) throw new Error(`keyword_volume upsert failed: ${error.message}`)
   }
 }
