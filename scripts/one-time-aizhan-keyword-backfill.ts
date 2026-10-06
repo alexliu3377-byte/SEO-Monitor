@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { createAizhanHttpSession, fetchAizhanListingHtml } from '../lib/crawler-aizhan-http'
-import { normalizeAizhanKeywordUrl, parseAizhanKeywordPage } from '../lib/aizhan-keyword-backfill'
+import { buildAizhanKeywordPageUrl, normalizeAizhanKeywordUrl, parseAizhanKeywordPage } from '../lib/aizhan-keyword-backfill'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
 const MAX_PAGES = 50
@@ -23,16 +23,11 @@ async function main() {
 
   for (const startUrl of urls) {
     console.log(`\n开始补抓：${startUrl}`)
-    let currentUrl: string | null = startUrl
     let referer = 'https://baidurank.aizhan.com/'
-    const visited = new Set<string>()
 
-    for (let page = 1; page <= MAX_PAGES && currentUrl; page += 1) {
-      if (visited.has(currentUrl)) {
-        console.log(`  第 ${page} 页链接重复，停止`)
-        break
-      }
-      visited.add(currentUrl)
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const currentUrl = buildAizhanKeywordPageUrl(startUrl, page)
+      if (!currentUrl) throw new Error(`无法生成第 ${page} 页链接：${startUrl}`)
       const html = await fetchAizhanListingHtml(session, currentUrl, referer)
       if (!html) {
         console.log(`  第 ${page} 页为空或请求失败，停止`)
@@ -51,12 +46,7 @@ async function main() {
         console.log(`  第 ${page} 页已出现搜索量 0，后续页面无需抓取`)
         break
       }
-      if (!parsed.nextUrl) {
-        console.log(`  第 ${page} 页没有下一页，停止`)
-        break
-      }
       referer = currentUrl
-      currentUrl = parsed.nextUrl
       await delay(800 + Math.floor(Math.random() * 700))
     }
   }

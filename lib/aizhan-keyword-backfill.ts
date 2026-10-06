@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio'
+import type { AnyNode } from 'domhandler'
 
 export type AizhanKeywordRow = { keyword: string; volume: number }
 
@@ -32,6 +33,27 @@ function safeNextUrl(href: string, currentUrl: string): string | null {
   }
 }
 
+export function buildAizhanKeywordPageUrl(startUrl: string, page: number): string | null {
+  const normalized = normalizeAizhanKeywordUrl(startUrl)
+  if (!normalized || !Number.isInteger(page) || page < 1 || page > 50) return null
+  const url = new URL(normalized)
+  const parts = url.pathname.split('/').filter(Boolean)
+  const expIndex = parts.indexOf('exp')
+  if (expIndex < 2 || !/^\d+$/.test(parts[expIndex - 1])) return null
+  parts[expIndex - 1] = String(page)
+  url.pathname = `/${parts.join('/')}/`
+  return url.toString()
+}
+
+function tableHeaders($: cheerio.CheerioAPI, table: AnyNode): string[] {
+  const tableNode = $(table)
+  const explicitHeaders = tableNode.find('thead th')
+  const headers = explicitHeaders.length > 0
+    ? explicitHeaders
+    : tableNode.find('tr').first().find('th, td')
+  return headers.map((_, cell) => $(cell).text().replace(/\s+/g, '')).get()
+}
+
 export function parseAizhanKeywordPage(html: string, currentUrl: string): {
   rows: AizhanKeywordRow[]
   sawZeroVolume: boolean
@@ -39,7 +61,7 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
 } {
   const $ = cheerio.load(html)
   const selectedTableElement = $('table').toArray().find(table => {
-    const headers = $(table).find('thead th').map((__, th) => $(th).text().replace(/\s+/g, '')).get()
+    const headers = tableHeaders($, table)
     const nextKeywordIndex = headers.findIndex(text => text.includes('关键词'))
     const nextVolumeIndex = headers.findIndex(text => text.includes('搜索量') || text.includes('搜索指数'))
     return nextKeywordIndex >= 0 && nextVolumeIndex >= 0
@@ -49,11 +71,14 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
   let sawZeroVolume = false
   if (selectedTableElement) {
     const selectedTable = $(selectedTableElement)
-    const headers = selectedTable.find('thead th').map((_, th) => $(th).text().replace(/\s+/g, '')).get()
+    const headers = tableHeaders($, selectedTableElement)
     const keywordIndex = headers.findIndex(text => text.includes('关键词'))
     const volumeIndex = headers.findIndex(text => text.includes('搜索量') || text.includes('搜索指数'))
-    const headerCount = selectedTable.find('thead th').length
-    selectedTable.find('tbody tr').each((_, tr) => {
+    const headerCount = headers.length
+    const bodyRows = selectedTable.find('tbody tr').length > 0
+      ? selectedTable.find('tbody tr')
+      : selectedTable.find('tr').slice(1)
+    bodyRows.each((_, tr) => {
       const cells = $(tr).find('td')
       if (cells.length === 0) return
       // The directory cell is often row-spanned, so subsequent rows contain
