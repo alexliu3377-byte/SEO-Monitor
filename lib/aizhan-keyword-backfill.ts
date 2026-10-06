@@ -75,9 +75,10 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
     const keywordIndex = headers.findIndex(text => text.includes('关键词'))
     const volumeIndex = headers.findIndex(text => text.includes('搜索量') || text.includes('搜索指数'))
     const headerCount = headers.length
-    const bodyRows = selectedTable.find('tbody tr').length > 0
-      ? selectedTable.find('tbody tr')
-      : selectedTable.find('tr').slice(1)
+    // Do not scope this to tbody: Aizhan nests an export dialog (with its own
+    // tbody) inside the header while the actual listing rows sit directly in
+    // the outer table. The rank marker below filters the listing rows safely.
+    const bodyRows = selectedTable.find('tr')
     bodyRows.each((_, tr) => {
       const cells = $(tr).find('td')
       if (cells.length === 0) return
