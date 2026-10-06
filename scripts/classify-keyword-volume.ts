@@ -94,9 +94,9 @@ async function runBatch(index: number) {
     await service.from('keyword_classification_batches').update({ requested_count: rows.length }).eq('id', batch.id)
 
     console.log(`[批次 ${index + 1}/${batchCount}] 交给 ${provider === 'gemini' ? 'Gemini' : 'Codex'} 分类 ${rows.length} 个词…`)
-    let parsed: { items?: ResultItem[] }
+    let parsed: { items?: ResultItem[] } | ResultItem[]
     if (provider === 'gemini') {
-      const { result, error } = await callGeminiJSON<{ items?: ResultItem[] }>(promptFor(rows), {
+      const { result, error } = await callGeminiJSON<{ items?: ResultItem[] } | ResultItem[]>(promptFor(rows), {
         temperature: 0.1,
         maxOutputTokens: 8192,
         models: selectedModel ? [selectedModel] : BULK_MODELS,
@@ -120,7 +120,11 @@ async function runBatch(index: number) {
       parsed = JSON.parse(readFileSync(outputPath, 'utf8')) as { items?: ResultItem[] }
     }
     const seen = new Set<number>()
-    const valid = (parsed.items ?? []).flatMap(item => {
+    // Gemini commonly returns the requested item list as the JSON root array,
+    // while Codex follows the output schema and wraps it in { items }. Accept
+    // both shapes so a valid Gemini response is not silently treated as empty.
+    const resultItems = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
+    const valid = resultItems.flatMap(item => {
       const { i: rowIndex, c: categoryIndex, s: subcategoryIndex } = item
       if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= rows.length || seen.has(rowIndex)) return []
       let category = KEYWORD_PRIMARY_CATEGORIES[categoryIndex]
@@ -163,6 +167,7 @@ async function runBatch(index: number) {
 }
 
 async function main() {
+  let invalidBatchCount = 0
   try {
     for (let index = 0; index < batchCount; index += 1) {
       let hasMore = true
@@ -171,12 +176,16 @@ async function main() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (message.includes('没有返回有效结果')) {
+          invalidBatchCount += 1
           console.warn(`[批次 ${index + 1}/${batchCount}] ${message}，已释放并继续下一批重试。`)
           continue
         }
         throw error
       }
       if (!hasMore) { console.log('待分类队列已经清空。'); break }
+    }
+    if (invalidBatchCount > 0) {
+      throw new Error(`${invalidBatchCount} 个批次没有写入有效分类，任务标记失败，请检查模型输出。`)
     }
   } finally {
     rmSync(workingDir, { recursive: true, force: true })
