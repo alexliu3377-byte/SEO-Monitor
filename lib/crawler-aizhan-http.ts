@@ -175,6 +175,17 @@ async function fetchHtmlWithRetry(session: AizhanHttpSession, url: string, refer
   return ''
 }
 
+// Used by narrowly-scoped GitHub Actions jobs that crawl another public
+// baidurank listing shape while keeping the same cookie challenge handling,
+// retry policy and request headers as the daily rank crawlers.
+export async function fetchAizhanListingHtml(
+  session: AizhanHttpSession,
+  url: string,
+  referer?: string,
+): Promise<string> {
+  return fetchHtmlWithRetry(session, url, referer)
+}
+
 // Mirrors fetchRankChangesViaBrowser in lib/crawler-browser.ts.
 export async function fetchRankChangesViaHttp(
   session: AizhanHttpSession,

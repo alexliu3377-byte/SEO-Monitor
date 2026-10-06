@@ -4,7 +4,7 @@
 // baseline so 0 -> 100 -> 50 is still recognised as net +50 even though the
 // latest movement is -50. Existing rows receive their honest starting point
 // in migration 20260929_keyword_volume_net_growth; history is not invented.
-type VolRow = { keyword: string; volume: number; latest_trend: string; stat_date: string }
+type VolRow = { keyword: string; volume: number; latest_trend?: string; stat_date: string }
 
 export async function upsertKeywordVolumeWithChange(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

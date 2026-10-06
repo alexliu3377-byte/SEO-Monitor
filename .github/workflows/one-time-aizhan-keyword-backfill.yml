@@ -1,0 +1,29 @@
+name: 一次性爱站高搜索量词补抓
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: one-time-aizhan-keyword-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: 抓取并补充高搜索量关键词
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AIZHAN_KEYWORD_URLS: |
+            https://baidurank.aizhan.com/mobile/youxiniao.com/game/0/1/exp/-1/
+            https://baidurank.aizhan.com/mobile/youxiniao.com/soft/0/1/exp/-1/
+            https://baidurank.aizhan.com/mobile/youxiniao.com/zt/0/1/exp/-1/
+        run: npx tsx scripts/one-time-aizhan-keyword-backfill.ts
