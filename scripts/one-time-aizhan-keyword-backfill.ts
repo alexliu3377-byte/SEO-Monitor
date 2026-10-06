@@ -1,15 +1,23 @@
 import { createClient } from '@supabase/supabase-js'
+import { readFileSync } from 'node:fs'
 import { createAizhanHttpSession, fetchAizhanListingHtml } from '../lib/crawler-aizhan-http'
 import { buildAizhanKeywordPageUrl, normalizeAizhanKeywordUrl, parseAizhanKeywordPage } from '../lib/aizhan-keyword-backfill'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
 const MAX_PAGES = 50
-const rawUrls = process.env.AIZHAN_KEYWORD_URLS || ''
+const urlFile = process.env.AIZHAN_KEYWORD_URL_FILE?.trim()
+const rawUrls = process.env.AIZHAN_KEYWORD_URLS || (urlFile ? readFileSync(urlFile, 'utf8') : '')
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 if (!supabaseUrl || !serviceKey) throw new Error('缺少 Supabase GitHub Actions secrets')
 
-const urls = [...new Set(rawUrls.split(/\r?\n/).map(value => normalizeAizhanKeywordUrl(value)).filter((value): value is string => Boolean(value)))]
+const allUrls = [...new Set(rawUrls.split(/\r?\n/).map(value => normalizeAizhanKeywordUrl(value)).filter((value): value is string => Boolean(value)))]
+const batchTotal = Number.parseInt(process.env.AIZHAN_BATCH_TOTAL || '1', 10)
+const batchIndex = Number.parseInt(process.env.AIZHAN_BATCH_INDEX || '0', 10)
+if (!Number.isInteger(batchTotal) || batchTotal < 1 || !Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex >= batchTotal) {
+  throw new Error(`无效的分批参数：index=${batchIndex}, total=${batchTotal}`)
+}
+const urls = allUrls.filter((_, index) => index % batchTotal === batchIndex)
 if (urls.length === 0) throw new Error('没有有效的爱站移动端搜索量降序链接')
 
 const service = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -29,6 +37,7 @@ async function ensureDatabaseReachable() {
 async function main() {
   await ensureDatabaseReachable()
   console.log('Supabase 连通预检通过')
+  console.log(`本批 ${batchIndex + 1}/${batchTotal}：${urls.length} 条链接；完整清单 ${allUrls.length} 条`)
   const bootstrapDomain = new URL(urls[0]).pathname.split('/').filter(Boolean)[1]
   const session = await createAizhanHttpSession(bootstrapDomain)
   const collected = new Map<string, number>()

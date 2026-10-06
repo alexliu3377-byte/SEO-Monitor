@@ -11,6 +11,13 @@ jobs:
   backfill:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      # 参考 daily-crawl 的矩阵并发方式。现有排名任务约 14 个 job 同跑；
+      # 本次一次性补词控制在 12 个，兼顾速度并给其他定时任务留出并发名额。
+      max-parallel: 12
+      matrix:
+        batch_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -22,8 +29,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          AIZHAN_KEYWORD_URLS: |
-            https://baidurank.aizhan.com/mobile/youxiniao.com/game/0/1/exp/-1/
-            https://baidurank.aizhan.com/mobile/youxiniao.com/soft/0/1/exp/-1/
-            https://baidurank.aizhan.com/mobile/youxiniao.com/zt/0/1/exp/-1/
+          AIZHAN_KEYWORD_URL_FILE: scripts/data/one-time-aizhan-keyword-urls.txt
+          AIZHAN_BATCH_INDEX: ${{ matrix.batch_index }}
+          AIZHAN_BATCH_TOTAL: 12
         run: npx tsx scripts/one-time-aizhan-keyword-backfill.ts
