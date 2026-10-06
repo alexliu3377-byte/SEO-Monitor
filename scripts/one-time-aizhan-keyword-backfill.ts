@@ -16,7 +16,19 @@ const service = createClient(supabaseUrl, serviceKey, { auth: { persistSession: 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const malaysiaDate = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
 
+async function ensureDatabaseReachable() {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const { error } = await service.from('keyword_volume').select('keyword').limit(1)
+    if (!error) return
+    console.warn(`Supabase 连通预检失败 ${attempt}/4：${error.message}`)
+    if (attempt < 4) await delay(1500 * attempt)
+  }
+  throw new Error('Supabase 连通预检失败，未开始抓取，请换一个 GitHub runner 重试')
+}
+
 async function main() {
+  await ensureDatabaseReachable()
+  console.log('Supabase 连通预检通过')
   const bootstrapDomain = new URL(urls[0]).pathname.split('/').filter(Boolean)[1]
   const session = await createAizhanHttpSession(bootstrapDomain)
   const collected = new Map<string, number>()
