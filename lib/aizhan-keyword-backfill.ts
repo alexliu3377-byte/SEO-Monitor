@@ -81,13 +81,18 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
     bodyRows.each((_, tr) => {
       const cells = $(tr).find('td')
       if (cells.length === 0) return
+      // Aizhan's directory cell uses an unusual rowspan layout and can be
+      // emitted as its own row. The stable identifiers are the destination
+      // links: keyword -> Baidu search, volume -> ci.aizhan.com detail.
+      const linkedKeyword = $(tr).find('a[href*="baidu.com/s"]').first()
+      const linkedVolume = $(tr).find('a[href*="ci.aizhan.com"]').first()
       // The directory cell is often row-spanned, so subsequent rows contain
       // one fewer td than the header. Shift both indexes by that leading gap.
       const leadingGap = Math.max(0, headerCount - cells.length)
       const keywordCell = cells.eq(Math.max(0, keywordIndex - leadingGap))
       const volumeCell = cells.eq(Math.max(0, volumeIndex - leadingGap))
-      const keyword = (keywordCell.find('a').first().text() || keywordCell.text()).trim()
-      const volumeText = volumeCell.text().replace(/,/g, '').trim()
+      const keyword = (linkedKeyword.text() || keywordCell.find('a').first().text() || keywordCell.text()).trim()
+      const volumeText = (linkedVolume.text() || volumeCell.text()).replace(/[,\s]/g, '').trim()
       if (!keyword || !/^\d+$/.test(volumeText)) return
       const volume = Number.parseInt(volumeText, 10)
       if (volume <= 0) {
