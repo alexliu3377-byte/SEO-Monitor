@@ -15,6 +15,7 @@ import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 import { fetchAllRows } from '../lib/supabase-paginate'
 import { fetchLatestUrlRanks } from '../lib/tracking-rank-lookup'
 import { pruneCompetitorDailyHistory } from '../lib/competitor-daily-retention'
+import { persistAizhanDaily } from '../lib/aizhan-daily-persist'
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -539,7 +540,7 @@ async function runWeight(sites: SiteRecord[], today: string, activityId: string 
   console.log(`  WEIGHT   日期=${today}   ${ts()}`)
   console.log(`${'═'.repeat(60)}`)
 
-  let ok = 0, failed = 0
+  let ok = 0, failed = 0, pendingZero = 0, totalRows = 0
 
   for (let idx = 0; idx < sites.length; idx++) {
     const site = sites[idx]
@@ -552,23 +553,19 @@ async function runWeight(sites: SiteRecord[], today: string, activityId: string 
           console.log(`${prefix}   ↺ 重试 ${attempt}/2，等待 30s…`)
           await delay(30000)
         }
-        const { pc, mobile, indexCount, pcIpMin, pcIpMax, mobileIpMin, mobileIpMax } = await fetchAizhanData(site.domain)
-        await Promise.all([
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (supabase.from('weight_history') as any).upsert(
-            { site_id: site.id, record_date: today, pc_weight: pc, mobile_weight: mobile, pc_ip: pcIpMin, pc_ip_max: pcIpMax, mobile_ip: mobileIpMin, mobile_ip_max: mobileIpMax },
-            { onConflict: 'site_id,record_date' }
-          ),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (supabase.from('index_snapshots') as any).upsert(
-            { site_id: site.id, snapshot_date: today, index_count: indexCount },
-            { onConflict: 'site_id,snapshot_date' }
-          ),
-        ])
-        console.log(`${prefix} ✓  pc=${String(pc).padStart(3)}  mobile=${String(mobile).padStart(3)}  index=${indexCount}`)
-        if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: 'ok', rowsWritten: 2, detail: `pc=${pc} mobile=${mobile} index=${indexCount}` })
+        const data = await fetchAizhanData(site.domain)
+        const persisted = await persistAizhanDaily(supabase, site.id, today, data)
+        totalRows += persisted.rowsWritten
+        console.log(`${prefix} ${persisted.pendingZero ? '⚠' : '✓'}  pc=${String(data.pc).padStart(3)}  mobile=${String(data.mobile).padStart(3)}  index=${data.indexCount}${persisted.pendingZero ? '（0值待次日确认）' : ''}`)
+        if (activityId) await siteLog(supabase, activityId, {
+          domain: site.domain,
+          status: persisted.pendingZero ? 'suspect' : 'ok',
+          rowsWritten: persisted.rowsWritten,
+          detail: `pc=${data.pc} mobile=${data.mobile} index=${data.indexCount}${persisted.pendingZero ? '；0值待连续两天确认' : ''}`,
+        })
         fetched = true
-        ok++
+        if (persisted.pendingZero) pendingZero++
+        else ok++
         break
       } catch (e) {
         if (attempt === 2) {
@@ -582,11 +579,11 @@ async function runWeight(sites: SiteRecord[], today: string, activityId: string 
   }
 
   const durationMs = Date.now() - stepStart
-  console.log(`\n  WEIGHT 完成  ✓${ok}  ✗${failed}  耗时=${elapsed(durationMs)}`)
+  console.log(`\n  WEIGHT 完成  ✓${ok}  ⚠${pendingZero}  ✗${failed}  耗时=${elapsed(durationMs)}`)
   if (activityId) await activityEnd(supabase, activityId, {
-    status: failed > 0 ? 'warn' : 'done',
-    ok, fail: failed, rowsWritten: ok * 2, durationMs,
-    summary: `权重+收录 ${ok} 站成功，${failed} 站失败`,
+    status: failed > 0 || pendingZero > 0 ? 'warn' : 'done',
+    ok, empty: pendingZero, fail: failed, rowsWritten: totalRows, durationMs,
+    summary: `权重+收录 ${ok} 站成功，${pendingZero} 站0值待确认，${failed} 站失败`,
   })
 }
 

@@ -22,20 +22,14 @@ interface HistoryRow {
 interface AizhanHistorySummary {
   site_id: string
   pc_current_weight: number
-  pc_current_keywords: number
   pc_max_weight: number
-  pc_max_keywords: number
   pc_max_date: string | null
   pc_min_weight: number
-  pc_min_keywords: number
   pc_min_date: string | null
   mobile_current_weight: number
-  mobile_current_keywords: number
   mobile_max_weight: number
-  mobile_max_keywords: number
   mobile_max_date: string | null
   mobile_min_weight: number
-  mobile_min_keywords: number
   mobile_min_date: string | null
 }
 
@@ -303,10 +297,10 @@ export default function WeightMonitorPage() {
   const latestDetail = detailTrend[detailTrend.length - 1]
   const historical = selected?.historySummary
   const detailCards = historical ? [
-    { label: 'PC历史最高', value: `权重 ${historical.pc_max_weight}`, detail: `${fmt(historical.pc_max_keywords)}词 · ${fullDate(historical.pc_max_date)}`, color: 'text-blue-600' },
-    { label: 'PC历史最低', value: `权重 ${historical.pc_min_weight}`, detail: `${fmt(historical.pc_min_keywords)}词 · ${fullDate(historical.pc_min_date)}`, color: 'text-blue-600' },
-    { label: '移动历史最高', value: `权重 ${historical.mobile_max_weight}`, detail: `${fmt(historical.mobile_max_keywords)}词 · ${fullDate(historical.mobile_max_date)}`, color: 'text-orange-500' },
-    { label: '移动历史最低', value: `权重 ${historical.mobile_min_weight}`, detail: `${fmt(historical.mobile_min_keywords)}词 · ${fullDate(historical.mobile_min_date)}`, color: 'text-orange-500' },
+    { label: 'PC历史最高', value: `权重 ${historical.pc_max_weight}`, detail: fullDate(historical.pc_max_date), color: 'text-blue-600' },
+    { label: 'PC历史最低', value: `权重 ${historical.pc_min_weight}`, detail: fullDate(historical.pc_min_date), color: 'text-blue-600' },
+    { label: '移动历史最高', value: `权重 ${historical.mobile_max_weight}`, detail: fullDate(historical.mobile_max_date), color: 'text-orange-500' },
+    { label: '移动历史最低', value: `权重 ${historical.mobile_min_weight}`, detail: fullDate(historical.mobile_min_date), color: 'text-orange-500' },
   ] : [
     { label: 'PC月内最高均值', value: pcHighest ? fmt(pcHighest.pcAvg) : '—', detail: pcHighest ? shortDate(pcHighest.date) : '', color: 'text-blue-600' },
     { label: 'PC月内最低均值', value: pcLowest ? fmt(pcLowest.pcAvg) : '—', detail: pcLowest ? shortDate(pcLowest.date) : '', color: 'text-blue-600' },
@@ -371,7 +365,6 @@ export default function WeightMonitorPage() {
                 <span>PC月变化：<ChangeText value={latestDetail.pcAvg - firstDetail.pcAvg} /></span>
                 <span>移动月变化：<ChangeText value={latestDetail.mobileAvg - firstDetail.mobileAvg} /></span>
               </>}
-              {historical && <span>当前爱站词数：PC {fmt(historical.pc_current_keywords)}／移动 {fmt(historical.mobile_current_keywords)}</span>}
               <span className="ml-auto text-gray-400">{detailHistory.length} 个记录日</span>
             </div>
           </div>

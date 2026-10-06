@@ -44,6 +44,7 @@ import { activityStart, activityEnd, siteLog } from '@/lib/activity-log'
 import { upsertKeywordVolumeWithChange } from '@/lib/keyword-volume'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { fetchLatestUrlRanks } from '@/lib/tracking-rank-lookup'
+import { persistAizhanDaily } from '@/lib/aizhan-daily-persist'
 
 interface SiteRecord {
   id: string
@@ -423,30 +424,19 @@ export async function GET(request: Request) {
     // ── Weight + Index ────────────────────────────────────────────────────────────
     // Retries up to 2 times on failure (likely rate-limited) with 30s wait each
     if (runWeight) {
-      let wtOk = 0, wtFail = 0, wtRows = 0
+      let wtOk = 0, wtPendingZero = 0, wtFail = 0, wtRows = 0
       const wtStart = Date.now()
       const wtAid = await activityStart(supabase, { type: logType, source: 'vercel', step: 'weight', domain: siteFilter ?? undefined })
 
       for (const site of sites) {
         let fetched = false
-        let lastData: { pc: number; mobile: number; indexCount: number } | null = null
+        let lastData: { pc: number; mobile: number; indexCount: number; pendingZero: boolean; rowsWritten: number } | null = null
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             if (attempt > 0) await new Promise((r) => setTimeout(r, isSingleSite ? 5000 : 30000))
-            const { pc, mobile, indexCount, pcIpMin, pcIpMax, mobileIpMin, mobileIpMax } = await fetchAizhanData(site.domain)
-            await Promise.all([
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (supabase.from('weight_history') as any).upsert(
-                { site_id: site.id, record_date: today, pc_weight: pc, mobile_weight: mobile, pc_ip: pcIpMin, pc_ip_max: pcIpMax, mobile_ip: mobileIpMin, mobile_ip_max: mobileIpMax },
-                { onConflict: 'site_id,record_date' }
-              ),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (supabase.from('index_snapshots') as any).upsert(
-                { site_id: site.id, snapshot_date: today, index_count: indexCount },
-                { onConflict: 'site_id,snapshot_date' }
-              ),
-            ])
-            lastData = { pc, mobile, indexCount }
+            const data = await fetchAizhanData(site.domain)
+            const persisted = await persistAizhanDaily(supabase, site.id, today, data)
+            lastData = { pc: data.pc, mobile: data.mobile, indexCount: data.indexCount, pendingZero: persisted.pendingZero, rowsWritten: persisted.rowsWritten }
             fetched = true
             break
           } catch {
@@ -457,11 +447,12 @@ export async function GET(request: Request) {
         await new Promise((r) => setTimeout(r, 3000))
 
         if (fetched && lastData) {
-          wtOk++
-          wtRows += 2
+          if (lastData.pendingZero) wtPendingZero++
+          else wtOk++
+          wtRows += lastData.rowsWritten
           if (wtAid) await siteLog(supabase, wtAid, {
-            domain: site.domain, status: 'ok', rowsWritten: 2,
-            detail: `pc=${lastData.pc} mobile=${lastData.mobile} index=${lastData.indexCount}`,
+            domain: site.domain, status: lastData.pendingZero ? 'suspect' : 'ok', rowsWritten: lastData.rowsWritten,
+            detail: `pc=${lastData.pc} mobile=${lastData.mobile} index=${lastData.indexCount}${lastData.pendingZero ? '；0值待连续两天确认' : ''}`,
           })
         } else {
           wtFail++
@@ -471,8 +462,8 @@ export async function GET(request: Request) {
       }
 
       if (wtAid) await activityEnd(supabase, wtAid, {
-        status: wtFail > 0 ? 'warn' : 'done',
-        ok: wtOk, fail: wtFail, rowsWritten: wtRows,
+        status: wtFail > 0 || wtPendingZero > 0 ? 'warn' : 'done',
+        ok: wtOk, empty: wtPendingZero, fail: wtFail, rowsWritten: wtRows,
         durationMs: Date.now() - wtStart,
       })
     }

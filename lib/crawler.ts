@@ -419,33 +419,39 @@ export async function fetchAizhanData(domain: string): Promise<{
   pc: number; mobile: number; indexCount: number
   pcIpMin: number; pcIpMax: number; pcIpAvg: number
   mobileIpMin: number; mobileIpMax: number; mobileIpAvg: number
+  weightValid: boolean; indexValid: boolean
 }> {
-  const empty = { pc: 0, mobile: 0, indexCount: 0, pcIpMin: 0, pcIpMax: 0, pcIpAvg: 0, mobileIpMin: 0, mobileIpMax: 0, mobileIpAvg: 0 }
-  try {
-    const res = await fetch(`https://www.aizhan.com/cha/${domain}/`, {
-      headers: { ...getBrowserHeaders(), Referer: 'https://www.aizhan.com/' },
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return empty
-    const html = await res.text()
-    const $ = cheerio.load(html)
+  const res = await fetch(`https://www.aizhan.com/cha/${domain}/`, {
+    headers: { ...getBrowserHeaders(), Referer: 'https://www.aizhan.com/' },
+    signal: AbortSignal.timeout(10000),
+  })
+  if (!res.ok) throw new Error(`AIZHAN_HTTP_${res.status}`)
+  const html = await res.text()
+  const $ = cheerio.load(html)
 
-    const pc = parseInt($('#baidurank_br img').attr('alt') || '0', 10)
-    const mobile = parseInt($('#baidurank_mbr img').attr('alt') || '0', 10)
-    const indexRaw = $('#shoulu1_baidu a').first().text().replace(/[^0-9]/g, '')
-    const indexCount = parseInt(indexRaw || '0', 10)
-    const pcRange = parseIpRange($('#baidurank_ip').text())
-    const mobileRange = parseIpRange($('#baidurank_m_ip').text())
+  const pcRaw = $('#baidurank_br img').attr('alt')?.trim() ?? ''
+  const mobileRaw = $('#baidurank_mbr img').attr('alt')?.trim() ?? ''
+  const pcIpRaw = $('#baidurank_ip').text().trim()
+  const mobileIpRaw = $('#baidurank_m_ip').text().trim()
+  const indexText = $('#shoulu1_baidu a').first().text().trim()
+  const weightValid = /^\d+$/.test(pcRaw) && /^\d+$/.test(mobileRaw) && /\d/.test(pcIpRaw) && /\d/.test(mobileIpRaw)
+  const indexValid = /\d/.test(indexText)
+  if (!weightValid && !indexValid) throw new Error('AIZHAN_DATA_MISSING')
 
-    return {
-      pc: isNaN(pc) ? 0 : pc,
-      mobile: isNaN(mobile) ? 0 : mobile,
-      indexCount: isNaN(indexCount) ? 0 : indexCount,
-      pcIpMin: pcRange.min, pcIpMax: pcRange.max, pcIpAvg: pcRange.avg,
-      mobileIpMin: mobileRange.min, mobileIpMax: mobileRange.max, mobileIpAvg: mobileRange.avg,
-    }
-  } catch {
-    return empty
+  const pc = parseInt(pcRaw || '0', 10)
+  const mobile = parseInt(mobileRaw || '0', 10)
+  const indexRaw = indexText.replace(/[^0-9]/g, '')
+  const indexCount = parseInt(indexRaw || '0', 10)
+  const pcRange = parseIpRange(pcIpRaw)
+  const mobileRange = parseIpRange(mobileIpRaw)
+
+  return {
+    pc: isNaN(pc) ? 0 : pc,
+    mobile: isNaN(mobile) ? 0 : mobile,
+    indexCount: isNaN(indexCount) ? 0 : indexCount,
+    pcIpMin: pcRange.min, pcIpMax: pcRange.max, pcIpAvg: pcRange.avg,
+    mobileIpMin: mobileRange.min, mobileIpMax: mobileRange.max, mobileIpAvg: mobileRange.avg,
+    weightValid, indexValid,
   }
 }
 
