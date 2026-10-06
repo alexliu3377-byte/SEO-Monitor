@@ -142,16 +142,81 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => null) as {
     action?: unknown
     keyword?: unknown
+    keywords?: unknown
     category?: unknown
     subcategory?: unknown
     domains?: unknown
+    mode?: unknown
     problem?: unknown
     issueNote?: unknown
   } | null
+  const service = access.service
+
+  if (body?.action === 'batch-sites' || body?.action === 'batch-issue') {
+    const keywords = Array.isArray(body.keywords)
+      ? Array.from(new Set(body.keywords.filter((value): value is string => typeof value === 'string').map(value => value.trim()).filter(Boolean)))
+      : []
+    if (keywords.length === 0) return NextResponse.json({ error: '请先选择关键词' }, { status: 400 })
+    if (keywords.length > 100) return NextResponse.json({ error: '单次最多处理 100 个关键词' }, { status: 400 })
+
+    if (body.action === 'batch-issue') {
+      const { error } = await service.from('keyword_volume').update({
+        layout_status: 'issue',
+        layout_issue_note: '组员批量标记有问题',
+        layout_updated_by: access.userId,
+        layout_updated_at: new Date().toISOString(),
+      }).in('keyword', keywords)
+      if (error) return NextResponse.json({ error: '批量标记问题失败' }, { status: 500 })
+      return NextResponse.json({ ok: true, updated: keywords.length })
+    }
+
+    const mode = body.mode === 'add' || body.mode === 'remove' ? body.mode : null
+    const requestedDomains = Array.isArray(body.domains)
+      ? Array.from(new Set(body.domains.filter((value): value is string => typeof value === 'string').map(normalizeDomain).filter(Boolean)))
+      : []
+    if (!mode || requestedDomains.length === 0) return NextResponse.json({ error: '请选择要处理的站点' }, { status: 400 })
+    if (requestedDomains.length > 100) return NextResponse.json({ error: '单次最多处理 100 个站点' }, { status: 400 })
+
+    let siteGroups: Awaited<ReturnType<typeof loadAccessibleSiteGroups>>
+    try {
+      siteGroups = await loadAccessibleSiteGroups(service, access.userId, access.role)
+    } catch (error) {
+      console.error('Keyword batch layout authorization failed:', error)
+      return NextResponse.json({ error: '分组任务站点读取失败' }, { status: 500 })
+    }
+    const allowedDomains = new Set(siteGroups.flatMap(group => group.sites))
+    if (requestedDomains.some(domain => !allowedDomains.has(domain))) {
+      return NextResponse.json({ error: '只能处理你可访问的分组任务站点' }, { status: 403 })
+    }
+
+    const { data: rows, error: rowsError } = await service.from('keyword_volume')
+      .select('keyword, layout_site_domains, layout_status').in('keyword', keywords)
+    if (rowsError) return NextResponse.json({ error: '关键词布局资料读取失败' }, { status: 500 })
+
+    const updatedAt = new Date().toISOString()
+    const results = await Promise.all((rows ?? []).map((row: { keyword: string; layout_site_domains: string[] | null; layout_status: LayoutStatus }) => {
+      const existingDomains = (row.layout_site_domains ?? []).map(normalizeDomain).filter(Boolean)
+      const nextDomains = mode === 'add'
+        ? Array.from(new Set([...existingDomains, ...requestedDomains]))
+        : existingDomains.filter(domain => !requestedDomains.includes(domain))
+      const nextStatus: LayoutStatus = row.layout_status === 'issue'
+        ? 'issue'
+        : nextDomains.length > 0 ? 'assigned' : 'unassigned'
+      return service.from('keyword_volume').update({
+        layout_site_domains: nextDomains,
+        layout_status: nextStatus,
+        layout_updated_by: access.userId,
+        layout_updated_at: updatedAt,
+      }).eq('keyword', row.keyword)
+    }))
+    if (results.some((result: { error: unknown }) => result.error)) {
+      return NextResponse.json({ error: mode === 'add' ? '批量布局失败' : '批量取消失败' }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true, updated: rows?.length ?? 0 })
+  }
+
   const keyword = typeof body?.keyword === 'string' ? body.keyword.trim() : ''
   if (!keyword) return NextResponse.json({ error: '关键词无效' }, { status: 400 })
-
-  const service = access.service
 
   if (body?.action === 'set-sites') {
     const requestedDomains = Array.isArray(body.domains)

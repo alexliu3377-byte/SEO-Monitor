@@ -42,6 +42,7 @@ type SiteGroup = {
 
 type Draft = { category: KeywordPrimaryCategory | ''; subcategory: string }
 type LayoutFilter = 'all' | 'unassigned' | 'assigned' | 'issue'
+type BatchSiteMode = 'add' | 'remove'
 
 const LAYOUT_FILTER_OPTIONS: { value: LayoutFilter; label: string }[] = [
   { value: 'all', label: '全部状态' },
@@ -94,11 +95,15 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
+  const [batchSaving, setBatchSaving] = useState(false)
   const [deleting, setDeleting] = useState('')
   const [error, setError] = useState('')
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [layoutEditor, setLayoutEditor] = useState<Row | null>(null)
   const [layoutDraft, setLayoutDraft] = useState<string[]>([])
+  const [selectedKeywords, setSelectedKeywords] = useState<Set<string>>(new Set())
+  const [batchSiteMode, setBatchSiteMode] = useState<BatchSiteMode | null>(null)
+  const [batchSiteDraft, setBatchSiteDraft] = useState<string[]>([])
   const layoutDialogRef = useRef<HTMLElement>(null)
   const pageSize = 50
 
@@ -121,6 +126,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       if (!response.ok) throw new Error(body.error || '词库布局资料读取失败')
       const rows = (body.items ?? []) as Row[]
       setItems(rows)
+      setSelectedKeywords(new Set())
       setSummary((body.summary ?? []) as SummaryRow[])
       const nextSiteGroups = (body.siteGroups ?? []) as SiteGroup[]
       setSiteGroups(nextSiteGroups)
@@ -143,7 +149,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
-    if (!layoutEditor) return
+    if (!layoutEditor && !batchSiteMode) return
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -155,6 +161,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       if (event.key === 'Escape') {
         event.preventDefault()
         setLayoutEditor(null)
+        setBatchSiteMode(null)
         return
       }
       if (event.key !== 'Tab') return
@@ -176,7 +183,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       document.removeEventListener('keydown', handleDialogKeys)
       previouslyFocused?.focus()
     }
-  }, [layoutEditor])
+  }, [batchSiteMode, layoutEditor])
 
   const primarySummary = useMemo(() => {
     const totals = new Map<string, SummaryRow>()
@@ -205,6 +212,13 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
 
   const allowedSiteDomains = useMemo(() => new Set(siteGroups.flatMap(group => group.sites)), [siteGroups])
   const availableSites = useMemo(() => siteGroups.flatMap(group => group.sites), [siteGroups])
+  const selectedRows = useMemo(() => items.filter(row => selectedKeywords.has(row.keyword)), [items, selectedKeywords])
+  const batchSiteOptions = useMemo(() => batchSiteMode === 'remove'
+    ? availableSites.filter(domain => selectedRows.some(row => (row.layout_site_domains ?? []).includes(domain)))
+    : availableSites, [availableSites, batchSiteMode, selectedRows])
+  const canBatchCancel = selectedSite === 'all'
+    ? selectedRows.some(row => (row.layout_site_domains ?? []).some(domain => allowedSiteDomains.has(domain)))
+    : selectedRows.some(row => (row.layout_site_domains ?? []).includes(selectedSite))
   const selectedCategory = (category === '游戏' || category === '应用') ? category : ''
   const availableSubcategories = selectedCategory === '游戏'
     ? GAME_SUBCATEGORIES
@@ -306,6 +320,80 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       : [...current, domain])
   }
 
+  function toggleKeyword(keyword: string) {
+    setSelectedKeywords(current => {
+      const next = new Set(current)
+      if (next.has(keyword)) next.delete(keyword)
+      else next.add(keyword)
+      return next
+    })
+  }
+
+  function toggleAllKeywords() {
+    setSelectedKeywords(items.length > 0 && items.every(row => selectedKeywords.has(row.keyword))
+      ? new Set()
+      : new Set(items.map(row => row.keyword)))
+  }
+
+  function toggleBatchSiteDraft(domain: string) {
+    setBatchSiteDraft(current => current.includes(domain)
+      ? current.filter(value => value !== domain)
+      : [...current, domain])
+  }
+
+  async function runBatchSiteAction(mode: BatchSiteMode, domains: string[]) {
+    if (selectedKeywords.size === 0 || domains.length === 0) return
+    setBatchSaving(true)
+    setError('')
+    try {
+      const response = await fetch('/api/keyword-classification', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'batch-sites', keywords: [...selectedKeywords], mode, domains }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || (mode === 'add' ? '批量布局失败' : '批量取消失败'))
+      setBatchSiteMode(null)
+      setBatchSiteDraft([])
+      await load()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : mode === 'add' ? '批量布局失败' : '批量取消失败')
+    } finally {
+      setBatchSaving(false)
+    }
+  }
+
+  function beginBatchSiteAction(mode: BatchSiteMode) {
+    if (selectedKeywords.size === 0) return
+    if (selectedSite !== 'all') {
+      void runBatchSiteAction(mode, [selectedSite])
+      return
+    }
+    setBatchSiteDraft([])
+    setBatchSiteMode(mode)
+    setError('')
+  }
+
+  async function markSelectedAsProblem() {
+    if (selectedKeywords.size === 0) return
+    setBatchSaving(true)
+    setError('')
+    try {
+      const response = await fetch('/api/keyword-classification', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'batch-issue', keywords: [...selectedKeywords] }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || '批量标记问题失败')
+      await load()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '批量标记问题失败')
+    } finally {
+      setBatchSaving(false)
+    }
+  }
+
   async function toggleProblem(row: Row) {
     setSaving(row.keyword)
     setError('')
@@ -398,26 +486,29 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
           <select aria-label="布局状态" value={layoutFilter} onChange={event => { setLayoutFilter(event.target.value as LayoutFilter); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
             {LAYOUT_FILTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[280px] flex-1 items-stretch gap-2">
-            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex min-w-[280px] flex-1 flex-wrap items-stretch gap-2 sm:min-w-[640px] sm:flex-nowrap">
+            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-48 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
             <button type="submit" disabled={loading} className="inline-flex h-9 min-h-0 shrink-0 items-center justify-center rounded-lg bg-green-500 px-4 text-sm font-medium text-white transition-colors hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:opacity-50">{loading ? '查询中...' : '查询'}</button>
+            <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => beginBatchSiteAction('add')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量布局</button>
+            <button type="button" disabled={batchSaving || !canBatchCancel} onClick={() => beginBatchSiteAction('remove')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量取消</button>
+            <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => void markSelectedAsProblem()} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">标记问题</button>
           </form>
-          <span className="ml-auto inline-flex h-9 shrink-0 items-center whitespace-nowrap text-xs text-slate-500">共 {formatNumber(total)} 个词</span>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] table-fixed" aria-label="关键词布局列表">
-            <colgroup><col className="w-60" /><col className="w-24" /><col className="w-32" /><col className="w-40" /><col /><col className={canDelete ? 'w-64' : 'w-44'} /></colgroup>
-            <thead className="bg-slate-50"><tr><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">布局站点</th><th className="table-th text-right">操作</th></tr></thead>
+          <table className="w-full min-w-[1150px] table-fixed" aria-label="关键词布局列表">
+            <colgroup><col className="w-12" /><col className="w-60" /><col className="w-24" /><col className="w-32" /><col className="w-40" /><col /><col className={canDelete ? 'w-64' : 'w-44'} /></colgroup>
+            <thead className="bg-slate-50"><tr><th className="table-th"><input type="checkbox" aria-label="全选当前页" checked={items.length > 0 && items.every(row => selectedKeywords.has(row.keyword))} onChange={toggleAllKeywords} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">布局站点</th><th className="table-th text-right">操作</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">正在读取词库布局资料…</td></tr> : items.length === 0 ? <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
+              {loading ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">正在读取词库布局资料…</td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
                 const draft = drafts[row.keyword] ?? { category: '', subcategory: '' }
                 const subOptions = subcategoriesFor(draft.category)
                 const assignedSites = row.layout_site_domains ?? []
                 const currentSiteAssigned = selectedSite !== 'all' && assignedSites.includes(selectedSite)
                 const visibleSites = selectedSite === 'all' ? assignedSites : currentSiteAssigned ? [selectedSite] : []
                 const classificationChanged = isClassificationChanged(row, draft)
-                return <tr key={row.keyword} className={row.layout_status === 'issue' ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-slate-50/70'}>
+                return <tr key={row.keyword} className={selectedKeywords.has(row.keyword) ? 'bg-emerald-50/60 hover:bg-emerald-50/80' : row.layout_status === 'issue' ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-slate-50/70'}>
+                  <td className="table-td align-middle"><input type="checkbox" aria-label={`选择 ${row.keyword}`} checked={selectedKeywords.has(row.keyword)} onChange={() => toggleKeyword(row.keyword)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></td>
                   <td className="table-td align-middle"><span className="block truncate font-medium text-slate-900" title={row.keyword}>{row.keyword}</span></td>
                   <td className="table-td align-middle text-right font-semibold tabular-nums text-slate-800">{formatNumber(row.volume)}</td>
                   <td className="table-td align-middle"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs focus:border-emerald-500 focus:outline-none"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value === '-' ? '未能判断' : value}</option>)}</select></td>
@@ -453,6 +544,28 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
                 <button type="button" disabled={Boolean(saving)} onClick={() => setLayoutEditor(null)} className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">取消</button>
                 <button type="button" disabled={Boolean(saving)} onClick={() => void saveSiteAssignments(layoutEditor, layoutDraft, true)} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">{saving ? '保存中…' : '保存布局'}</button>
               </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {batchSiteMode && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button type="button" aria-label="关闭批量站点选择" className="absolute inset-0 bg-slate-950/45" onClick={() => { if (!batchSaving) setBatchSiteMode(null) }} />
+          <section ref={layoutDialogRef} role="dialog" aria-modal="true" aria-labelledby="batch-site-editor-title" className="relative flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0 flex-1">
+                <h2 id="batch-site-editor-title" className="text-lg font-semibold text-slate-950">{batchSiteMode === 'add' ? '批量布局站点' : '批量取消站点'}</h2>
+                <p className="mt-1 text-sm text-slate-500">{batchSiteMode === 'add' ? '勾选要加入布局的站点。' : '勾选要从这些关键词中取消的站点。'}</p>
+              </div>
+              <button type="button" aria-label="关闭批量站点选择" disabled={batchSaving} onClick={() => setBatchSiteMode(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50">×</button>
+            </div>
+            <div className="grid gap-2 overflow-y-auto p-5 sm:grid-cols-2">
+              {batchSiteOptions.map(domain => <label key={domain} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:brightness-95 ${siteStyle(domain).chip}`}><input type="checkbox" checked={batchSiteDraft.includes(domain)} onChange={() => toggleBatchSiteDraft(domain)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /><span className="min-w-0 truncate" title={domain}>{domain}</span></label>)}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button type="button" disabled={batchSaving} onClick={() => setBatchSiteMode(null)} className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">取消</button>
+              <button type="button" disabled={batchSaving || batchSiteDraft.length === 0} onClick={() => void runBatchSiteAction(batchSiteMode, batchSiteDraft)} className={`inline-flex h-9 items-center rounded-lg px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40 ${batchSiteMode === 'add' ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus:ring-slate-400'}`}>{batchSaving ? '处理中…' : batchSiteMode === 'add' ? '确认布局' : '确认取消'}</button>
             </div>
           </section>
         </div>
