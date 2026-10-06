@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { createAizhanHttpSession, fetchAizhanListingHtml } from '../lib/crawler-aizhan-http'
-import { buildAizhanKeywordPageUrl, normalizeAizhanKeywordUrl, parseAizhanKeywordPage } from '../lib/aizhan-keyword-backfill'
+import { buildAizhanKeywordPageUrl, describeAizhanKeywordHtml, normalizeAizhanKeywordUrl, parseAizhanKeywordPage } from '../lib/aizhan-keyword-backfill'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
 const MAX_PAGES = 50
@@ -35,6 +35,7 @@ async function main() {
       }
       const parsed = parseAizhanKeywordPage(html, currentUrl)
       if (parsed.rows.length === 0) {
+        if (page === 1) console.log(`  页面结构摘要：${describeAizhanKeywordHtml(html)}`)
         console.log(`  第 ${page} 页没有正搜索量关键词，停止`)
         break
       }

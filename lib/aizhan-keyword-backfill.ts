@@ -110,3 +110,20 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
 
   return { rows, sawZeroVolume, nextUrl }
 }
+
+export function describeAizhanKeywordHtml(html: string): string {
+  const $ = cheerio.load(html)
+  const tables = $('table').slice(0, 5).map((_, table) => ({
+    className: $(table).attr('class') || '',
+    rows: $(table).find('tr').slice(0, 3).map((__, row) =>
+      $(row).find('th, td').map((___, cell) => $(cell).text().replace(/\s+/g, ' ').trim()).get()
+    ).get(),
+  })).get()
+  return JSON.stringify({
+    title: $('title').text().trim(),
+    htmlLength: html.length,
+    tableCount: $('table').length,
+    tables,
+    textStart: $('body').text().replace(/\s+/g, ' ').trim().slice(0, 500),
+  })
+}
