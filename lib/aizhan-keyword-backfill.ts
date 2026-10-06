@@ -80,30 +80,3 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
 
   return { rows, sawZeroVolume, nextUrl }
 }
-
-export function describeAizhanKeywordHtml(html: string): string {
-  const $ = cheerio.load(html)
-  const sampleRankRows = $('tr').toArray()
-    .filter(row => /第\s*\d+\s*页/.test($(row).text()))
-    .slice(0, 2)
-    .map(row => ({
-      cells: $(row).find('th, td').toArray().map(cell => ({
-        text: $(cell).text().replace(/\s+/g, ' ').trim().slice(0, 200),
-        html: ($(cell).html() || '').replace(/\s+/g, ' ').trim().slice(0, 500),
-      })),
-    }))
-  const tables = $('table').slice(0, 5).map((_, table) => ({
-    className: $(table).attr('class') || '',
-    rows: $(table).find('tr').slice(0, 3).map((__, row) =>
-      $(row).find('th, td').map((___, cell) => $(cell).text().replace(/\s+/g, ' ').trim()).get()
-    ).get(),
-  })).get()
-  return JSON.stringify({
-    title: $('title').text().trim(),
-    htmlLength: html.length,
-    tableCount: $('table').length,
-    tables,
-    sampleRankRows,
-    textStart: $('body').text().replace(/\s+/g, ' ').trim().slice(0, 500),
-  })
-}
