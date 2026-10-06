@@ -79,7 +79,7 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
       ? selectedTable.find('tbody tr')
       : selectedTable.find('tr').slice(1)
     bodyRows.each((_, tr) => {
-      const cells = $(tr).find('td')
+      const cells = $(tr).children('td')
       if (cells.length === 0) return
       // Aizhan's directory cell uses an unusual rowspan layout and can be
       // emitted as its own row. The stable identifiers are the destination
@@ -91,8 +91,12 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
       const leadingGap = Math.max(0, headerCount - cells.length)
       const keywordCell = cells.eq(Math.max(0, keywordIndex - leadingGap))
       const volumeCell = cells.eq(Math.max(0, volumeIndex - leadingGap))
-      const keyword = (linkedKeyword.text() || keywordCell.find('a').first().text() || keywordCell.text()).trim()
-      const volumeText = (linkedVolume.text() || volumeCell.text()).replace(/[,\s]/g, '').trim()
+      const directTexts = cells.toArray().map(cell => $(cell).text().replace(/\s+/g, ' ').trim())
+      const rankIndex = directTexts.findIndex(text => /第\s*\d+\s*页/.test(text) && /第\s*\d+\s*位/.test(text))
+      const rankKeywordCell = rankIndex > 0 ? cells.eq(rankIndex - 1) : keywordCell
+      const rankVolumeCell = rankIndex >= 0 && rankIndex + 1 < cells.length ? cells.eq(rankIndex + 1) : volumeCell
+      const keyword = (linkedKeyword.text() || rankKeywordCell.find('a').first().text() || rankKeywordCell.text()).trim()
+      const volumeText = (linkedVolume.text() || rankVolumeCell.text()).replace(/[,\s]/g, '').trim()
       if (!keyword || !/^\d+$/.test(volumeText)) return
       const volume = Number.parseInt(volumeText, 10)
       if (volume <= 0) {

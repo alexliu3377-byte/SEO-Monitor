@@ -16,8 +16,8 @@ test('parses an Aizhan table whose header row is not wrapped in thead', () => {
     <table>
       <tr><td>目录(大约词数)</td><td>关键字</td><td>排名</td><td>(移动)搜索量</td><td>网页标题</td></tr>
       <tbody>
-        <tr><td rowspan="2">game</td><td><a href="https://m.baidu.com/s?word=demo">蛋仔派对官服正版下载</a></td><td>第4页 第10位</td><td><a href="https://ci.aizhan.com/id/">1,385</a></td><td>标题</td></tr>
-        <tr><td><a href="https://m.baidu.com/s?word=zero">休闲游戏</a></td><td>第2页</td><td><a href="https://ci.aizhan.com/zero/">0</a></td><td>标题</td></tr>
+        <tr><td rowspan="2">game</td><td><a href="/keyword/demo">蛋仔派对官服正版下载</a></td><td>第4页 第10位</td><td><a href="/volume/id/">1,385</a></td><td>标题</td></tr>
+        <tr><td><a href="/keyword/zero">休闲游戏</a></td><td>第2页 第1位</td><td><a href="/volume/zero/">0</a></td><td>标题</td></tr>
       </tbody>
     </table>`
   const parsed = parseAizhanKeywordPage(html, startUrl)
