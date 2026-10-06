@@ -468,9 +468,9 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-3">
-          <label className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5">
+          <label className="flex h-9 w-[170px] shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5">
             <span className="shrink-0 text-xs text-slate-500">当前站点</span>
-            <select aria-label="当前站点" value={selectedSite} onChange={event => { setSelectedSite(event.target.value); setPage(0) }} style={{ color: selectedSite === 'all' ? '#334155' : siteStyle(selectedSite).text }} className="min-w-[150px] border-0 bg-transparent pr-2 text-sm font-semibold outline-none">
+            <select aria-label="当前站点" value={selectedSite} onChange={event => { setSelectedSite(event.target.value); setPage(0) }} style={{ color: selectedSite === 'all' ? '#334155' : siteStyle(selectedSite).text }} className="min-w-0 flex-1 border-0 bg-transparent pr-1 text-sm font-semibold outline-none">
               <option value="all" className="text-slate-700">全部</option>
               {availableSites.map(domain => <option key={domain} value={domain} style={{ color: siteStyle(domain).text }}>{domain}</option>)}
             </select>
@@ -486,13 +486,13 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
           <select aria-label="布局状态" value={layoutFilter} onChange={event => { setLayoutFilter(event.target.value as LayoutFilter); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
             {LAYOUT_FILTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex min-w-[280px] flex-1 flex-wrap items-stretch gap-2 sm:min-w-[640px] sm:flex-nowrap">
-            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-48 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[240px] basis-[300px] grow items-stretch gap-2 xl:max-w-[420px]">
+            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
             <button type="submit" disabled={loading} className="inline-flex h-9 min-h-0 shrink-0 items-center justify-center rounded-lg bg-green-500 px-4 text-sm font-medium text-white transition-colors hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:opacity-50">{loading ? '查询中...' : '查询'}</button>
-            <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => beginBatchSiteAction('add')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量布局</button>
-            <button type="button" disabled={batchSaving || !canBatchCancel} onClick={() => beginBatchSiteAction('remove')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量取消</button>
-            <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => void markSelectedAsProblem()} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">标记问题</button>
           </form>
+          <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => beginBatchSiteAction('add')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量布局</button>
+          <button type="button" disabled={batchSaving || !canBatchCancel} onClick={() => beginBatchSiteAction('remove')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量取消</button>
+          <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => void markSelectedAsProblem()} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">标记问题</button>
         </div>
 
         <div className="overflow-x-auto">
