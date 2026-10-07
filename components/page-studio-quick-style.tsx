@@ -17,12 +17,15 @@ function ChoiceRow({ title, choices, onChoose }: { title: string; choices: Array
   return <div className="border-b border-slate-100 px-3 py-3"><p className="mb-2 text-[11px] font-semibold text-slate-600">{title}</p><div className="grid grid-cols-4 gap-1.5">{choices.map(choice => <button key={choice.value} type="button" onClick={() => onChoose(choice.value)} className="h-8 rounded-md border border-slate-200 bg-white px-1 text-[11px] text-slate-700 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800">{choice.label}</button>)}</div></div>
 }
 
-function renderedPixelValue(component: Component, property: 'width' | 'height' | 'margin-left') {
+type PixelProperty = 'width' | 'height' | 'margin-left' | 'margin-right' | 'gap'
+
+function renderedPixelValue(component: Component, property: PixelProperty) {
   const element = component.getEl()
   const view = element?.ownerDocument.defaultView
   const raw = element && view ? view.getComputedStyle(element).getPropertyValue(property) : String(component.getStyle()[property] || '')
   const value = Number.parseFloat(raw)
-  return Number.isFinite(value) ? String(Math.round(value * 10) / 10) : ''
+  if (Number.isFinite(value)) return String(Math.round(value * 10) / 10)
+  return ['gap', 'margin-left', 'margin-right'].includes(property) ? '0' : ''
 }
 
 function findNumberGroup(component: Component | null) {
@@ -59,6 +62,7 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
   const isImage = tagName === 'img'
   const isLink = tagName === 'a'
   const isEditableText = component.is('text') || ['p', 'span', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'button'].includes(tagName)
+  const hasMultipleChildren = component.components().length > 1
   const selectedElement = component.getEl()
   const visibleText = selectedElement?.textContent ?? String(component.get('content') || '')
 
@@ -69,7 +73,7 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
     reader.readAsDataURL(file)
   }
 
-  function applyPixels(property: 'width' | 'height' | 'margin-left', rawValue: string) {
+  function applyPixels(property: PixelProperty, rawValue: string) {
     if (rawValue === '') {
       component.removeStyle(property)
       return
@@ -129,16 +133,22 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
         <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-blue-900">图片设置</p><button type="button" onClick={removeImage} className="h-7 rounded-md border border-red-200 bg-white px-2.5 text-[11px] font-medium text-red-600 hover:bg-red-50">删除图片</button></div>
         <label className="mt-2 flex h-9 cursor-pointer items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-100">从电脑选择图片<input type="file" accept="image/*" onChange={event => uploadImage(event.target.files?.[0])} className="sr-only" /></label>
         <label className="mt-2 block text-[11px] font-medium text-blue-900">或者粘贴图片网址<input value={String(component.getAttributes().src || '')} onChange={event => component.addAttributes({ src: event.target.value })} placeholder="https://…" className="mt-1 h-9 w-full rounded-md border border-blue-200 bg-white px-2 text-xs text-slate-700 outline-none focus:border-blue-400" /></label>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {([['宽度', 'width'], ['高度', 'height'], ['图片前间距', 'margin-left']] as const).map(([label, property]) => <label key={property} className="text-[10px] font-semibold text-blue-900">{label}<span className="ml-0.5 font-normal text-blue-500">px</span><input type="number" min="0" max="4000" step="1" value={renderedPixelValue(component, property)} onChange={event => applyPixels(property, event.target.value)} className="mt-1 h-9 w-full rounded-md border border-blue-200 bg-white px-2 text-xs tabular-nums text-slate-800 outline-none focus:border-blue-500" /></label>)}
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {([['宽度', 'width'], ['高度', 'height'], ['图片前间距', 'margin-left'], ['图片后间距', 'margin-right']] as const).map(([label, property]) => <label key={property} className="text-[10px] font-semibold text-blue-900">{label}<span className="ml-0.5 font-normal text-blue-500">px</span><input type="number" min="0" max="4000" step="1" value={renderedPixelValue(component, property)} onChange={event => applyPixels(property, event.target.value)} className="mt-1 h-9 w-full rounded-md border border-blue-200 bg-white px-2 text-xs tabular-nums text-slate-800 outline-none focus:border-blue-500" /></label>)}
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-1.5"><button type="button" onClick={() => apply({ height: 'auto' })} className="h-8 rounded-md border border-blue-200 bg-white text-[11px] text-blue-700 hover:bg-blue-100">按原比例</button><button type="button" onClick={() => { ['width', 'height', 'margin-left'].forEach(property => component.removeStyle(property)) }} className="h-8 rounded-md border border-blue-200 bg-white text-[11px] text-blue-700 hover:bg-blue-100">恢复自动尺寸</button></div>
+        <div className="mt-2 grid grid-cols-2 gap-1.5"><button type="button" onClick={() => apply({ height: 'auto' })} className="h-8 rounded-md border border-blue-200 bg-white text-[11px] text-blue-700 hover:bg-blue-100">按原比例</button><button type="button" onClick={() => { ['width', 'height', 'margin-left', 'margin-right'].forEach(property => component.removeStyle(property)) }} className="h-8 rounded-md border border-blue-200 bg-white text-[11px] text-blue-700 hover:bg-blue-100">恢复自动尺寸</button></div>
         <div className="mt-2 grid grid-cols-3 gap-1.5">{([['完整显示', 'contain'], ['填满裁切', 'cover'], ['拉伸', 'fill']] as const).map(([label, value]) => <button key={value} type="button" onClick={() => apply({ 'object-fit': value })} className="h-8 rounded-md border border-blue-200 bg-white text-[11px] text-blue-700 hover:bg-blue-100">{label}</button>)}</div>
       </div> : null}
 
       {isEditableText ? <div className="border-b border-slate-100 px-3 py-3"><label className="block text-[11px] font-semibold text-slate-600">文字内容<textarea value={visibleText} onChange={event => component.components(event.target.value)} rows={3} className="mt-2 w-full resize-y rounded-md border border-slate-300 bg-white p-2 text-sm leading-5 text-slate-800 outline-none focus:border-emerald-500" /></label>{isLink && <label className="mt-3 block text-[11px] font-semibold text-slate-600">点击后前往<input value={String(component.getAttributes().href || '')} onChange={event => component.addAttributes({ href: event.target.value })} placeholder="https://… 或 /页面地址" className="mt-1.5 h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-none focus:border-emerald-500" /></label>}</div> : null}
 
       {!isImage && !isEditableText ? <div className="border-b border-slate-100 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">先选中模块里面的文字或图片，就能直接修改内容；要改整个模块的大小和背景，则选中外框。</div> : null}
+
+      {!isImage && hasMultipleChildren ? <div className="border-b border-emerald-100 bg-emerald-50/60 px-3 py-3">
+        <label className="block text-[11px] font-semibold text-emerald-900">内容间距 <span className="font-normal text-emerald-600">px</span><input type="number" min="0" max="4000" step="1" value={renderedPixelValue(component, 'gap')} onChange={event => applyPixels('gap', event.target.value)} className="mt-1.5 h-9 w-full rounded-md border border-emerald-200 bg-white px-2 text-xs tabular-nums text-slate-800 outline-none focus:border-emerald-500" /></label>
+        <p className="mt-1.5 text-[10px] leading-4 text-emerald-700">控制这一行内部图片、标题和日期之间的距离。</p>
+        <div className="mt-2 grid grid-cols-4 gap-1.5">{[0, 8, 16, 24].map(value => <button key={value} type="button" onClick={() => applyPixels('gap', String(value))} className="h-8 rounded-md border border-emerald-200 bg-white text-[11px] text-emerald-800 hover:bg-emerald-100">{value}</button>)}</div>
+      </div> : null}
 
       {numberGroup ? <div className="border-b border-emerald-100 bg-emerald-50/60 px-3 py-3">
         <p className="text-xs font-semibold text-emerald-950">数字显示规则</p>
