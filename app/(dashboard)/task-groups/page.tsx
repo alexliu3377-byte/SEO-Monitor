@@ -73,13 +73,6 @@ function formatSignedVolume(value: number) {
   if (!value) return '—'
   return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
 }
-function formatCompactSignedVolume(value: number) {
-  if (!value) return '—'
-  const sign = value > 0 ? '+' : '-'
-  const absolute = Math.abs(value)
-  if (absolute < 10000) return `${sign}${absolute.toLocaleString()}`
-  return `${sign}${(absolute / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })}万`
-}
 function getNetVolumeChange(row: VolumeRisingWord) {
   return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
 }
@@ -87,6 +80,15 @@ function getBaselineVolume(row: VolumeRisingWord) {
   return Number.isFinite(row.baselineVolume)
     ? row.baselineVolume
     : row.prevVolume ?? Math.max(0, row.volume - row.change)
+}
+function getNetVolumeGrowthRate(row: VolumeRisingWord): number | null {
+  const baseline = getBaselineVolume(row)
+  if (baseline <= 0) return null
+  return (getNetVolumeChange(row) / baseline) * 100
+}
+function formatSignedPercent(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '—' }
 function normalizeUrl(raw: string): string {
@@ -834,7 +836,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 站点域名过滤，全组共享同一份全局列表。
   const volumeRisingWordsSorted = useMemo(() => {
     if (!radarData) return []
-    return [...radarData.volumeRisingWords].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date))
+    return [...radarData.volumeRisingWords].sort((a, b) => (getNetVolumeGrowthRate(b) ?? -Infinity) - (getNetVolumeGrowthRate(a) ?? -Infinity) || b.last_date.localeCompare(a.last_date))
   }, [radarData])
 
   const allNewWords = useMemo(() => {
@@ -2444,8 +2446,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       const base_vr = filterByRadarDate(volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(a) : sortCol === 'change' ? (a.change??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(b) : sortCol === 'change' ? (b.change??0) : 0
+        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? (getNetVolumeGrowthRate(a) ?? -Infinity) : sortCol === 'change' ? (a.change??0) : 0
+        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'netChange' ? (getNetVolumeGrowthRate(b) ?? -Infinity) : sortCol === 'change' ? (b.change??0) : 0
         if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_vr
@@ -2456,7 +2458,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
               <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
-              <th className="px-2 py-2 text-center font-medium w-24" title="当前搜索量减去系统追踪起点的搜索量"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">累计增加{sortIcons('netChange')}</span></th>
+              <th className="px-2 py-2 text-center font-medium w-28" title="相对系统追踪起点的累计搜索量涨幅"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">累计涨幅 (%){sortIcons('netChange')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-24" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">本次变化{sortIcons('change')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-20"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">搜索量{sortIcons('volume')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-16">排名波动</th>
@@ -2474,7 +2476,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
                   <td className="px-2 py-2 text-center text-xs" title={`追踪起点${w.baselineDate ? ` ${w.baselineDate}` : ''}：${fmtVol(getBaselineVolume(w))} → 当前 ${fmtVol(w.volume)}`}>
                     <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                      <span className="font-medium tabular-nums text-green-600">{formatCompactSignedVolume(getNetVolumeChange(w))}</span>
+                      <span className="font-medium tabular-nums text-green-600">{formatSignedPercent(getNetVolumeGrowthRate(w))}</span>
                     </span>
                   </td>
                   <td className={`px-2 py-2 text-center text-xs font-medium ${w.change > 0 ? 'text-green-600' : w.change < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '暂无上次数值' : `上次 ${fmtVol(w.prevVolume)} → 当前 ${fmtVol(w.volume)}`}>{formatSignedVolume(w.change)}</td>
@@ -2879,7 +2881,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               </div>
               <div className="text-center">
                 <p className="text-gray-300">→</p>
-                <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatCompactSignedVolume(getNetVolumeChange(volumeEntry))}</p>
+                <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatSignedPercent(getNetVolumeGrowthRate(volumeEntry))}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-400">现在</p>
