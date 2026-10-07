@@ -377,6 +377,18 @@ export default function IndexMonitorPage() {
               </div>
             </div>
             <div className="p-6">
+              <div className="mb-4 flex flex-wrap items-center gap-x-10 gap-y-2 border-b border-gray-100 pb-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xs text-gray-400">当前收录</span>
+                  <strong className="text-lg tabular-nums text-gray-900">{selectedSite.latest.toLocaleString()}</strong>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xs text-gray-400">周变化</span>
+                  <strong className={`text-lg tabular-nums ${selectedSite.weeklyChange > 0 ? 'text-green-600' : selectedSite.weeklyChange < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                    {selectedSite.weeklyChange === 0 ? '—' : `${selectedSite.weeklyChange > 0 ? '+' : ''}${selectedSite.weeklyChange.toLocaleString()}`}
+                  </strong>
+                </div>
+              </div>
               {detailLoading ? (
                 <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">读取该月资料中…</div>
               ) : detailError ? (
