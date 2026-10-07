@@ -52,6 +52,14 @@ function formatSignedVolume(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
 }
 
+function formatCompactSignedVolume(value: number): string {
+  if (!value) return '—'
+  const sign = value > 0 ? '+' : '-'
+  const absolute = Math.abs(value)
+  if (absolute < 10000) return `${sign}${absolute.toLocaleString()}`
+  return `${sign}${(absolute / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })}万`
+}
+
 function getNetVolumeChange(row: VolumeRisingEntry): number {
   return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
 }
@@ -60,18 +68,6 @@ function getBaselineVolume(row: VolumeRisingEntry): number {
   return Number.isFinite(row.baselineVolume)
     ? row.baselineVolume
     : row.prevVolume ?? Math.max(0, row.volume - row.change)
-}
-
-function getNetGrowthRate(row: VolumeRisingEntry): number | null {
-  const baseline = getBaselineVolume(row)
-  return baseline > 0 ? getNetVolumeChange(row) / baseline : null
-}
-
-function formatNetGrowthPercent(row: VolumeRisingEntry): string {
-  const rate = getNetGrowthRate(row)
-  if (rate == null) return '—'
-  const percent = rate * 100
-  return `+${percent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%`
 }
 
 // 更新词库按“哪一天的竞品资料”展示。它的 RPC 历史上用 discovered_at
@@ -516,9 +512,9 @@ export default function HotRadarPage() {
       rankWords:   sortByDate(rw, yesterday, (a, b) => b.volume - a.volume || b.siteCount - a.siteCount),
       crossWords:  sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
       streakWords: data.streakWords || [],
-      // 搜索量趋势按相对追踪起点的累计涨幅排序；本次变化只用来
+      // 搜索量趋势按相对追踪起点的累计增加量排序；本次变化只用来
       // 判断最近是否适合更新，不再把回落但仍净增的词丢掉。
-      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => (getNetGrowthRate(b) ?? -1) - (getNetGrowthRate(a) ?? -1) || b.last_date.localeCompare(a.last_date)),
+      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date)),
     }
   }, [data, minSites, yesterday])
 
@@ -592,7 +588,7 @@ export default function HotRadarPage() {
           case 'rankDays':      va = a.rankDays ?? 0;   vb = b.rankDays ?? 0;   break
           case 'streak':        va = a.streak ?? 0;     vb = b.streak ?? 0;     break
           case 'change':        va = a.change ?? 0;     vb = b.change ?? 0;     break
-          case 'netChange':     va = getNetGrowthRate(a) ?? -1; vb = getNetGrowthRate(b) ?? -1; break
+          case 'netChange':     va = getNetVolumeChange(a); vb = getNetVolumeChange(b); break
           case 'longTailCount': va = a.longTailCount ?? 0; vb = b.longTailCount ?? 0; break
           case 'siteCount':     va = a.siteCount ?? 0;  vb = b.siteCount ?? 0;  break
         }
@@ -922,7 +918,7 @@ export default function HotRadarPage() {
                     <tr>
                       <th className="table-th"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
                       <th className="table-th">关键词</th>
-                      <th className="table-th text-center whitespace-nowrap" title="相对系统追踪起点的累计涨幅"><span className="inline-flex items-center justify-center gap-0.5">累计涨幅{sortIcons('netChange')}</span></th>
+                      <th className="table-th text-center whitespace-nowrap" title="当前搜索量减去系统追踪起点的搜索量"><span className="inline-flex items-center justify-center gap-0.5">累计增加{sortIcons('netChange')}</span></th>
                       <th className="table-th text-center whitespace-nowrap" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5">本次变化{sortIcons('change')}</span></th>
                       <th className="table-th text-center whitespace-nowrap"><span className="inline-flex items-center justify-center gap-0.5">当前搜索量{sortIcons('volume')}</span></th>
                       <th className="table-th">出现站点</th>
@@ -942,7 +938,7 @@ export default function HotRadarPage() {
                           </td>
                           <td className="table-td text-center">
                             <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap" title={`追踪起点${w.baselineDate ? ` ${w.baselineDate}` : ''}：${fmtVolume(getBaselineVolume(w))} → 当前 ${fmtVolume(w.volume)}`}>
-                              <span className="font-semibold tabular-nums text-green-600">{formatNetGrowthPercent(w)}</span>
+                              <span className="font-semibold tabular-nums text-green-600">{formatCompactSignedVolume(getNetVolumeChange(w))}</span>
                             </span>
                           </td>
                           <td className="table-td text-center">
@@ -1166,7 +1162,7 @@ export default function HotRadarPage() {
                       </div>
                       <div className="text-center">
                         <p className="text-gray-300">→</p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatNetGrowthPercent(detailVolumeEntry)}</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-green-600">{formatCompactSignedVolume(getNetVolumeChange(detailVolumeEntry))}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-gray-400">现在</p>
