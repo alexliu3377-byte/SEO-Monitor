@@ -38,20 +38,10 @@ export async function POST(request: Request) {
     index_count: baiduCollection,
     baidu_index_count: baiduIndex,
   }
-  const optionalFields = {
-    baidu_home_position: optionalNonNegativeInteger(body?.baiduHomePosition),
-    baidu_new_1d: optionalNonNegativeInteger(body?.baidu1d),
-    baidu_new_7d: optionalNonNegativeInteger(body?.baidu7d),
-    baidu_new_30d: optionalNonNegativeInteger(body?.baidu30d),
-  }
-  if (Object.values(optionalFields).some(value => value === undefined)) {
-    return NextResponse.json({ error: '收录明细必须是非负整数' }, { status: 400 })
-  }
-  Object.assign(payload, optionalFields)
 
   const { data, error } = await service.from('index_snapshots')
     .upsert(payload, { onConflict: 'site_id,snapshot_date' })
-    .select('site_id,snapshot_date,index_count,baidu_index_count,baidu_home_position,baidu_new_1d,baidu_new_7d,baidu_new_30d')
+    .select('site_id,snapshot_date,index_count,baidu_index_count')
     .single()
 
   if (error) return NextResponse.json({ error: '保存失败' }, { status: 500 })
