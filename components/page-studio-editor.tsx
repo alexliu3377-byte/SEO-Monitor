@@ -103,6 +103,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const pendingInteractionRef = useRef<{ trigger: Component; mode: 'hover-show' | 'click-toggle' } | null>(null)
   const componentClipboardRef = useRef<Component | null>(null)
   const shortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
+  const canvasGestureCleanupRef = useRef<() => void>(() => undefined)
   const [project, setProject] = useState<PageStudioProject | null>(null)
   const [ready, setReady] = useState(false)
   const [saved, setSaved] = useState(true)
@@ -143,6 +144,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
   const [hasCopiedComponent, setHasCopiedComponent] = useState(false)
+  const [canvasZoom, setCanvasZoom] = useState(100)
 
   useEffect(() => {
     let disposed = false
@@ -187,7 +189,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             { id: 'Mobile', name: 'M端页面', width: '375px' },
           ],
         },
-        canvas: { styles: [], scripts: [] },
+        canvas: { styles: [], scripts: [], infiniteCanvas: true },
       })
 
       const blocks = editor.BlockManager
@@ -287,7 +289,82 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       const installCanvasHelpers = () => {
         installLayoutGuides()
         const documentValue = editor.Canvas.getDocument()
-        if (!documentValue || documentValue.documentElement.dataset.studioShortcuts === 'true') return
+        if (!documentValue) return
+
+        canvasGestureCleanupRef.current()
+        let spacePressed = false
+        let drag: { pointerId: number; x: number; y: number; canvasX: number; canvasY: number } | null = null
+        const canvasHost = document.getElementById('page-studio-canvas')
+        const panSurfaces = [canvasHost, documentValue.documentElement].filter((value): value is HTMLElement => Boolean(value))
+        const keyTargets: EventTarget[] = [window, documentValue]
+
+        const editableTarget = (target: EventTarget | null) => target instanceof HTMLElement
+          && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+        const setPanCursor = (active: boolean) => {
+          panSurfaces.forEach(surface => {
+            surface.style.cursor = active ? 'grabbing' : spacePressed ? 'grab' : ''
+            surface.style.userSelect = active ? 'none' : ''
+          })
+        }
+        const handleKeyDown = (event: Event) => {
+          const keyboardEvent = event as KeyboardEvent
+          if (keyboardEvent.code !== 'Space' || editableTarget(keyboardEvent.target)) return
+          spacePressed = true
+          keyboardEvent.preventDefault()
+          setPanCursor(false)
+        }
+        const handleKeyUp = (event: Event) => {
+          const keyboardEvent = event as KeyboardEvent
+          if (keyboardEvent.code !== 'Space') return
+          spacePressed = false
+          if (!drag) setPanCursor(false)
+        }
+        const handlePointerDown = (event: PointerEvent) => {
+          if (event.button !== 1 && !(event.button === 0 && spacePressed)) return
+          event.preventDefault()
+          event.stopPropagation()
+          const coords = editor.Canvas.getCoords()
+          drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, canvasX: coords.x, canvasY: coords.y }
+          ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+          setPanCursor(true)
+        }
+        const handlePointerMove = (event: PointerEvent) => {
+          if (!drag || drag.pointerId !== event.pointerId) return
+          event.preventDefault()
+          editor.Canvas.setCoords(drag.canvasX + event.clientX - drag.x, drag.canvasY + event.clientY - drag.y)
+        }
+        const stopPanning = (event: PointerEvent) => {
+          if (!drag || drag.pointerId !== event.pointerId) return
+          drag = null
+          setPanCursor(false)
+        }
+
+        keyTargets.forEach(target => {
+          target.addEventListener('keydown', handleKeyDown)
+          target.addEventListener('keyup', handleKeyUp)
+        })
+        panSurfaces.forEach(surface => {
+          surface.addEventListener('pointerdown', handlePointerDown, true)
+          surface.addEventListener('pointermove', handlePointerMove, true)
+          surface.addEventListener('pointerup', stopPanning, true)
+          surface.addEventListener('pointercancel', stopPanning, true)
+        })
+        canvasGestureCleanupRef.current = () => {
+          keyTargets.forEach(target => {
+            target.removeEventListener('keydown', handleKeyDown)
+            target.removeEventListener('keyup', handleKeyUp)
+          })
+          panSurfaces.forEach(surface => {
+            surface.removeEventListener('pointerdown', handlePointerDown, true)
+            surface.removeEventListener('pointermove', handlePointerMove, true)
+            surface.removeEventListener('pointerup', stopPanning, true)
+            surface.removeEventListener('pointercancel', stopPanning, true)
+            surface.style.cursor = ''
+            surface.style.userSelect = ''
+          })
+        }
+
+        if (documentValue.documentElement.dataset.studioShortcuts === 'true') return
         documentValue.documentElement.dataset.studioShortcuts = 'true'
         documentValue.addEventListener('keydown', event => shortcutHandlerRef.current(event), true)
       }
@@ -314,6 +391,16 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       }
       const initialDevice = page.targetDevice === 'mobile' ? 'Mobile' : 'Desktop'
       editor.setDevice(initialDevice)
+      const syncCanvasZoom = () => {
+        const zoom = Math.max(25, Math.min(200, Math.round(editor.Canvas.getZoom())))
+        if (zoom !== Math.round(editor.Canvas.getZoom())) editor.Canvas.setZoom(zoom, { from: 'studio-limit' })
+        setCanvasZoom(zoom)
+      }
+      editor.on('canvas:zoom', syncCanvasZoom)
+      syncCanvasZoom()
+      window.requestAnimationFrame(() => {
+        editor.Canvas.fitViewport({ gap: { x: 24, y: 24 }, ignoreHeight: true, zoom: value => Math.min(100, value) })
+      })
       const refreshHistory = () => {
         setCanUndo(editor.UndoManager.hasUndo())
         setCanRedo(editor.UndoManager.hasRedo())
@@ -378,6 +465,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     })
     return () => {
       disposed = true
+      canvasGestureCleanupRef.current()
       editorRef.current?.destroy()
       editorRef.current = null
     }
@@ -547,6 +635,18 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     if (!component) return
     component.addStyle({ 'margin-left': 'auto', 'margin-right': 'auto' })
     setSaved(false)
+  }
+
+  function changeCanvasZoom(nextZoom: number) {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.Canvas.setZoom(Math.max(25, Math.min(200, Math.round(nextZoom))), { from: 'studio-toolbar' })
+  }
+
+  function fitCanvasToWidth() {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.Canvas.fitViewport({ gap: { x: 24, y: 24 }, ignoreHeight: true, zoom: value => Math.min(100, value) })
   }
 
   function openSaveModuleDialog() {
@@ -974,7 +1074,18 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             {advancedMode && <><button type="button" onClick={openInteractionDialog} className={`h-7 shrink-0 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button><button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button><button type="button" onClick={openAnimationDialog} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button></>}
             <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 shrink-0 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">存为我的模块</button>
           </div>}
-          <div id="page-studio-canvas" className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
+          <div className="relative min-h-0 flex-1">
+            <div id="page-studio-canvas" className="h-full overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm" />
+            <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex items-center gap-2">
+              <span className="hidden rounded-md border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-500 shadow-sm 2xl:inline">Ctrl＋滚轮缩放 · 中键或 Space＋拖动</span>
+              <div className="pointer-events-auto inline-flex h-9 items-center overflow-hidden rounded-lg border border-slate-300 bg-white shadow-md">
+                <button type="button" onClick={() => changeCanvasZoom(canvasZoom - 10)} disabled={canvasZoom <= 25} aria-label="缩小画布" title="缩小画布（Ctrl＋滚轮）" className="h-full w-9 text-lg text-slate-700 hover:bg-slate-50 disabled:opacity-35">−</button>
+                <button type="button" onClick={() => changeCanvasZoom(100)} title="恢复 100%" className="h-full min-w-14 border-x border-slate-200 px-2 text-xs font-semibold tabular-nums text-slate-700 hover:bg-slate-50">{canvasZoom}%</button>
+                <button type="button" onClick={() => changeCanvasZoom(canvasZoom + 10)} disabled={canvasZoom >= 200} aria-label="放大画布" title="放大画布（Ctrl＋滚轮）" className="h-full w-9 text-lg text-slate-700 hover:bg-slate-50 disabled:opacity-35">＋</button>
+                <button type="button" onClick={fitCanvasToWidth} className="h-full border-l border-slate-200 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50" title="让当前页面完整适应画布宽度">适合宽度</button>
+              </div>
+            </div>
+          </div>
         </main>
 
         <aside className={`${rightPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
