@@ -184,7 +184,7 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
       </div>
 
       <div className="p-3">
-        <button type="button" onClick={onAdvanced} className="h-9 w-full rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50">需要精确数值？打开高级 CSS</button>
+        <button type="button" onClick={onAdvanced} className="h-9 w-full rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50">需要精确调整？打开样式检查器</button>
       </div>
     </div>
   )

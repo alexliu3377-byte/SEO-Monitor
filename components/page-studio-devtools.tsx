@@ -6,6 +6,13 @@ import type { Component, CssRule, Editor } from 'grapesjs'
 type PseudoState = 'normal' | 'hover'
 type RuleScope = 'element' | 'class'
 
+const COMPUTED_GROUPS = [
+  { label: '尺寸与盒模型', properties: ['display', 'box-sizing', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'border-radius'] },
+  { label: '布局', properties: ['position', 'top', 'right', 'bottom', 'left', 'z-index', 'float', 'overflow', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis', 'align-items', 'align-self', 'justify-content', 'gap', 'row-gap', 'column-gap', 'grid-template-columns', 'grid-template-rows'] },
+  { label: '文字', properties: ['color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'white-space', 'text-overflow'] },
+  { label: '外观', properties: ['background-color', 'background-image', 'border-color', 'border-style', 'box-shadow', 'opacity', 'object-fit', 'object-position', 'transform'] },
+] as const
+
 function componentLabel(component: Component) {
   const attributes = component.getAttributes()
   const tag = String(component.get('tagName') || 'div').toLowerCase()
@@ -73,6 +80,7 @@ function colorInputValue(value: string) {
 
 function BoxModel({ element, revision }: { element?: HTMLElement; revision: number }) {
   const values = useMemo(() => {
+    void revision
     if (!element) return null
     const computed = element.ownerDocument.defaultView?.getComputedStyle(element)
     if (!computed) return null
@@ -104,13 +112,14 @@ function BoxModel({ element, revision }: { element?: HTMLElement; revision: numb
   )
 }
 
-function PropertyRow({ name, value, onChange, onRemove }: { name: string; value: string; onChange: (value: string) => void; onRemove: () => void }) {
+function PropertyRow({ name, value, enabled = true, onChange, onToggle, onRemove }: { name: string; value: string; enabled?: boolean; onChange: (value: string) => void; onToggle?: () => void; onRemove: () => void }) {
   const [draft, setDraft] = useState(value)
   const isColor = name.includes('color')
   useEffect(() => setDraft(value), [value])
   return (
-    <div className="group grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_24px] items-center gap-1 border-t border-slate-100 px-2 py-1 first:border-t-0">
-      <span className="truncate font-mono text-[11px] text-violet-700" title={name}>{name}</span>
+    <div className={`group grid grid-cols-[18px_minmax(0,0.9fr)_minmax(0,1.1fr)_24px] items-center gap-1 border-t border-slate-100 px-2 py-1 first:border-t-0 ${enabled ? '' : 'bg-slate-50 opacity-60'}`}>
+      <input type="checkbox" checked={enabled} onChange={onToggle} disabled={!onToggle} className="h-3.5 min-h-0 w-3.5 cursor-pointer rounded border-slate-300 text-emerald-600 disabled:cursor-default" aria-label={`${enabled ? '停用' : '启用'} ${name}`} />
+      <span className={`truncate font-mono text-[11px] text-violet-700 ${enabled ? '' : 'line-through'}`} title={name}>{name}</span>
       <div className="flex min-w-0 items-center">
         {isColor ? <input type="color" value={colorInputValue(draft)} onChange={event => { setDraft(event.target.value); onChange(event.target.value) }} className="mr-1 h-5 w-5 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0" aria-label={`${name} 颜色选择器`} /> : null}
         <input value={draft} onChange={event => setDraft(event.target.value)} onBlur={() => draft !== value && onChange(draft)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }} className="h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 font-mono text-[11px] text-slate-800 hover:border-slate-300 focus:border-emerald-500 focus:bg-white focus:outline-none" aria-label={`${name} 的值`} />
@@ -121,7 +130,24 @@ function PropertyRow({ name, value, onChange, onRemove }: { name: string; value:
 }
 
 function RuleCard({ rule, onChanged }: { rule: CssRule; onChanged: () => void }) {
-  const entries = Object.entries(rule.getStyle()).map(([name, value]) => [name, displayValue(value)] as const)
+  const [disabled, setDisabled] = useState<Record<string, string>>({})
+  const activeEntries = Object.entries(rule.getStyle()).map(([name, value]) => [name, displayValue(value)] as const)
+  const entries = [...activeEntries, ...Object.entries(disabled).filter(([name]) => !activeEntries.some(([activeName]) => activeName === name))]
+  const toggleProperty = (name: string, value: string) => {
+    if (disabled[name] !== undefined) {
+      rule.addStyle(name, disabled[name])
+      setDisabled(current => { const next = { ...current }; delete next[name]; return next })
+    } else {
+      setDisabled(current => ({ ...current, [name]: value }))
+      rule.removeStyle(name)
+    }
+    onChanged()
+  }
+  const removeProperty = (name: string) => {
+    rule.removeStyle(name)
+    setDisabled(current => { const next = { ...current }; delete next[name]; return next })
+    onChanged()
+  }
   return (
     <section className="border-b border-slate-200 bg-white py-2">
       <div className="flex items-start gap-2 px-2 pb-1.5">
@@ -129,10 +155,82 @@ function RuleCard({ rule, onChanged }: { rule: CssRule; onChanged: () => void })
         {rule.getAtRule() ? <span className="shrink-0 rounded bg-sky-50 px-1.5 py-0.5 text-[9px] text-sky-700" title={rule.getAtRule()}>媒体</span> : null}
       </div>
       <div className="mx-2 overflow-hidden rounded border border-slate-200">
-        {entries.length ? entries.map(([name, value]) => <PropertyRow key={name} name={name} value={value} onChange={next => { rule.addStyle(name, next); onChanged() }} onRemove={() => { rule.removeStyle(name); onChanged() }} />) : <p className="px-2 py-2 text-[11px] text-slate-400">这条规则没有声明</p>}
+        {entries.length ? entries.map(([name, value]) => <PropertyRow key={name} name={name} value={value} enabled={disabled[name] === undefined} onToggle={() => toggleProperty(name, value)} onChange={next => { if (disabled[name] !== undefined) setDisabled(current => ({ ...current, [name]: next })); else rule.addStyle(name, next); onChanged() }} onRemove={() => removeProperty(name)} />) : <p className="px-2 py-2 text-[11px] text-slate-400">这条规则没有声明</p>}
       </div>
     </section>
   )
+}
+
+function InlineStyleCard({ component, onChanged }: { component: Component; onChanged: () => void }) {
+  const [disabled, setDisabled] = useState<Record<string, string>>({})
+  const activeEntries = Object.entries(component.getStyle()).map(([name, value]) => [name, displayValue(value)] as const)
+  const entries = [...activeEntries, ...Object.entries(disabled).filter(([name]) => !activeEntries.some(([activeName]) => activeName === name))]
+  const toggleProperty = (name: string, value: string) => {
+    if (disabled[name] !== undefined) {
+      component.addStyle({ [name]: disabled[name] })
+      setDisabled(current => { const next = { ...current }; delete next[name]; return next })
+    } else {
+      setDisabled(current => ({ ...current, [name]: value }))
+      component.removeStyle(name)
+    }
+    onChanged()
+  }
+  const removeProperty = (name: string) => {
+    component.removeStyle(name)
+    setDisabled(current => { const next = { ...current }; delete next[name]; return next })
+    onChanged()
+  }
+  return (
+    <section className="border-b border-slate-200 bg-white py-2">
+      <div className="flex items-center justify-between gap-2 px-2 pb-1.5">
+        <code className="text-[11px] font-semibold text-slate-900">element.style</code>
+        <span className="text-[9px] text-slate-400">仅此元素</span>
+      </div>
+      <div className="mx-2 overflow-hidden rounded border border-slate-200">
+        {entries.length ? entries.map(([name, value]) => <PropertyRow key={name} name={name} value={value} enabled={disabled[name] === undefined} onToggle={() => toggleProperty(name, value)} onChange={next => { if (disabled[name] !== undefined) setDisabled(current => ({ ...current, [name]: next })); else component.addStyle({ [name]: next }); onChanged() }} onRemove={() => removeProperty(name)} />) : <p className="px-2 py-2 text-[11px] text-slate-400">当前元素没有内联样式</p>}
+      </div>
+    </section>
+  )
+}
+
+export function PageStudioComputedStyle({ editor }: { editor: Editor | null }) {
+  const [revision, setRevision] = useState(0)
+  const [query, setQuery] = useState('')
+
+  useEffect(() => {
+    if (!editor) return
+    const refresh = () => setRevision(value => value + 1)
+    editor.on('component:selected component:deselected update undo redo', refresh)
+    return () => { editor.off('component:selected component:deselected update undo redo', refresh) }
+  }, [editor])
+
+  const selected = editor?.getSelected() ?? null
+  const element = selected?.getEl() as HTMLElement | undefined
+  const groups = useMemo(() => {
+    void revision
+    const view = element?.ownerDocument.defaultView
+    if (!element || !view) return []
+    const computed = view.getComputedStyle(element)
+    const normalized = query.trim().toLowerCase()
+    return COMPUTED_GROUPS.map(group => ({
+      ...group,
+      rows: group.properties
+        .filter(name => !normalized || name.includes(normalized) || computed.getPropertyValue(name).toLowerCase().includes(normalized))
+        .map(name => ({ name, value: computed.getPropertyValue(name) || '—' })),
+    })).filter(group => group.rows.length)
+  }, [element, query, revision])
+
+  if (!editor || !selected || !element) return <div className="p-5 text-center text-xs leading-5 text-slate-500">先在画布或左侧结构中选择一个元素。</div>
+
+  return <div className="min-h-full bg-white">
+    <div className="sticky top-0 z-10 border-b border-slate-200 bg-white p-2"><label className="block"><span className="sr-only">筛选计算样式</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="筛选属性或数值" className="h-8 w-full rounded border border-slate-300 px-2 font-mono text-[11px] outline-none focus:border-emerald-500" /></label></div>
+    <BoxModel element={element} revision={revision} />
+    {groups.map(group => <section key={group.label} className="border-b border-slate-200">
+      <h3 className="bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-700">{group.label}</h3>
+      <dl>{group.rows.map(row => <div key={row.name} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-2 border-t border-slate-100 px-3 py-1.5 first:border-t-0"><dt className="truncate font-mono text-[10px] text-violet-700" title={row.name}>{row.name}</dt><dd className="break-all font-mono text-[10px] text-slate-700" title={row.value}>{row.value}</dd></div>)}</dl>
+    </section>)}
+    {!groups.length ? <p className="p-5 text-center text-xs text-slate-400">没有符合条件的计算样式</p> : null}
+  </div>
 }
 
 export default function PageStudioDevtools({ editor }: { editor: Editor | null }) {
@@ -151,8 +249,12 @@ export default function PageStudioDevtools({ editor }: { editor: Editor | null }
 
   const selected = editor?.getSelected() ?? null
   const element = selected?.getEl() as HTMLElement | undefined
-  const trail = useMemo(() => componentTrail(selected), [selected, revision])
+  const trail = useMemo(() => {
+    void revision
+    return componentTrail(selected)
+  }, [selected, revision])
   const rules = useMemo(() => {
+    void revision
     if (!editor || !element) return []
     return editor.Css.getRules().filter(rule => ruleMatchesElement(rule, element, state)).reverse()
   }, [editor, element, state, revision])
@@ -223,6 +325,7 @@ export default function PageStudioDevtools({ editor }: { editor: Editor | null }
         <h3 className="text-[11px] font-semibold text-slate-700">匹配的 CSS 规则</h3>
         <span className="text-[10px] text-slate-500">{rules.length} 条 · 后声明在前</span>
       </div>
+      <InlineStyleCard component={selected} onChanged={() => setRevision(value => value + 1)} />
       {rules.length ? rules.map((rule, index) => <RuleCard key={`${rule.cid}-${index}`} rule={rule} onChanged={() => setRevision(value => value + 1)} />) : <div className="p-4 text-center text-[11px] leading-5 text-slate-500">当前状态没有匹配规则。可在上方直接新增属性。</div>}
     </div>
   )

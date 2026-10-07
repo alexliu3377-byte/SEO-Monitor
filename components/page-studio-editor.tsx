@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import type { Component, Editor } from 'grapesjs'
 import AppDialog from '@/components/app-dialog'
-import PageStudioDevtools from '@/components/page-studio-devtools'
+import PageStudioDevtools, { PageStudioComputedStyle } from '@/components/page-studio-devtools'
 import PageStudioModuleLibrary from '@/components/page-studio-module-library'
 import PageStudioQuickStyle from '@/components/page-studio-quick-style'
 import {
@@ -110,7 +110,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [leftPanel, setLeftPanel] = useState<'blocks' | 'layers'>('blocks')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
-  const [rightPanel, setRightPanel] = useState<'quick' | 'style' | 'devtools' | 'traits'>('quick')
+  const [rightPanel, setRightPanel] = useState<'quick' | 'style' | 'devtools' | 'computed' | 'traits'>('quick')
   const [advancedMode, setAdvancedMode] = useState(false)
   const [dialog, setDialog] = useState<'preview' | 'audit' | 'add-page' | 'import-code' | 'changes' | 'save-module' | 'module-library' | 'module-versions' | 'import-module' | 'animation' | 'interaction' | 'versions' | null>(null)
   const [newPageName, setNewPageName] = useState('')
@@ -1088,11 +1088,14 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           </div>
         </main>
 
-        <aside className={`${rightPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
-          <div className={`sticky top-0 z-10 grid ${advancedMode ? 'grid-cols-4' : 'grid-cols-2'} border-b border-slate-200 bg-white p-1.5`}><button type="button" onClick={() => setRightPanel('quick')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'quick' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>常用设置</button><button type="button" onClick={() => setRightPanel('traits')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'traits' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>图片与链接</button>{advancedMode && <><button type="button" onClick={() => setRightPanel('style')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'style' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>详细样式</button><button type="button" onClick={() => setRightPanel('devtools')} className={`h-8 rounded-md text-[11px] font-medium ${rightPanel === 'devtools' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>CSS 高级</button></>}</div>
-          <div className={rightPanel === 'quick' ? '' : 'hidden'}><PageStudioQuickStyle editor={editorRef.current} onAdvanced={() => { setAdvancedMode(true); setRightPanel('devtools') }} /></div>
-          <div id="page-studio-styles" className={`page-studio-panel ${rightPanel === 'style' ? '' : 'hidden'}`} />
+        <aside className={`${rightPanelOpen ? 'w-[360px]' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
+          <div className="sticky top-0 z-20 grid grid-cols-5 border-b border-slate-200 bg-white p-1.5">
+            {([['quick', '快捷'], ['devtools', '样式'], ['computed', '计算值'], ['style', '布局'], ['traits', '属性']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setRightPanel(value)} className={`h-8 rounded-md px-1 text-[11px] font-medium ${rightPanel === value ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>{label}</button>)}
+          </div>
+          <div className={rightPanel === 'quick' ? '' : 'hidden'}><PageStudioQuickStyle editor={editorRef.current} onAdvanced={() => setRightPanel('devtools')} /></div>
           <div className={rightPanel === 'devtools' ? '' : 'hidden'}><PageStudioDevtools editor={editorRef.current} /></div>
+          <div className={rightPanel === 'computed' ? '' : 'hidden'}><PageStudioComputedStyle editor={editorRef.current} /></div>
+          <div id="page-studio-styles" className={`page-studio-panel ${rightPanel === 'style' ? '' : 'hidden'}`} />
           <div id="page-studio-traits" className={`page-studio-panel ${rightPanel === 'traits' ? '' : 'hidden'}`} />
         </aside>
       </div>
