@@ -1037,10 +1037,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         <button type="button" aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{leftPanelOpen ? '隐藏模块' : '选择模块'}</button>
         <button type="button" aria-pressed={rightPanelOpen} onClick={() => setRightPanelOpen(value => !value)} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">{rightPanelOpen ? '隐藏设置' : '显示设置'}</button>
         <button type="button" onClick={showPreview} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">预览</button>
+        <button type="button" aria-pressed={advancedMode} onClick={() => { const next = !advancedMode; setAdvancedMode(next); setRightPanel('quick'); if (!next) setLeftPanel('blocks') }} className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium ${advancedMode ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{advancedMode ? '返回简易搭建' : '精确调整'}</button>
         {advancedMode && <><button type="button" onClick={() => setDialog('audit')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">百度检查</button><button type="button" onClick={() => setDialog('import-code')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">粘贴代码</button><button type="button" onClick={() => void openVersions()} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">版本</button><button type="button" onClick={() => setDialog('changes')} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">修改记录</button></>}
-        <button type="button" aria-pressed={advancedMode} onClick={() => { setAdvancedMode(value => !value); setRightPanel('quick') }} className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium ${advancedMode ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{advancedMode ? '退出高级' : '高级模式'}</button>
         <button type="button" disabled={syncing} onClick={() => void persist(true, '手动保存')} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">{syncing ? '保存中' : '保存'}</button>
-        <button type="button" onClick={() => void copyCurrentCode()} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">{copied ? '已复制' : '复制代码'}</button>
+        {advancedMode && <button type="button" onClick={() => void copyCurrentCode()} className="inline-flex h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">{copied ? '已复制' : '复制代码'}</button>}
         <button type="button" onClick={() => void exportCurrent()} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700">导出当前页</button>
       </header>
 
@@ -1048,9 +1048,9 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <aside className={`${leftPanelOpen ? 'w-80' : 'hidden'} shrink-0 overflow-y-auto border-r border-slate-200 bg-white`}>
-          <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>选择模块</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>高级结构</button></div>
-          <div className={leftPanel === 'blocks' ? '' : 'hidden'}><PageStudioModuleLibrary editor={editorRef.current} favorites={favoriteModules} onManageFavorites={() => setDialog('module-library')} /><div id="page-studio-blocks" className="hidden" /></div>
-          <div id="page-studio-layers" className={`page-studio-panel ${leftPanel === 'layers' ? '' : 'hidden'}`} />
+          {advancedMode ? <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white p-1.5"><button type="button" onClick={() => setLeftPanel('blocks')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'blocks' ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500'}`}>添加内容</button><button type="button" onClick={() => setLeftPanel('layers')} className={`h-8 flex-1 rounded-md text-xs font-medium ${leftPanel === 'layers' ? 'bg-slate-100 text-slate-900' : 'text-slate-500'}`}>页面结构</button></div> : <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3"><p className="text-sm font-semibold text-slate-900">搭建页面</p><p className="mt-0.5 text-xs text-slate-500">选一个模板，或继续添加内容模块</p></div>}
+          <div className={!advancedMode || leftPanel === 'blocks' ? '' : 'hidden'}><PageStudioModuleLibrary editor={editorRef.current} favorites={favoriteModules} onManageFavorites={() => setDialog('module-library')} /><div id="page-studio-blocks" className="hidden" /></div>
+          <div id="page-studio-layers" className={`page-studio-panel ${advancedMode && leftPanel === 'layers' ? '' : 'hidden'}`} />
         </aside>
 
         <main className="relative flex min-w-0 flex-1 flex-col gap-2 bg-slate-200 p-4">
@@ -1059,7 +1059,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           {selectedComponentName && <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-300 bg-white px-2 shadow-sm">
             <span className="mr-1 max-w-36 truncate text-xs text-slate-500" title={selectedComponentName}>已选：{selectedComponentName}</span>
             <button type="button" onClick={selectParentComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
-            <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+            {advancedMode ? <><div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
               <button type="button" onClick={copySelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="复制当前元素（Ctrl+C）">复制</button>
               <button type="button" disabled={!hasCopiedComponent} onClick={pasteSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="粘贴到当前元素后面（Ctrl+V）">粘贴</button>
               <button type="button" onClick={duplicateSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="直接复制一份（Ctrl+D）">复制一份</button>
@@ -1070,7 +1070,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             <button type="button" onClick={() => setSelectedWidth('33.333%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/3</button>
             <button type="button" onClick={() => setSelectedWidth('50%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/2</button>
             <button type="button" onClick={() => setSelectedWidth('100%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">全宽</button>
-            <button type="button" onClick={centerSelectedComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">模块居中</button>
+            <button type="button" onClick={centerSelectedComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">模块居中</button></> : <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white"><button type="button" onClick={duplicateSelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="直接复制一份">复制一份</button><button type="button" onClick={deleteSelectedComponent} className="h-7 border-l border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50" title="删除当前元素">删除</button></div>}
             {advancedMode && <><button type="button" onClick={openInteractionDialog} className={`h-7 shrink-0 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button><button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button><button type="button" onClick={openAnimationDialog} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button></>}
             <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 shrink-0 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">存为我的模块</button>
           </div>}
@@ -1088,15 +1088,15 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
           </div>
         </main>
 
-        <aside className={`${rightPanelOpen ? 'w-[360px]' : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
-          <div className="sticky top-0 z-20 grid grid-cols-5 border-b border-slate-200 bg-white p-1.5">
+        <aside className={`${rightPanelOpen ? (advancedMode ? 'w-[360px]' : 'w-80') : 'hidden'} shrink-0 overflow-y-auto border-l border-slate-200 bg-white`}>
+          {advancedMode ? <div className="sticky top-0 z-20 grid grid-cols-5 border-b border-slate-200 bg-white p-1.5">
             {([['quick', '快捷'], ['devtools', '样式'], ['computed', '计算值'], ['style', '布局'], ['traits', '属性']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setRightPanel(value)} className={`h-8 rounded-md px-1 text-[11px] font-medium ${rightPanel === value ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>{label}</button>)}
-          </div>
-          <div className={rightPanel === 'quick' ? '' : 'hidden'}><PageStudioQuickStyle editor={editorRef.current} onAdvanced={() => setRightPanel('devtools')} /></div>
-          <div className={rightPanel === 'devtools' ? '' : 'hidden'}><PageStudioDevtools editor={editorRef.current} /></div>
-          <div className={rightPanel === 'computed' ? '' : 'hidden'}><PageStudioComputedStyle editor={editorRef.current} /></div>
-          <div id="page-studio-styles" className={`page-studio-panel ${rightPanel === 'style' ? '' : 'hidden'}`} />
-          <div id="page-studio-traits" className={`page-studio-panel ${rightPanel === 'traits' ? '' : 'hidden'}`} />
+          </div> : <div className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3"><p className="text-sm font-semibold text-slate-900">调整当前模块</p><p className="mt-0.5 text-xs text-slate-500">先在画布中点选要修改的内容</p></div>}
+          <div className={!advancedMode || rightPanel === 'quick' ? '' : 'hidden'}><PageStudioQuickStyle editor={editorRef.current} onAdvanced={() => { setAdvancedMode(true); setRightPanel('devtools'); setRightPanelOpen(true) }} /></div>
+          <div className={advancedMode && rightPanel === 'devtools' ? '' : 'hidden'}><PageStudioDevtools editor={editorRef.current} /></div>
+          <div className={advancedMode && rightPanel === 'computed' ? '' : 'hidden'}><PageStudioComputedStyle editor={editorRef.current} /></div>
+          <div id="page-studio-styles" className={`page-studio-panel ${advancedMode && rightPanel === 'style' ? '' : 'hidden'}`} />
+          <div id="page-studio-traits" className={`page-studio-panel ${advancedMode && rightPanel === 'traits' ? '' : 'hidden'}`} />
         </aside>
       </div>
 

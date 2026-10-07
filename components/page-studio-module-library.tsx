@@ -16,6 +16,17 @@ type StudioModule = {
   html: string
 }
 
+type LibraryView = 'templates' | 'modules' | 'favorites'
+
+type PageTemplate = {
+  id: string
+  name: string
+  description: string
+  accent: string
+  preview: 'download' | 'content'
+  html: string
+}
+
 const PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><rect width="640" height="360" fill="#eef2f7"/><path d="m145 285 120-128 78 82 58-61 96 107H145z" fill="#cbd5e1"/><circle cx="438" cy="112" r="32" fill="#cbd5e1"/></svg>')}`
 const section = 'box-sizing:border-box;width:100%;max-width:1200px;margin:0 auto 16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;'
 const heading = 'margin:0;color:#0f172a;font-size:24px;line-height:1.3;'
@@ -54,7 +65,30 @@ const MODULES: StudioModule[] = [
   { id: 'carousel-arrows', name: '左右切换按钮', description: '用于轮播或横向内容区', category: '基础组件', preview: 'carousel', html: `<div data-studio-module="左右切换按钮" style="${section}display:flex;align-items:center;justify-content:space-between;min-height:100px;"><button type="button" aria-label="上一项" style="width:44px;height:44px;border:1px solid #cbd5e1;border-radius:50%;background:#fff;color:#334155;font-size:24px;">‹</button><span style="color:#94a3b8;">轮播内容区域</span><button type="button" aria-label="下一项" style="width:44px;height:44px;border:1px solid #cbd5e1;border-radius:50%;background:#fff;color:#334155;font-size:24px;">›</button></div>` },
 ]
 
-const CATEGORIES: ModuleCategory[] = ['常用', '导航', '内容', '广告', '布局', '按钮', '基础组件', '我的模块']
+function combineModules(...ids: string[]) {
+  return ids.map(id => MODULES.find(module => module.id === id)?.html || '').join('')
+}
+
+const PAGE_TEMPLATES: PageTemplate[] = [
+  {
+    id: 'nostalgia-download-home',
+    name: '怀旧下载首页',
+    description: '导航、横幅、游戏推荐、专题与下载列表',
+    accent: 'from-amber-100 via-orange-50 to-emerald-50',
+    preview: 'download',
+    html: `<div data-studio-module="怀旧下载首页模板" style="box-sizing:border-box;width:100%;padding:16px 0 32px;background:#f1f5f9;">${combineModules('nav-logo', 'banner-ad', 'section-title-tabs', 'icon-recommend-section', 'feature-cards', 'download-list', 'pager')}</div>`,
+  },
+  {
+    id: 'content-app-home',
+    name: '资讯／应用首页',
+    description: '主导航、栏目切换、焦点专题、资讯与应用内容',
+    accent: 'from-sky-100 via-indigo-50 to-violet-100',
+    preview: 'content',
+    html: `<div data-studio-module="资讯应用首页模板" style="box-sizing:border-box;width:100%;padding:16px 0 32px;background:#f8fafc;">${combineModules('nav-logo', 'nav-compact', 'feature-cards', 'info-list', 'waterfall', 'pager')}</div>`,
+  },
+]
+
+const CATEGORIES: ModuleCategory[] = ['常用', '导航', '内容', '广告', '布局', '按钮', '基础组件']
 const COMMON_IDS = new Set(['nav-logo', 'icon-recommend-section', 'section-title-tabs', 'icon-grid', 'app-icon-card', 'app-icon-card-meta', 'compact-list-row', 'more-button', 'view-button', 'download-button', 'banner-ad', 'two-columns', 'three-columns'])
 const CONTAINER_TAGS = new Set(['main', 'header', 'footer', 'section', 'article', 'aside', 'nav', 'div', 'ul', 'ol', 'li'])
 
@@ -94,7 +128,20 @@ function ModulePreview({ kind }: { kind: PreviewKind }) {
   return <div className="grid h-full gap-1.5 p-2" style={{ gridTemplateColumns: `repeat(${bars}, minmax(0, 1fr))` }}>{Array.from({ length: kind === 'waterfall' ? 8 : bars }).map((_, item) => <span key={item} className={`${kind === 'banner' || kind === 'image' ? 'min-h-10' : 'min-h-5'} rounded bg-gradient-to-br from-slate-200 to-slate-300`} />)}</div>
 }
 
+function PageTemplatePreview({ kind }: { kind: PageTemplate['preview'] }) {
+  return <div className="h-full p-3">
+    <div className="mx-auto h-full max-w-[210px] overflow-hidden rounded-md border border-white/80 bg-white/90 shadow-sm">
+      <div className="flex h-5 items-center gap-1.5 border-b border-slate-200 px-2"><span className="h-2 w-7 rounded bg-emerald-500" /><span className="ml-auto h-1.5 w-5 rounded bg-slate-300" /><span className="h-1.5 w-5 rounded bg-slate-300" /><span className="h-1.5 w-5 rounded bg-slate-300" /></div>
+      <div className="m-2 h-7 rounded bg-gradient-to-r from-slate-300 to-slate-200" />
+      {kind === 'download'
+        ? <><div className="mx-2 grid grid-cols-6 gap-1">{[1,2,3,4,5,6].map(item => <span key={item} className="aspect-square rounded bg-gradient-to-br from-violet-300 to-indigo-400" />)}</div><div className="mx-2 mt-2 grid grid-cols-2 gap-1.5"><span className="h-8 rounded bg-amber-100" /><span className="h-8 rounded bg-emerald-100" /></div></>
+        : <><div className="mx-2 grid grid-cols-3 gap-1">{[1,2,3].map(item => <span key={item} className="h-7 rounded bg-sky-100" />)}</div><div className="mx-2 mt-2 space-y-1.5">{[1,2,3].map(item => <span key={item} className="block h-1.5 rounded bg-slate-200" />)}</div></>}
+    </div>
+  </div>
+}
+
 export default function PageStudioModuleLibrary({ editor, favorites, onManageFavorites }: { editor: Editor | null; favorites: PageStudioFavoriteModule[]; onManageFavorites: () => void }) {
+  const [view, setView] = useState<LibraryView>('templates')
   const [category, setCategory] = useState<ModuleCategory>('常用')
   const [query, setQuery] = useState('')
   const [insertAt, setInsertAt] = useState<'selection' | 'page'>('page')
@@ -102,10 +149,10 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
   const insertionTargetRef = useRef<Component | null>(null)
   const normalizedQuery = query.trim().toLowerCase()
   const modules = useMemo(() => MODULES.filter(module => {
-    const matchesCategory = category === '常用' ? COMMON_IDS.has(module.id) : category === '我的模块' ? false : module.category === category
+    const matchesCategory = category === '常用' ? COMMON_IDS.has(module.id) : module.category === category
     return matchesCategory && (!normalizedQuery || `${module.name} ${module.description}`.toLowerCase().includes(normalizedQuery))
   }), [category, normalizedQuery])
-  const visibleFavorites = category === '我的模块' ? favorites.filter(item => !normalizedQuery || `${item.name} ${item.category}`.toLowerCase().includes(normalizedQuery)) : []
+  const visibleFavorites = favorites.filter(item => !normalizedQuery || `${item.name} ${item.category}`.toLowerCase().includes(normalizedQuery))
 
   useEffect(() => {
     if (!editor) return
@@ -124,9 +171,9 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
     }
   }, [editor])
 
-  function addHtml(html: string, css?: string) {
+  function addHtml(html: string, css?: string, forcePage = false) {
     if (!editor) return
-    const target = insertAt === 'selection' ? insertionTargetRef.current : null
+    const target = !forcePage && insertAt === 'selection' ? insertionTargetRef.current : null
     if (target?.getAttributes()['data-studio-slot']) {
       const placeholders = target.components().filter((component: Component) => component.getAttributes()['data-studio-placeholder'] === 'true')
       placeholders.forEach((component: Component) => component.remove())
@@ -138,27 +185,62 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
     if (component) editor.select(component)
   }
 
+  function switchView(nextView: LibraryView) {
+    setView(nextView)
+    setQuery('')
+  }
+
   return <div className="bg-white">
-    <div className="border-b border-slate-200 p-3">
-      <label className="block"><span className="sr-only">搜索模块</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索导航、列表、广告…" className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
+    <div className="grid grid-cols-3 gap-1 border-b border-slate-200 bg-slate-50 p-2" role="tablist" aria-label="搭建内容选择">
+      {([
+        ['templates', '整页模板'],
+        ['modules', '内容模块'],
+        ['favorites', '我的收藏'],
+      ] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => switchView(value)} className={`h-9 rounded-md px-2 text-xs font-semibold transition ${view === value ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}>{label}</button>)}
+    </div>
+
+    {view === 'templates' && <>
+      <div className="border-b border-emerald-100 bg-emerald-50 px-3 py-2.5 text-[11px] leading-4 text-emerald-800">
+        点击模板会把整套结构加入<strong>页面底部</strong>，不会覆盖你已经做好的内容。
+      </div>
+      <div className="space-y-3 p-3">
+        {PAGE_TEMPLATES.map(template => <button key={template.id} type="button" disabled={!editor} onClick={() => addHtml(template.html, undefined, true)} className="group block w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
+          <div className={`h-28 border-b border-slate-100 bg-gradient-to-br ${template.accent}`}><PageTemplatePreview kind={template.preview} /></div>
+          <span className="flex items-center justify-between gap-2 px-3 pt-2.5 text-sm font-bold text-slate-800 group-hover:text-emerald-800"><span>{template.name}</span><span className="text-[11px] font-semibold text-emerald-600">一键加入</span></span>
+          <span className="block px-3 pb-3 pt-1 text-[11px] leading-4 text-slate-500">{template.description}</span>
+        </button>)}
+      </div>
+    </>}
+
+    {(view === 'modules' || view === 'favorites') && <div className="border-b border-slate-200 p-3">
+      <label className="block"><span className="sr-only">搜索{view === 'favorites' ? '收藏' : '模块'}</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={view === 'favorites' ? '搜索我的收藏…' : '搜索导航、列表、广告…'} className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
       {targetLabel ? <div className="mt-2 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 p-1">
         <button type="button" aria-pressed={insertAt === 'selection'} onClick={() => setInsertAt('selection')} className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-[11px] font-medium ${insertAt === 'selection' ? 'bg-white text-emerald-800 shadow-sm' : 'text-emerald-700 hover:bg-white/60'}`} title={`加入“${targetLabel}”里面`}>加入：{targetLabel}</button>
         <button type="button" aria-pressed={insertAt === 'page'} onClick={() => setInsertAt('page')} className={`shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium ${insertAt === 'page' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:bg-white/60'}`}>页面底部</button>
-      </div> : <p className="mt-2 text-[11px] leading-4 text-slate-500">先选中画布中的模块或栏位，再点击这里的内容即可放进去；未选中时会加入页面底部。</p>}
-    </div>
-    <div className="flex gap-1 overflow-x-auto border-b border-slate-200 p-2" style={{ scrollbarWidth: 'thin' }}>{CATEGORIES.map(item => <button key={item} type="button" onClick={() => setCategory(item)} className={`h-8 shrink-0 rounded-md px-2.5 text-xs font-medium ${category === item ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{item}</button>)}</div>
-    <div className="grid grid-cols-2 gap-2 p-3">
-      {modules.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html)} className="group overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
-        <div className="h-16 border-b border-slate-100 bg-slate-50"><ModulePreview kind={module.preview} /></div>
-        <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800 group-hover:text-emerald-800">{module.name}</span>
-        <span className="block px-2.5 pb-2 pt-0.5 text-[10px] leading-4 text-slate-500">{module.description}</span>
-      </button>)}
-      {visibleFavorites.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html, module.css)} className="group overflow-hidden rounded-lg border border-amber-200 bg-white text-left hover:border-amber-400 hover:shadow-sm">
-        <div className="flex h-16 items-center justify-center border-b border-amber-100 bg-amber-50 text-xs font-semibold text-amber-700">我的模块</div>
-        <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800">{module.name}</span><span className="block px-2.5 pb-2 pt-0.5 text-[10px] text-slate-500">{module.category}</span>
-      </button>)}
-    </div>
-    {category === '我的模块' && <div className="border-t border-slate-100 p-3"><button type="button" onClick={onManageFavorites} className="h-9 w-full rounded-md border border-amber-300 bg-amber-50 text-xs font-semibold text-amber-800 hover:bg-amber-100">管理我的模块</button></div>}
-    {modules.length === 0 && visibleFavorites.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-400">没有找到符合条件的模块</div>}
+      </div> : <p className="mt-2 text-[11px] leading-4 text-slate-500">先选中画布中的模块或栏位即可放进去；未选中时会加入页面底部。</p>}
+    </div>}
+
+    {view === 'modules' && <>
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-200 p-2" style={{ scrollbarWidth: 'thin' }}>{CATEGORIES.map(item => <button key={item} type="button" onClick={() => setCategory(item)} className={`h-8 shrink-0 rounded-md px-2.5 text-xs font-medium ${category === item ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{item}</button>)}</div>
+      <div className="grid grid-cols-2 gap-2 p-3">
+        {modules.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html)} className="group overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
+          <div className="h-16 border-b border-slate-100 bg-slate-50"><ModulePreview kind={module.preview} /></div>
+          <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800 group-hover:text-emerald-800">{module.name}</span>
+          <span className="block px-2.5 pb-2 pt-0.5 text-[10px] leading-4 text-slate-500">{module.description}</span>
+        </button>)}
+      </div>
+      {modules.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-400">没有找到符合条件的模块</div>}
+    </>}
+
+    {view === 'favorites' && <>
+      <div className="grid grid-cols-2 gap-2 p-3">
+        {visibleFavorites.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html, module.css)} className="group overflow-hidden rounded-lg border border-amber-200 bg-white text-left transition hover:border-amber-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50">
+          <div className="flex h-16 items-center justify-center border-b border-amber-100 bg-amber-50 text-xs font-semibold text-amber-700">已收藏模块</div>
+          <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800">{module.name}</span><span className="block px-2.5 pb-2 pt-0.5 text-[10px] text-slate-500">{module.category}</span>
+        </button>)}
+      </div>
+      {visibleFavorites.length === 0 && <div className="px-4 py-10 text-center text-xs leading-5 text-slate-400">{favorites.length === 0 ? '还没有收藏模块；在画布中选中喜欢的模块后点击“存为我的模块”。' : '没有找到符合条件的收藏'}</div>}
+      <div className="border-t border-slate-100 p-3"><button type="button" onClick={onManageFavorites} className="h-9 w-full rounded-md border border-amber-300 bg-amber-50 text-xs font-semibold text-amber-800 hover:bg-amber-100">管理我的收藏</button></div>
+    </>}
   </div>
 }

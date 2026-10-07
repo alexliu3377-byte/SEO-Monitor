@@ -43,6 +43,38 @@ const NUMBER_PRESETS = {
   same: { end: 10, featured: '#475569', normal: '#475569', normalText: '#ffffff' },
 } as const
 
+const SPACING_PRESETS = {
+  compact: { label: '紧凑', padding: '8px', gap: '8px' },
+  standard: { label: '标准', padding: '16px', gap: '16px' },
+  relaxed: { label: '宽松', padding: '24px', gap: '24px' },
+} as const
+
+type SpacingPreset = keyof typeof SPACING_PRESETS
+type SpacingStyleValue = string | null
+type SpacingSnapshot = {
+  parent: Record<string, SpacingStyleValue>
+  children: Array<{ component: Component; style: Record<string, SpacingStyleValue> }>
+}
+
+const SPACING_PARENT_PROPERTIES = ['padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'gap', 'row-gap', 'column-gap'] as const
+const SPACING_CHILD_PROPERTIES = ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left'] as const
+const spacingSnapshots = new WeakMap<Component, SpacingSnapshot>()
+
+function captureInlineStyles(component: Component, properties: readonly string[]) {
+  const style = component.getStyle() as Record<string, unknown>
+  return properties.reduce<Record<string, SpacingStyleValue>>((snapshot, property) => {
+    snapshot[property] = Object.prototype.hasOwnProperty.call(style, property) ? String(style[property] ?? '') : null
+    return snapshot
+  }, {})
+}
+
+function restoreInlineStyles(component: Component, snapshot: Record<string, SpacingStyleValue>) {
+  Object.entries(snapshot).forEach(([property, value]) => {
+    if (value === null) component.removeStyle(property)
+    else component.addStyle({ [property]: value })
+  })
+}
+
 export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: Editor | null; onAdvanced: () => void }) {
   const [, setRevision] = useState(0)
   useEffect(() => {
@@ -121,6 +153,44 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
     })
   }
 
+  function applySpacingPreset(presetName: SpacingPreset) {
+    if (!spacingSnapshots.has(component)) {
+      const children: SpacingSnapshot['children'] = []
+      component.components().forEach((child: Component) => {
+        children.push({ component: child, style: captureInlineStyles(child, SPACING_CHILD_PROPERTIES) })
+      })
+      spacingSnapshots.set(component, {
+        parent: captureInlineStyles(component, SPACING_PARENT_PROPERTIES),
+        children,
+      })
+    }
+
+    const preset = SPACING_PRESETS[presetName]
+    ;['padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'row-gap', 'column-gap'].forEach(property => component.removeStyle(property))
+    component.addStyle({ padding: preset.padding, gap: preset.gap })
+    component.components().forEach((child: Component) => {
+      SPACING_CHILD_PROPERTIES.forEach(property => child.removeStyle(property))
+    })
+    setRevision(value => value + 1)
+  }
+
+  function restoreSpacing() {
+    const snapshot = spacingSnapshots.get(component)
+    if (!snapshot) return
+    restoreInlineStyles(component, snapshot.parent)
+    snapshot.children.forEach(childSnapshot => {
+      restoreInlineStyles(childSnapshot.component, childSnapshot.style)
+    })
+    spacingSnapshots.delete(component)
+    setRevision(value => value + 1)
+  }
+
+  const componentStyle = component.getStyle() as Record<string, unknown>
+  const activeSpacingPreset = (Object.entries(SPACING_PRESETS).find(([, preset]) => (
+    String(componentStyle.padding || '') === preset.padding && String(componentStyle.gap || '') === preset.gap
+  ))?.[0] ?? '') as SpacingPreset | ''
+  const canRestoreSpacing = spacingSnapshots.has(component)
+
   return (
     <div className="bg-white">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
@@ -128,6 +198,19 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
         <p className="mt-1 truncate font-mono text-xs font-semibold text-slate-800" title={labelFor(component)}>{labelFor(component)}</p>
         <p className="mt-1 text-[11px] leading-4 text-slate-500">下面的设置只改当前选中的元素，适合快速调整。</p>
       </div>
+
+      {hasMultipleChildren ? <div className="border-b border-emerald-100 bg-emerald-50/70 px-3 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold text-emerald-950">自动整理间距</p>
+            <p className="mt-1 text-[10px] leading-4 text-emerald-700">一键统一当前模块的内边距和内容间距，下方仍可手动调整。</p>
+          </div>
+          <button type="button" onClick={restoreSpacing} disabled={!canRestoreSpacing} className="h-7 shrink-0 rounded-md border border-emerald-200 bg-white px-2 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40">恢复原来</button>
+        </div>
+        <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+          {(Object.entries(SPACING_PRESETS) as Array<[SpacingPreset, (typeof SPACING_PRESETS)[SpacingPreset]]>).map(([key, preset]) => <button key={key} type="button" onClick={() => applySpacingPreset(key)} className={`h-9 rounded-md border px-1 text-[11px] font-semibold transition ${activeSpacingPreset === key ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-200 bg-white text-emerald-800 hover:border-emerald-500 hover:bg-emerald-100'}`}><span className="block">{preset.label}</span><span className={`block text-[9px] font-normal ${activeSpacingPreset === key ? 'text-emerald-50' : 'text-emerald-600'}`}>{Number.parseInt(preset.gap, 10)}px</span></button>)}
+        </div>
+      </div> : null}
 
       {isImage ? <div className="border-b border-blue-100 bg-blue-50 px-3 py-3">
         <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-blue-900">图片设置</p><button type="button" onClick={removeImage} className="h-7 rounded-md border border-red-200 bg-white px-2.5 text-[11px] font-medium text-red-600 hover:bg-red-50">删除图片</button></div>
