@@ -2,6 +2,7 @@ import { computeOutcomeScore, explainUpdateEffectScore, fetchFirstRankedDates, b
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { buildDeviceRankSnapshots, fetchLatestUrlRanks, type DeviceRankSnapshot } from '@/lib/tracking-rank-lookup'
+import { dedupeTrackingTargets } from '@/lib/tracking-target-dedupe'
 import {
   computeSourceEffectiveness, currentMonth, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
@@ -371,16 +372,22 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     dedupedRows.push(...page)
     if (page.length < pageSize) break
   }
+  // Keep every submission in member_claimed_keywords for audit history, while
+  // crediting only the latest submission for the same page + final keyword.
+  // Otherwise an initial “新增” followed by an “更新” is matched to the same
+  // current rank evidence and appears (and scores) twice in the outcome report.
+  const reportRows = dedupeTrackingTargets(dedupedRows)
+
   const usernameOf = await resolveUserDisplayNames(
     service,
-    dedupedRows.map(row => row.user_id),
+    reportRows.map(row => row.user_id),
     memberList
   )
 
   // Fetch source for deduped claim_ids (batched to avoid URL length limits —
   // UUIDs are fixed-width so 200/batch is safe here, unlike the CJK-keyword
   // case elsewhere in this codebase).
-  const claimIds = dedupedRows.map(r => r.claim_id)
+  const claimIds = reportRows.map(r => r.claim_id)
   const claimSourceMap = new Map<string, string | null>()
   const BATCH = 200
   for (let i = 0; i < claimIds.length; i += BATCH) {
@@ -429,7 +436,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
   // "更新"型claim的增量评分需要知道一个URL是不是"真新排名"（历史上从没排过
   // 名 vs 这条claim刚开始追踪、还没攒够前一天数据）——只对 prev_rank_position
   // 为null的"更新"行查（有真实prev_rank_position的已经证明不是新的）。
-  const urlsNeedingHistory = dedupedRows
+  const urlsNeedingHistory = reportRows
     .filter(r => r.operation_type === '更新' && r.prev_rank_position == null && r.page_url)
     .map(r => r.page_url as string)
   const firstRankedDates = await fetchFirstRankedDates(service, urlsNeedingHistory)
@@ -438,7 +445,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
   // latest row for each URL/keyword/platform/direction, so a day outside the
   // 15-page crawl window does not erase the last confirmed observation.
   const rankEvidenceByUrl = new Map<string, Awaited<ReturnType<typeof fetchLatestUrlRanks>>>()
-  const trackingUrls = Array.from(new Set(dedupedRows.map(row => row.page_url).filter((url): url is string => !!url)))
+  const trackingUrls = Array.from(new Set(reportRows.map(row => row.page_url).filter((url): url is string => !!url)))
   const allUrlVariants = Array.from(new Set(trackingUrls.flatMap(urlSubdomainVariants)))
   for (let i = 0; i < allUrlVariants.length; i += 150) {
     const evidenceRows = await fetchLatestUrlRanks(service, allUrlVariants.slice(i, i + 150))
@@ -449,7 +456,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     }
   }
 
-  return dedupedRows.map(r => {
+  return reportRows.map(r => {
     const matches = rankMatchesMap.get(`${r.claim_id}|${r.record_date}`) ?? []
     const matchedPositions = matches.map(m => m.rank_position).filter((p): p is number => p != null)
     // Best (lowest = highest-ranking) position across every matched keyword,
