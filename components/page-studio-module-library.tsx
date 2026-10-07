@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import type { Editor } from 'grapesjs'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Component, Editor } from 'grapesjs'
 import type { PageStudioFavoriteModule } from '@/lib/page-studio'
 
 type ModuleCategory = '常用' | '导航' | '内容' | '广告' | '布局' | '基础组件' | '我的模块'
@@ -43,6 +43,28 @@ const MODULES: StudioModule[] = [
 
 const CATEGORIES: ModuleCategory[] = ['常用', '导航', '内容', '广告', '布局', '基础组件', '我的模块']
 const COMMON_IDS = new Set(['nav-logo', 'waterfall', 'info-list', 'banner-ad', 'feature-cards', 'two-columns', 'three-columns', 'buttons', 'number-group'])
+const CONTAINER_TAGS = new Set(['main', 'header', 'footer', 'section', 'article', 'aside', 'nav', 'div', 'ul', 'ol', 'li'])
+
+function insertionTargetFor(component: Component | undefined): Component | null {
+  let current = component
+  while (current?.parent()) {
+    const tagName = String(current.get('tagName') || '').toLowerCase()
+    if (CONTAINER_TAGS.has(tagName) && current.get('droppable') !== false && !current.is('text')) return current
+    current = current.parent()
+  }
+  return null
+}
+
+function insertionTargetLabel(component: Component): string {
+  const attributes = component.getAttributes()
+  return String(
+    attributes['data-studio-slot']
+    || attributes['data-studio-module']
+    || component.getName()
+    || component.get('tagName')
+    || '选中模块'
+  )
+}
 
 function ModulePreview({ kind }: { kind: PreviewKind }) {
   const bars = kind === 'columns3' ? 3 : kind === 'columns2' ? 2 : kind === 'waterfall' ? 4 : 1
@@ -57,6 +79,9 @@ function ModulePreview({ kind }: { kind: PreviewKind }) {
 export default function PageStudioModuleLibrary({ editor, favorites, onManageFavorites }: { editor: Editor | null; favorites: PageStudioFavoriteModule[]; onManageFavorites: () => void }) {
   const [category, setCategory] = useState<ModuleCategory>('常用')
   const [query, setQuery] = useState('')
+  const [insertAt, setInsertAt] = useState<'selection' | 'page'>('page')
+  const [targetLabel, setTargetLabel] = useState('')
+  const insertionTargetRef = useRef<Component | null>(null)
   const normalizedQuery = query.trim().toLowerCase()
   const modules = useMemo(() => MODULES.filter(module => {
     const matchesCategory = category === '常用' ? COMMON_IDS.has(module.id) : category === '我的模块' ? false : module.category === category
@@ -64,9 +89,30 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
   }), [category, normalizedQuery])
   const visibleFavorites = category === '我的模块' ? favorites.filter(item => !normalizedQuery || `${item.name} ${item.category}`.toLowerCase().includes(normalizedQuery)) : []
 
+  useEffect(() => {
+    if (!editor) return
+    const updateTarget = () => {
+      const target = insertionTargetFor(editor.getSelected())
+      insertionTargetRef.current = target
+      setTargetLabel(target ? insertionTargetLabel(target) : '')
+      if (target) setInsertAt('selection')
+      else setInsertAt('page')
+    }
+    editor.on('component:selected component:deselected', updateTarget)
+    updateTarget()
+    return () => {
+      editor.off('component:selected component:deselected', updateTarget)
+      insertionTargetRef.current = null
+    }
+  }, [editor])
+
   function addHtml(html: string, css?: string) {
     if (!editor) return
-    const added = editor.addComponents(html)
+    const target = insertAt === 'selection' ? insertionTargetRef.current : null
+    if (target?.getAttributes()['data-studio-slot'] && target.getInnerHTML().includes('把内容放在这里')) {
+      target.components().reset()
+    }
+    const added = target ? target.append(html) : editor.addComponents(html)
     if (css) editor.addStyle(css)
     const component = Array.isArray(added) ? added[0] : added
     if (component) editor.select(component)
@@ -75,7 +121,10 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
   return <div className="bg-white">
     <div className="border-b border-slate-200 p-3">
       <label className="block"><span className="sr-only">搜索模块</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索导航、列表、广告…" className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
-      <p className="mt-2 text-[11px] leading-4 text-slate-500">点击模块即可加入页面底部，再到右侧修改图片、文字和样式。</p>
+      {targetLabel ? <div className="mt-2 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 p-1">
+        <button type="button" aria-pressed={insertAt === 'selection'} onClick={() => setInsertAt('selection')} className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-[11px] font-medium ${insertAt === 'selection' ? 'bg-white text-emerald-800 shadow-sm' : 'text-emerald-700 hover:bg-white/60'}`} title={`加入“${targetLabel}”里面`}>加入：{targetLabel}</button>
+        <button type="button" aria-pressed={insertAt === 'page'} onClick={() => setInsertAt('page')} className={`shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium ${insertAt === 'page' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:bg-white/60'}`}>页面底部</button>
+      </div> : <p className="mt-2 text-[11px] leading-4 text-slate-500">先选中画布中的模块或栏位，再点击这里的内容即可放进去；未选中时会加入页面底部。</p>}
     </div>
     <div className="flex gap-1 overflow-x-auto border-b border-slate-200 p-2" style={{ scrollbarWidth: 'thin' }}>{CATEGORIES.map(item => <button key={item} type="button" onClick={() => setCategory(item)} className={`h-8 shrink-0 rounded-md px-2.5 text-xs font-medium ${category === item ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{item}</button>)}</div>
     <div className="grid grid-cols-2 gap-2 p-3">
