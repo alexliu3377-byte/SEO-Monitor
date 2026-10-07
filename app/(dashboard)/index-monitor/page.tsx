@@ -11,12 +11,7 @@ import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
 import { computeIndexStatus } from '@/lib/index-status'
 
 interface SiteRow { id: string; domain: string; name: string; focus_level: number; friend_links?: string[] | null; is_enabled?: boolean }
-interface SnapRow {
-  site_id: string
-  snapshot_date: string
-  index_count: number
-  baidu_index_count: number | null
-}
+interface SnapRow { site_id: string; snapshot_date: string; index_count: number }
 
 interface IndexRow {
   site_id: string
@@ -61,19 +56,6 @@ function monthBounds(month: string) {
   return { start: `${month}-01`, next: `${shiftMonth(month, 1)}-01` }
 }
 
-function fullDate(date?: string | null) {
-  return date ? date.replaceAll('-', '/') : '暂无日期'
-}
-
-function ExternalLinkIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path d="M8 5H5.5A2.5 2.5 0 003 7.5v7A2.5 2.5 0 005.5 17h7a2.5 2.5 0 002.5-2.5V12" />
-      <path d="M11 3h6v6M17 3l-8 8" />
-    </svg>
-  )
-}
-
 export default function IndexMonitorPage() {
   const { role, accessibleSiteIds } = useUser()
   const [rows, setRows] = useState<IndexRow[]>([])
@@ -84,12 +66,6 @@ export default function IndexMonitorPage() {
   const [detailSnaps, setDetailSnaps] = useState<SnapRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
-  const [showManualEntry, setShowManualEntry] = useState(false)
-  const [manualDate, setManualDate] = useState(() => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10))
-  const [manualCollection, setManualCollection] = useState('')
-  const [manualIndex, setManualIndex] = useState('')
-  const [manualSaving, setManualSaving] = useState(false)
-  const [manualError, setManualError] = useState('')
   const [crawling, setCrawling] = useState<string | null>(null)
   const [crawlMsg, setCrawlMsg] = useState<{ domain: string; text: string; ok: boolean } | null>(null)
   const [page, setPage] = useState(0)
@@ -142,7 +118,7 @@ export default function IndexMonitorPage() {
     setDetailLoading(true)
     setDetailError('')
     getBrowserClient().from('index_snapshots')
-      .select('site_id, snapshot_date, index_count, baidu_index_count')
+      .select('site_id, snapshot_date, index_count')
       .eq('site_id', selectedSite.site_id)
       .gte('snapshot_date', start)
       .lt('snapshot_date', next)
@@ -159,40 +135,6 @@ export default function IndexMonitorPage() {
       })
     return () => { active = false }
   }, [detailMonth, selectedSite])
-
-  async function saveManualSnapshot() {
-    if (!selectedSite || manualCollection.trim() === '') return
-    setManualSaving(true)
-    setManualError('')
-    try {
-      const response = await fetch('/api/sites/index-snapshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: selectedSite.site_id,
-          snapshotDate: manualDate,
-          baiduCollection: Number(manualCollection),
-          baiduIndex: manualIndex.trim() === '' ? null : Number(manualIndex),
-        }),
-      })
-      const result = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(result?.error || '保存失败')
-      setShowManualEntry(false)
-      setManualCollection('')
-      setManualIndex('')
-      setDetailMonth(manualDate.slice(0, 7))
-      setDetailSnaps(current => {
-        const next = current.filter(row => row.snapshot_date !== result.snapshot.snapshot_date)
-        next.push(result.snapshot as SnapRow)
-        return next.sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
-      })
-      await loadData()
-    } catch (saveError) {
-      setManualError(saveError instanceof Error ? saveError.message : '保存失败')
-    } finally {
-      setManualSaving(false)
-    }
-  }
 
   async function loadData() {
     setLoading(true)
@@ -286,9 +228,6 @@ export default function IndexMonitorPage() {
   }
 
   const detailTrend = detailSnaps.map(row => ({ date: row.snapshot_date, count: row.index_count }))
-  const firstDetail = detailTrend[0]
-  const latestDetail = detailTrend[detailTrend.length - 1]
-  const latestSnapshot = detailSnaps[detailSnaps.length - 1]
 
   return (
     <div className="p-6">
@@ -392,8 +331,6 @@ export default function IndexMonitorPage() {
                               onClick={() => {
                                 setDetailSnaps([])
                                 setDetailMonth(row.trend[row.trend.length - 1]?.date.slice(0, 7) || currentMYMonth())
-                                setShowManualEntry(false)
-                                setManualError('')
                                 setSelectedSite(row)
                               }}
                               className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 hover:border-blue-200 transition-colors"
@@ -440,57 +377,6 @@ export default function IndexMonitorPage() {
               </div>
             </div>
             <div className="p-6">
-              <div className="mb-4 flex flex-wrap items-center gap-x-7 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                <div className="min-w-[150px]">
-                  <p className="text-xs text-gray-400">域名</p>
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <strong className="text-sm text-gray-900">{selectedSite.domain}</strong>
-                    <a href={`https://www.aizhan.com/cha/${selectedSite.domain}/`} target="_blank" rel="noreferrer" aria-label="在爱站查询该域名" title="在爱站查询" className="text-gray-400 hover:text-blue-600">
-                      <ExternalLinkIcon />
-                    </a>
-                  </div>
-                </div>
-                <div className="min-w-[150px]">
-                  <p className="text-xs text-gray-400">百度收录</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <strong className="text-base tabular-nums text-gray-900">{latestSnapshot ? latestSnapshot.index_count.toLocaleString() : '—'}</strong>
-                    <span className="text-xs text-gray-400">{fullDate(latestSnapshot?.snapshot_date)}</span>
-                    <a href={`https://www.baidu.com/s?wd=${encodeURIComponent(`site:${selectedSite.domain}`)}`} target="_blank" rel="noreferrer" aria-label="查询百度收录" title="查询百度收录" className="text-gray-400 hover:text-blue-600">
-                      <ExternalLinkIcon />
-                    </a>
-                  </div>
-                </div>
-                <div className="min-w-[150px]">
-                  <p className="text-xs text-gray-400">百度索引</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <strong className="text-base tabular-nums text-gray-900">{latestSnapshot?.baidu_index_count == null ? '—' : latestSnapshot.baidu_index_count.toLocaleString()}</strong>
-                    <span className="text-xs text-gray-400">{latestSnapshot?.baidu_index_count == null ? '暂无资料' : fullDate(latestSnapshot.snapshot_date)}</span>
-                    <a href="https://apistore.aizhan.com/detail/94/" target="_blank" rel="noreferrer" aria-label="查看爱站收录查询接口" title="查看查询方法" className="text-gray-400 hover:text-blue-600">
-                      <ExternalLinkIcon />
-                    </a>
-                  </div>
-                </div>
-                {role !== 'normal' && (
-                  <button onClick={() => { setShowManualEntry(value => !value); setManualError('') }} className="ml-auto h-8 rounded-lg border border-green-200 bg-white px-3 text-xs font-medium text-green-700 hover:bg-green-50">
-                    {showManualEntry ? '取消补录' : '补录资料'}
-                  </button>
-                )}
-              </div>
-              {showManualEntry && (
-                <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-green-100 bg-green-50/60 px-4 py-3">
-                  <label className="text-xs text-gray-600">日期
-                    <input type="date" value={manualDate} max={new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)} onChange={event => setManualDate(event.target.value)} className="mt-1 block h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none" />
-                  </label>
-                  <label className="text-xs text-gray-600">百度收录
-                    <input type="number" min="0" required value={manualCollection} onChange={event => setManualCollection(event.target.value)} placeholder="必填" className="mt-1 block h-9 w-32 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none" />
-                  </label>
-                  <label className="text-xs text-gray-600">百度索引
-                    <input type="number" min="0" value={manualIndex} onChange={event => setManualIndex(event.target.value)} placeholder="可不填" className="mt-1 block h-9 w-32 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none" />
-                  </label>
-                  <button disabled={manualSaving || manualCollection.trim() === ''} onClick={saveManualSnapshot} className="btn-primary h-9 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50">{manualSaving ? '保存中…' : '保存资料'}</button>
-                  {manualError && <p role="alert" className="w-full text-xs text-red-500">{manualError}</p>}
-                </div>
-              )}
               {detailLoading ? (
                 <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">读取该月资料中…</div>
               ) : detailError ? (
@@ -508,10 +394,7 @@ export default function IndexMonitorPage() {
               ) : (
                 <div className="flex h-[220px] items-center justify-center text-sm text-gray-400">这个月份暂无足够的历史资料</div>
               )}
-              <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
-                {firstDetail && latestDetail && <span>月变化：<strong className={latestDetail.count > firstDetail.count ? 'text-green-600' : latestDetail.count < firstDetail.count ? 'text-red-500' : 'text-gray-500'}>{latestDetail.count > firstDetail.count ? '+' : ''}{(latestDetail.count - firstDetail.count).toLocaleString()}</strong></span>}
-                <span className="ml-auto text-gray-400">{detailSnaps.length} 个记录日</span>
-              </div>
+              <div className="mt-3 border-t border-gray-100 pt-3 text-right text-xs text-gray-400">{detailSnaps.length} 个记录日</div>
             </div>
           </div>
         </div>

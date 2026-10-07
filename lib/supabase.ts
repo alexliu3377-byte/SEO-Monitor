@@ -70,11 +70,8 @@ export type Database = {
           site_id: string
           snapshot_date: string
           index_count: number
-          baidu_index_count: number | null
         }
-        Insert: Omit<Database['public']['Tables']['index_snapshots']['Row'], 'id' | 'baidu_index_count'> & {
-          baidu_index_count?: number | null
-        }
+        Insert: Omit<Database['public']['Tables']['index_snapshots']['Row'], 'id'>
         Update: Partial<Database['public']['Tables']['index_snapshots']['Insert']>
       }
       weight_history: {
