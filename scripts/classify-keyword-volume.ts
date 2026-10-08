@@ -10,6 +10,7 @@ import {
   GAME_SUBCATEGORIES,
   KEYWORD_PRIMARY_CATEGORIES,
   inferredAppSubcategory,
+  inferredGameSubcategory,
   isKeywordPrimaryCategory,
   isRankingKeyword,
   isValidKeywordSubcategory,
@@ -135,6 +136,7 @@ async function runBatch(index: number) {
         : category === '应用'
           ? APP_SUBCATEGORIES[subcategoryIndex] ?? ''
           : ''
+      if (category === '游戏') subcategory = inferredGameSubcategory(rows[rowIndex].keyword) ?? subcategory
       if (category === '应用') subcategory = inferredAppSubcategory(rows[rowIndex].keyword) ?? subcategory
       if (category !== '游戏' && category !== '应用' && subcategoryIndex !== -1) return []
       if (!isValidKeywordSubcategory(category, subcategory)) return []

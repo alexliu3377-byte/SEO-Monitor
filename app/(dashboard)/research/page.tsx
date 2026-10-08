@@ -1062,7 +1062,13 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
       </div>
 
       {loading ? <Spinner /> : error ? (
-        <p className="text-sm text-red-600">{error}</p>
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{error}</span>
+          <button type="button" onClick={runCoverage}
+            className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">
+            重新读取
+          </button>
+        </div>
       ) : result && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">

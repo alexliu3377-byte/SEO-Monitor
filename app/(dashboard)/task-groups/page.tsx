@@ -51,6 +51,11 @@ type Badge = 'new' | 'updated' | null
 type BadgeFilter = 'all' | 'new' | 'updated'
 interface DetailRow { date: string; domain: string }
 interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
+interface RecommendationRow {
+  keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null
+  volume: number; url: string | null; title: string | null
+  memberId: string; memberName: string; ownUrl: string | null; ownCreatedAt: string | null
+}
 
 const PAGE_SIZE = 20
 
@@ -646,6 +651,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [competitorRankupData, setCompetitorRankupData] = useState<{ keyword: string; stat_date: string; rank_position: number; prev_rank: number | null; volume: number; url: string | null; title: string | null; ownUrl: string | null; ownUserId: string | null; ownCreatedAt: string | null }[]>([])
   const [competitorRankupLoading, setCompetitorRankupLoading] = useState(false)
   const [competitorRankupGroupId, setCompetitorRankupGroupId] = useState<string | null>(null)
+  const [recommendationRows, setRecommendationRows] = useState<RecommendationRow[]>([])
+  const [recommendationTotal, setRecommendationTotal] = useState(0)
+  const [recommendationLoading, setRecommendationLoading] = useState(false)
+  const [recommendationLoadedKey, setRecommendationLoadedKey] = useState<string | null>(null)
+  const recommendationRequestRef = useRef(0)
   // 组员对某个词最近一次"新增/更新"提交时间 + 历史"更新"次数 —— 用于给
   // 跌排更新/涨排更新推荐做冷却（7天内提交过的词不再重复推荐）和优先级
   // （反复更新过的词优先级更低）排序，2026-07-29 加入。
@@ -883,6 +893,38 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const showRadarTypeFilter = (['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
 
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
+
+  async function loadRecommendationPage(force = false) {
+    const recommendationUserId = effectiveViewingId || (canManage ? currentUserId : '')
+    if (!activeGroupId || !recommendationUserId) return
+    const page = tabPage.recommend
+    const key = `${activeGroupId}|${recommendationUserId}|${recSubTab}|${page}|${canManage ? 'all' : 'self'}`
+    if (!force && recommendationLoadedKey === key) return
+    const requestId = ++recommendationRequestRef.current
+    setRecommendationLoading(true)
+    try {
+      const params = new URLSearchParams({
+        type: recSubTab,
+        page: String(page),
+        userId: recommendationUserId,
+      })
+      const response = await fetch(`/api/task-groups/${activeGroupId}/recommendations?${params}`)
+      if (!response.ok) throw new Error(await apiError(response, '今日推荐加载失败'))
+      const payload = await response.json() as { rows?: RecommendationRow[]; total?: number }
+      if (requestId !== recommendationRequestRef.current) return
+      setRecommendationRows(payload.rows ?? [])
+      setRecommendationTotal(payload.total ?? 0)
+      setRecommendationLoadedKey(key)
+      setLoadError(current => current?.scope === 'recommendations' ? null : current)
+    } catch (error) {
+      if (requestId !== recommendationRequestRef.current) return
+      setRecommendationRows([])
+      setRecommendationTotal(0)
+      setLoadError({ scope: 'recommendations', message: error instanceof Error ? error.message : '今日推荐加载失败' })
+    } finally {
+      if (requestId === recommendationRequestRef.current) setRecommendationLoading(false)
+    }
+  }
 
   async function loadSiteRankdown(force = false) {
     if (!activeGroup || (!force && siteRankdownGroupId === activeGroup.id)) return
@@ -1414,6 +1456,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   function dismissRec(keyword: string, targetUserId?: string, permanent = false) {
     const uid = targetUserId ?? effectiveViewingId
     const at = permanent ? PERMANENT_DISMISS_AT : new Date().toISOString()
+    setRecommendationRows(previous => previous.filter(row => !(row.keyword === keyword && row.memberId === uid)))
+    setRecommendationTotal(previous => Math.max(0, previous - 1))
+    setRecommendationLoadedKey(null)
     if (uid === effectiveViewingId) {
       setDismissedRecMap(prev => { const next = new Map(prev); next.set(keyword, at); return next })
     }
@@ -1811,13 +1856,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       return activeGroup.members.some(member => member.user_id === currentUserId) ? currentUserId : null
     })
   }, [currentUserId, activeGroup])
-  useEffect(() => { if (isWorkspaceRoute && rightTab !== 'search' && rightTab !== 'distribute') loadRadar() }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (isWorkspaceRoute && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) loadRadar()
+  }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown' || (rightTab === 'recommend' && recSubTab === 'rankdown'))) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend' && recSubTab === 'rankup') loadCompetitorRankup() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadSubmissionHistory() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadDismissedRec() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend' && canManage) { loadAllMembersSubmissionHistory(); loadAllMembersDismissed() } }, [isWorkspaceRoute, rightTab, activeGroupId, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown')) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadRecommendationPage() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId, currentUserId, tabPage.recommend, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
@@ -2099,6 +2143,88 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+      )
+    }
+
+    const activeTabValue: string = rightTab
+    if (activeTabValue === 'recommend') {
+      const isRankdown = recSubTab === 'rankdown'
+      return (
+        <div>
+          <div className="flex mb-4 w-fit overflow-hidden rounded-lg border border-gray-200">
+            {(['rankdown', 'rankup'] as RecSubTab[]).map(st => (
+              <button key={st} onClick={() => { setRecSubTab(st); setPage('recommend', 0) }}
+                className={`px-4 py-1.5 text-sm font-medium transition-colors ${recSubTab === st ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                {st === 'rankdown' ? '跌排更新' : '涨排更新'}
+              </button>
+            ))}
+          </div>
+
+          {recommendationLoading ? <Spinner /> : recommendationRows.length === 0 ? (
+            <div className="py-10 text-center text-sm text-gray-400">
+              {isRankdown ? '暂无符合条件的跌排更新推荐' : '暂无符合条件的涨排更新推荐'}
+            </div>
+          ) : (
+            <>
+              <table aria-label="今日推荐" className="w-full min-w-[760px] table-fixed">
+                <thead><tr className="border-b border-gray-100 text-xs text-gray-400">
+                  <th className="w-7" />
+                  <th className="px-3 py-2 text-left font-medium">关键词</th>
+                  <th className="px-2 py-2 text-left font-medium">排名页面</th>
+                  {canManage && <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">组员</th>}
+                  {!isRankdown && <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">提交日期</th>}
+                  <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '现排名' : '竞品排名'}</th>
+                  <th className="w-14 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '跌幅' : '涨幅'}</th>
+                  <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">搜索量</th>
+                  <th className="w-32"><span className="sr-only">操作</span></th>
+                </tr></thead>
+                <tbody>
+                  {recommendationRows.map(row => {
+                    const claimed = row.memberId === effectiveViewingId && claimedSet.has(row.keyword)
+                    const displayUrl = row.ownUrl || row.url
+                    return (
+                      <tr key={`${row.memberId}|${row.keyword}`} onDoubleClick={() => { if (!claimed) claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId) }}
+                        className={`cursor-pointer select-none border-b border-gray-50 transition-colors last:border-0 ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}>
+                        <td className="py-2 pl-2">
+                          <button onClick={event => { event.stopPropagation(); setDismissConfirm({ keyword: row.keyword, targetUserId: row.memberId, memberName: row.memberName }) }}
+                            className="flex h-5 w-5 items-center justify-center rounded text-base leading-none text-gray-300 transition-colors hover:bg-red-50 hover:text-red-400" title="移除此词">×</button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-sm text-gray-800" title={row.keyword}>{row.keyword.length > 16 ? `${row.keyword.slice(0, 16)}…` : row.keyword}</span>
+                          {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
+                        </td>
+                        <td className="px-2 py-2">
+                          {displayUrl ? <a href={displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`}
+                            target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}
+                            className="block max-w-[160px] truncate text-[11px] text-blue-500 hover:underline" title={displayUrl}>
+                            {displayUrl.replace(/^https?:\/\//, '')}
+                          </a> : <span className="text-xs text-gray-300">—</span>}
+                        </td>
+                        {canManage && <td className="truncate px-2 py-2 text-center text-xs text-gray-500" title={row.memberName}>{row.memberName || '—'}</td>}
+                        {!isRankdown && <td className="px-2 py-2 text-center text-xs text-gray-500">{row.ownCreatedAt ? fmtDate(row.ownCreatedAt.slice(0, 10)) : '—'}</td>}
+                        <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">{row.rank_position ?? <span className="text-gray-400">脱排</span>}</td>
+                        <td className={`px-2 py-2 text-center text-xs font-medium ${isRankdown ? 'text-red-500' : 'text-green-600'}`}>
+                          {row.rank_position != null && row.prev_rank != null
+                            ? `${isRankdown ? '▼' : '▲'}${Math.abs(row.rank_position - row.prev_rank)}`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-center text-xs text-gray-500">{row.volume > 0 ? fmtVol(row.volume) : '—'}</td>
+                        <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <ClaimAction keyword={row.keyword} claimed={claimed} onClaim={() => claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId)} compact />
+                            {isRankdown && <button onClick={() => openDetail(row.keyword, '跌排更新', row.url)}
+                              className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500 transition-colors hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <Pager page={tabPage.recommend} total={recommendationTotal} onPage={page => setPage('recommend', page)} />
+            </>
           )}
         </div>
       )
@@ -3040,14 +3166,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     else if (loadError.scope === 'distributed') void loadDistributed()
     else if (loadError.scope === 'recommendations') {
       setLoadError(null)
-      void loadSiteRankdown(true)
-      void loadCompetitorRankup(true)
-      void loadSubmissionHistory()
-      void loadDismissedRec()
-      if (canManage) {
-        void loadAllMembersSubmissionHistory()
-        void loadAllMembersDismissed()
-      }
+      void loadRecommendationPage(true)
     }
   }
 

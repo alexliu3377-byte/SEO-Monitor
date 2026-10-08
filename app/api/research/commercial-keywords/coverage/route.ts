@@ -31,6 +31,48 @@ interface CoverageRow {
   searchVolume: number
 }
 
+function isMissingCoverageRpc(error: { code?: string; message?: string } | null) {
+  if (!error) return false
+  return error.code === '42883'
+    || error.code === 'PGRST202'
+    || error.message?.includes('get_latest_commercial_keyword_coverage') === true
+}
+
+async function fetchCoverageRows(service: any, keywords: string[], since: string): Promise<RankRow[]> {
+  let rpcError: { code?: string; message?: string } | null = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetchAllRows<RankRow>((from, to) => service
+        .rpc('get_latest_commercial_keyword_coverage', { p_keywords: keywords, p_since: since })
+        .range(from, to))
+    } catch (error) {
+      rpcError = error instanceof Error ? { message: error.message } : { message: String(error) }
+      if (isMissingCoverageRpc(rpcError)) break
+      if (attempt === 0) await delay(200)
+    }
+  }
+
+  // Safe deployment fallback: application code may reach Vercel just before
+  // the migration. The old query remains available, but also gets one retry
+  // for transient PostgREST/connection-pool failures.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetchAllRows<RankRow>((from, to) => service
+        .from('site_keyword_ranks')
+        .select('id, site_id, keyword, rank_position, title, url, platform, stat_date')
+        .in('keyword', keywords)
+        .gte('stat_date', since)
+        .order('stat_date', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, to))
+    } catch (error) {
+      if (attempt === 1) throw error
+      await delay(250)
+    }
+  }
+  throw new Error(rpcError?.message || 'Coverage query failed')
+}
+
 // 研究中心"商业词"tab 的核心接口。正式排名只查询用户已经维护或审核加入的
 // 别名；百度联想词单独作为辅助资料返回，绝不能混进正式覆盖结果。
 export async function POST(req: Request) {
@@ -94,14 +136,7 @@ export async function POST(req: Request) {
   const rankRows: RankRow[] = []
   for (const chunk of chunkArray(allKeywords, 150)) {
     try {
-      const rows = await fetchAllRows<RankRow>((from, to) => service
-        .from('site_keyword_ranks')
-        .select('id, site_id, keyword, rank_position, title, url, platform, stat_date')
-        .in('keyword', chunk)
-        .gte('stat_date', since)
-        .order('stat_date', { ascending: false })
-        .order('id', { ascending: true })
-        .range(from, to))
+      const rows = await fetchCoverageRows(service, chunk, since)
       rankRows.push(...rows)
     } catch (error) {
       console.error('商业词覆盖查询 site_keyword_ranks 失败:', error)

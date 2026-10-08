@@ -13,7 +13,8 @@
     "app-updates:crawl": "tsx scripts/app-update-crawl.ts",
     "app-store:discover": "tsx scripts/app-store-discover.ts",
     "marketplace:discover": "tsx scripts/marketplace-discover.ts",
-    "keywords:classify": "tsx scripts/classify-keyword-volume.ts"
+    "keywords:classify": "tsx scripts/classify-keyword-volume.ts",
+    "keywords:refine": "tsx scripts/refine-keyword-subcategories.ts"
   },
   "dependencies": {
     "@mradex77/google-play-scraper": "^1.1.0",
