@@ -8,6 +8,8 @@ const TEXT_COLORS = ['#0f172a', '#475569', '#047857', '#0369a1', '#c2410c', '#ff
 
 function labelFor(component: Component) {
   const attributes = component.getAttributes()
+  const friendlyName = attributes['data-studio-module'] || attributes['data-studio-role'] || attributes['data-studio-slot']
+  if (friendlyName) return String(friendlyName)
   const tag = String(component.get('tagName') || 'div').toLowerCase()
   const className = String(attributes.class || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.')
   return `${tag}${attributes.id ? `#${attributes.id}` : ''}${className ? `.${className}` : ''}`
@@ -59,6 +61,21 @@ type SpacingSnapshot = {
 const SPACING_PARENT_PROPERTIES = ['padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'gap', 'row-gap', 'column-gap'] as const
 const SPACING_CHILD_PROPERTIES = ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left'] as const
 const spacingSnapshots = new WeakMap<Component, SpacingSnapshot>()
+const LAYOUT_PROPERTIES = ['display', 'flex-direction', 'flex-wrap', 'grid-template-columns', 'grid-template-rows', 'align-items', 'justify-content', 'gap', 'row-gap', 'column-gap'] as const
+const SAFE_QUICK_LAYOUT_TAGS = new Set(['main', 'header', 'footer', 'section', 'article', 'aside', 'div'])
+type LayoutSnapshot = {
+  style: Record<string, SpacingStyleValue>
+  layoutAttribute: string | null
+}
+const layoutSnapshots = new WeakMap<Component, LayoutSnapshot>()
+
+function canUseQuickLayout(component: Component | null): component is Component {
+  if (!component || component.get('droppable') === false || component.components().length < 2) return false
+  const attributes = component.getAttributes()
+  const tagName = String(component.get('tagName') || '').toLowerCase()
+  const studioContainer = attributes['data-studio-layout-enabled'] || attributes['data-studio-layout'] || attributes['data-studio-slot'] || attributes['data-studio-module']
+  return Boolean(studioContainer) && (SAFE_QUICK_LAYOUT_TAGS.has(tagName) || attributes['data-studio-layout-enabled'] === 'true')
+}
 
 function captureInlineStyles(component: Component, properties: readonly string[]) {
   const style = component.getStyle() as Record<string, unknown>
@@ -95,6 +112,8 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
   const isLink = tagName === 'a'
   const isEditableText = component.is('text') || ['p', 'span', 'strong', 'h1', 'h2', 'h3', 'h4', 'a', 'button'].includes(tagName)
   const hasMultipleChildren = component.components().length > 1
+  const componentParent = component.parent() ?? null
+  const layoutTarget = canUseQuickLayout(component) ? component : canUseQuickLayout(componentParent) ? componentParent : null
   const selectedElement = component.getEl()
   const visibleText = selectedElement?.textContent ?? String(component.get('content') || '')
 
@@ -120,6 +139,40 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
     const parent = component.parent()
     component.remove()
     if (parent) editor?.select(parent)
+  }
+
+  function applyLayout(mode: 'vertical' | 'horizontal' | 'wrap' | 'grid2' | 'grid3' | 'grid4') {
+    if (!layoutTarget) return
+    if (!layoutSnapshots.has(layoutTarget)) {
+      const currentLayout = layoutTarget.getAttributes()['data-studio-layout']
+      layoutSnapshots.set(layoutTarget, {
+        style: captureInlineStyles(layoutTarget, LAYOUT_PROPERTIES),
+        layoutAttribute: currentLayout === undefined ? null : String(currentLayout),
+      })
+    }
+    ;['display', 'flex-direction', 'flex-wrap', 'grid-template-columns', 'grid-template-rows', 'align-items', 'justify-content', 'row-gap', 'column-gap'].forEach(property => layoutTarget.removeStyle(property))
+    if (mode === 'vertical') layoutTarget.addStyle({ display: 'flex', 'flex-direction': 'column', 'flex-wrap': 'nowrap', 'align-items': 'stretch' })
+    if (mode === 'horizontal') layoutTarget.addStyle({ display: 'flex', 'flex-direction': 'row', 'flex-wrap': 'nowrap', 'align-items': 'center' })
+    if (mode === 'wrap') layoutTarget.addStyle({ display: 'flex', 'flex-direction': 'row', 'flex-wrap': 'wrap', 'align-items': 'center' })
+    if (mode.startsWith('grid')) {
+      const columns = mode === 'grid2' ? 2 : mode === 'grid3' ? 3 : 4
+      layoutTarget.addStyle({ display: 'grid', 'grid-template-columns': `repeat(${columns}, minmax(0, 1fr))`, 'align-items': 'stretch' })
+    }
+    const style = layoutTarget.getStyle() as Record<string, unknown>
+    if (!style.gap) layoutTarget.addStyle({ gap: '12px' })
+    layoutTarget.addAttributes({ 'data-studio-layout': mode })
+    setRevision(value => value + 1)
+  }
+
+  function restoreLayout() {
+    if (!layoutTarget) return
+    const snapshot = layoutSnapshots.get(layoutTarget)
+    if (!snapshot) return
+    restoreInlineStyles(layoutTarget, snapshot.style)
+    if (snapshot.layoutAttribute === null) layoutTarget.removeAttributes('data-studio-layout')
+    else layoutTarget.addAttributes({ 'data-studio-layout': snapshot.layoutAttribute })
+    layoutSnapshots.delete(layoutTarget)
+    setRevision(value => value + 1)
   }
 
   function updateNumbers(options: { preset?: keyof typeof NUMBER_PRESETS; selected?: number; featured?: string; normal?: string; selectedColor?: string }) {
@@ -198,6 +251,21 @@ export default function PageStudioQuickStyle({ editor, onAdvanced }: { editor: E
         <p className="mt-1 truncate font-mono text-xs font-semibold text-slate-800" title={labelFor(component)}>{labelFor(component)}</p>
         <p className="mt-1 text-[11px] leading-4 text-slate-500">下面的设置只改当前选中的元素，适合快速调整。</p>
       </div>
+
+      {layoutTarget ? <div className="border-b border-indigo-100 bg-indigo-50/70 px-3 py-3">
+        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-xs font-semibold text-indigo-950">内容怎么排列</p><p className="mt-1 truncate text-[10px] leading-4 text-indigo-700" title={labelFor(layoutTarget)}>正在整理：{layoutTarget === component ? labelFor(layoutTarget) : `父级 ${labelFor(layoutTarget)}`}</p></div><button type="button" onClick={restoreLayout} disabled={!layoutSnapshots.has(layoutTarget)} className="h-7 shrink-0 rounded-md border border-indigo-200 bg-white px-2 text-[10px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40">恢复原来</button></div>
+        <p className="mt-1 text-[10px] leading-4 text-indigo-700">只整理这一组内容，不用手动改 CSS。</p>
+        <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+          {([
+            ['vertical', '上下排列'],
+            ['horizontal', '左右一行'],
+            ['wrap', '左右换行'],
+            ['grid2', '每行 2 个'],
+            ['grid3', '每行 3 个'],
+            ['grid4', '每行 4 个'],
+          ] as const).map(([value, label]) => <button key={value} type="button" onClick={() => applyLayout(value)} className={`h-9 rounded-md border px-1 text-[11px] font-semibold transition ${layoutTarget.getAttributes()['data-studio-layout'] === value ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-indigo-200 bg-white text-indigo-800 hover:border-indigo-500 hover:bg-indigo-100'}`}>{label}</button>)}
+        </div>
+      </div> : null}
 
       {hasMultipleChildren ? <div className="border-b border-emerald-100 bg-emerald-50/70 px-3 py-3">
         <div className="flex items-start justify-between gap-3">

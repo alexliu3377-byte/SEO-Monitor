@@ -30,6 +30,8 @@ import {
 } from '@/lib/page-studio'
 
 type AuditItem = { label: string; ok: boolean; detail: string }
+type ComponentClipboard = { source: Component; lastPasted: Component | null }
+type ComponentActionFeedback = { tone: 'success' | 'error'; text: string }
 
 const FAVORITE_BLOCK_PREFIX = 'favorite-module:'
 const STUDIO_ANIMATION_CSS = `
@@ -78,6 +80,8 @@ function registerFavoriteBlock(editor: Editor, module: PageStudioFavoriteModule)
     label: module.name,
     category: { id: 'favorite-modules', label: '我的收藏', open: true },
     content: module.html,
+    select: true,
+    resetId: true,
     attributes: { title: `${module.category} · 拖到画布中使用` },
   })
 }
@@ -95,13 +99,42 @@ function auditPage(page: PageStudioPage): AuditItem[] {
   ]
 }
 
+function studioModuleName(component: Component) {
+  const value = component.getAttributes()['data-studio-module']
+  return value ? String(value) : ''
+}
+
+function componentContains(root: Component, component: Component | undefined) {
+  let current = component
+  while (current) {
+    if (current === root) return true
+    current = current.parent()
+  }
+  return false
+}
+
+function findPasteAnchor(selected: Component | undefined, clipboard: ComponentClipboard) {
+  const sourceModule = studioModuleName(clipboard.source)
+  let current = selected
+  while (current?.parent()) {
+    if (componentContains(clipboard.source, current) || (clipboard.lastPasted && componentContains(clipboard.lastPasted, current))) {
+      return clipboard.lastPasted && componentContains(clipboard.lastPasted, current) ? clipboard.lastPasted : clipboard.source
+    }
+    if (sourceModule && studioModuleName(current) === sourceModule) return current
+    current = current.parent()
+  }
+  if (clipboard.lastPasted?.parent()) return clipboard.lastPasted
+  return clipboard.source.parent() ? clipboard.source : null
+}
+
 export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const editorRef = useRef<Editor | null>(null)
   const projectRef = useRef<PageStudioProject | null>(null)
   const favoriteModulesRef = useRef<PageStudioFavoriteModule[]>([])
   const persistRef = useRef<(createVersion?: boolean, label?: string) => Promise<PageStudioProject | null>>(async () => null)
   const pendingInteractionRef = useRef<{ trigger: Component; mode: 'hover-show' | 'click-toggle' } | null>(null)
-  const componentClipboardRef = useRef<Component | null>(null)
+  const componentClipboardRef = useRef<ComponentClipboard | null>(null)
+  const componentFeedbackTimerRef = useRef<number | null>(null)
   const shortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
   const canvasGestureCleanupRef = useRef<() => void>(() => undefined)
   const [project, setProject] = useState<PageStudioProject | null>(null)
@@ -144,6 +177,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
   const [hasCopiedComponent, setHasCopiedComponent] = useState(false)
+  const [componentActionFeedback, setComponentActionFeedback] = useState<ComponentActionFeedback | null>(null)
   const [canvasZoom, setCanvasZoom] = useState(100)
 
   useEffect(() => {
@@ -191,6 +225,10 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         },
         canvas: { styles: [], scripts: [], infiniteCanvas: true },
       })
+
+      // Page Studio owns these shortcuts so copy/paste has one predictable target.
+      // Keeping GrapesJS defaults as well would execute the same key press twice.
+      ;['core:undo', 'core:redo', 'core:copy', 'core:paste', 'core:component-delete'].forEach(keymap => editor.Keymaps.remove(keymap))
 
       const blocks = editor.BlockManager
       const storedFavoriteModules = await loadPageStudioFavoriteModules()
@@ -466,6 +504,8 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     return () => {
       disposed = true
       canvasGestureCleanupRef.current()
+      if (componentFeedbackTimerRef.current !== null) window.clearTimeout(componentFeedbackTimerRef.current)
+      componentClipboardRef.current = null
       editorRef.current?.destroy()
       editorRef.current = null
     }
@@ -524,25 +564,50 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     if (editor && parent && parent.parent()) editor.select(parent)
   }
 
+  function showComponentActionFeedback(feedback: ComponentActionFeedback) {
+    setComponentActionFeedback(feedback)
+    if (componentFeedbackTimerRef.current !== null) window.clearTimeout(componentFeedbackTimerRef.current)
+    componentFeedbackTimerRef.current = window.setTimeout(() => {
+      setComponentActionFeedback(null)
+      componentFeedbackTimerRef.current = null
+    }, 2200)
+  }
+
+  function clearComponentClipboard() {
+    componentClipboardRef.current = null
+    setHasCopiedComponent(false)
+    setComponentActionFeedback(null)
+  }
+
   function copySelectedComponent() {
     const component = editorRef.current?.getSelected()
     if (!component?.parent()) return
-    componentClipboardRef.current = component.clone()
+    componentClipboardRef.current = { source: component, lastPasted: null }
     setHasCopiedComponent(true)
+    showComponentActionFeedback({ tone: 'success', text: `已复制“${studioModuleName(component) || component.getName() || '当前内容'}”` })
   }
 
   function pasteSelectedComponent() {
     const editor = editorRef.current
-    const copied = componentClipboardRef.current
-    if (!editor || !copied) return
-    const selected = editor.getSelected()
-    const parent = selected?.parent() ?? editor.getWrapper()
-    if (!parent) return
-    const siblings = parent.components().models
-    const selectedIndex = selected && selected.parent() === parent ? siblings.indexOf(selected) : siblings.length - 1
-    const [pasted] = parent.append(copied.clone(), { at: selectedIndex + 1 })
-    if (pasted) editor.select(pasted)
+    const clipboard = componentClipboardRef.current
+    if (!editor || !clipboard) return
+    const anchor = findPasteAnchor(editor.getSelected(), clipboard)
+    const parent = anchor?.parent()
+    if (!anchor || !parent) {
+      showComponentActionFeedback({ tone: 'error', text: '原来的复制位置已不存在，请重新复制' })
+      return
+    }
+    const at = anchor.index() + 1
+    if (!editor.Components.canMove(parent, clipboard.source, at).result) {
+      showComponentActionFeedback({ tone: 'error', text: '这里不能放这个模块，请选择同类模块后再粘贴' })
+      return
+    }
+    const [pasted] = parent.append(clipboard.source.clone(), { at, action: 'clone-component' })
+    if (!pasted) return
+    clipboard.lastPasted = pasted
+    editor.select(pasted)
     setSaved(false)
+    showComponentActionFeedback({ tone: 'success', text: '已粘贴到同级下方' })
   }
 
   function duplicateSelectedComponent() {
@@ -550,10 +615,16 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const component = editor?.getSelected()
     const parent = component?.parent()
     if (!editor || !component || !parent || component.get('copyable') === false) return
-    const index = parent.components().models.indexOf(component)
-    const [duplicate] = parent.append(component.clone(), { at: index + 1 })
-    if (duplicate) editor.select(duplicate)
+    const at = component.index() + 1
+    if (!editor.Components.canMove(parent, component, at).result) {
+      showComponentActionFeedback({ tone: 'error', text: '当前模块不能复制到这里' })
+      return
+    }
+    const [duplicate] = parent.append(component.clone(), { at, action: 'clone-component' })
+    if (!duplicate) return
+    editor.select(duplicate)
     setSaved(false)
+    showComponentActionFeedback({ tone: 'success', text: '已复制到同级下方' })
   }
 
   function deleteSelectedComponent() {
@@ -829,6 +900,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
       projectRef.current = next
       setProject(next)
       const page = next.pages.find(item => item.id === next.activePageId) ?? next.pages[0]
+      clearComponentClipboard()
       editor.DomComponents.clear()
       editor.CssComposer.clear()
       if (page.projectData) editor.loadProjectData(page.projectData)
@@ -852,6 +924,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const next = { ...current, activePageId: pageId }
     const page = next.pages.find(item => item.id === pageId)
     if (!page) return
+    clearComponentClipboard()
     editor.DomComponents.clear()
     editor.CssComposer.clear()
     if (page.projectData) editor.loadProjectData(page.projectData)
@@ -878,6 +951,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     }
     const page = next.pages.find(item => item.id === next.activePageId)
     if (!page) return
+    clearComponentClipboard()
     editor.DomComponents.clear()
     editor.CssComposer.clear()
     editor.setComponents(page.html)
@@ -983,6 +1057,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const editor = editorRef.current
     if (!current || !editor || !codeHtml.trim()) return
     const imported = extractImportedCode(codeHtml, codeCss, { removeImages: codeRemoveImages })
+    clearComponentClipboard()
     editor.DomComponents.clear()
     editor.CssComposer.clear()
     editor.setComponents(imported.html)
@@ -1061,8 +1136,8 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             <button type="button" onClick={selectParentComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="选中包住当前元素的外框">上一级</button>
             {advancedMode ? <><div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
               <button type="button" onClick={copySelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="复制当前元素（Ctrl+C）">复制</button>
-              <button type="button" disabled={!hasCopiedComponent} onClick={pasteSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="粘贴到当前元素后面（Ctrl+V）">粘贴</button>
-              <button type="button" onClick={duplicateSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="直接复制一份（Ctrl+D）">复制一份</button>
+              <button type="button" disabled={!hasCopiedComponent} onClick={pasteSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" title="粘贴到同级模块下方（Ctrl+V）">粘贴到下方</button>
+              <button type="button" onClick={duplicateSelectedComponent} className="h-7 border-l border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="复制当前模块到同级下方（Ctrl+D）">复制到下方</button>
               <button type="button" onClick={deleteSelectedComponent} className="h-7 border-l border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50" title="删除当前元素（Delete）">删除</button>
             </div>
             <button type="button" onClick={makeSelectedHorizontal} className="h-7 shrink-0 rounded-md border border-emerald-300 px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50" title="让这个外框里的子模块左右排列">改为横排</button>
@@ -1070,7 +1145,8 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
             <button type="button" onClick={() => setSelectedWidth('33.333%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/3</button>
             <button type="button" onClick={() => setSelectedWidth('50%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">1/2</button>
             <button type="button" onClick={() => setSelectedWidth('100%')} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">全宽</button>
-            <button type="button" onClick={centerSelectedComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">模块居中</button></> : <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white"><button type="button" onClick={duplicateSelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="直接复制一份">复制一份</button><button type="button" onClick={deleteSelectedComponent} className="h-7 border-l border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50" title="删除当前元素">删除</button></div>}
+            <button type="button" onClick={centerSelectedComponent} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">模块居中</button></> : <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white"><button type="button" onClick={duplicateSelectedComponent} className="h-7 px-2.5 text-xs text-slate-700 hover:bg-slate-50" title="复制当前模块到同级下方">复制到下方</button><button type="button" onClick={deleteSelectedComponent} className="h-7 border-l border-red-200 px-2.5 text-xs font-medium text-red-600 hover:bg-red-50" title="删除当前元素">删除</button></div>}
+            {componentActionFeedback ? <span role="status" className={`shrink-0 text-[11px] font-medium ${componentActionFeedback.tone === 'error' ? 'text-red-600' : 'text-emerald-700'}`}>{componentActionFeedback.text}</span> : null}
             {advancedMode && <><button type="button" onClick={openInteractionDialog} className={`h-7 shrink-0 rounded-md border px-2.5 text-xs ${selectedHasInteraction ? 'border-amber-300 bg-amber-50 font-medium text-amber-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>交互{selectedHasInteraction ? '已设' : ''}</button><button type="button" aria-pressed={showInteractionLayers} onClick={toggleInteractionLayers} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">{showInteractionLayers ? '隐藏交互层' : '显示交互层'}</button><button type="button" onClick={openAnimationDialog} className="h-7 shrink-0 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50">动画</button></>}
             <button type="button" onClick={openSaveModuleDialog} className="ml-auto h-7 shrink-0 rounded-md border border-amber-300 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50">存为我的模块</button>
           </div>}

@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import type { Component, Editor } from 'grapesjs'
 import type { PageStudioFavoriteModule } from '@/lib/page-studio'
 
-type ModuleCategory = '常用' | '导航' | '内容' | '广告' | '布局' | '按钮' | '基础组件' | '我的模块'
+type ModuleCategory = '常用' | '导航' | '内容' | '广告' | '布局' | '按钮' | '小组件' | '基础组件' | '我的模块'
 type PreviewKind = 'nav' | 'banner' | 'waterfall' | 'list' | 'feature' | 'columns2' | 'columns3' | 'title' | 'text' | 'image' | 'icon' | 'iconCard' | 'iconGrid' | 'tabs' | 'tag' | 'button' | 'buttons' | 'pager' | 'carousel' | 'numbers'
 
 type StudioModule = {
@@ -14,9 +14,11 @@ type StudioModule = {
   category: Exclude<ModuleCategory, '我的模块'>
   preview: PreviewKind
   html: string
+  keywords?: string[]
 }
 
 type LibraryView = 'templates' | 'modules' | 'favorites'
+type InsertPosition = 'inside' | 'before' | 'after' | 'left' | 'right' | 'page'
 
 type PageTemplate = {
   id: string
@@ -32,8 +34,16 @@ const section = 'box-sizing:border-box;width:100%;max-width:1200px;margin:0 auto
 const heading = 'margin:0;color:#0f172a;font-size:24px;line-height:1.3;'
 const button = 'display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 16px;border-radius:8px;background:#059669;color:#fff;text-decoration:none;font-weight:700;'
 const compactButton = 'display:inline-flex;box-sizing:border-box;min-height:30px;align-items:center;justify-content:center;padding:0 12px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap;'
+const STUDIO_BLOCK_PREFIX = 'studio-library-module:'
+const FAVORITE_BLOCK_PREFIX = 'favorite-module:'
 
 const MODULES: StudioModule[] = [
+  { id: 'small-icon', name: '小图标', description: '放到标题或文字左边', category: '小组件', preview: 'icon', keywords: ['标题左边', '文字左边', '前置图标', 'icon', '星标'], html: `<span data-studio-module="小图标" data-studio-role="icon" aria-hidden="true" style="display:inline-flex;width:28px;height:28px;flex:none;align-items:center;justify-content:center;border-radius:7px;background:#ecfdf5;color:#047857;font-size:16px;line-height:1;">★</span>` },
+  { id: 'small-image', name: '小图片／Icon', description: '32px 图片，可直接换图', category: '小组件', preview: 'iconCard', keywords: ['标题图片', '前置图片', 'logo', '头像', '图标图片'], html: `<img data-studio-module="小图片" data-studio-role="image" src="${PLACEHOLDER}" alt="小图片" style="display:inline-block;width:32px;height:32px;flex:none;border-radius:7px;object-fit:cover;"/>` },
+  { id: 'accent-line', name: '标题色条', description: '放在标题左侧作强调', category: '小组件', preview: 'tag', keywords: ['标题左边', '竖线', '装饰', '强调线'], html: `<span data-studio-module="标题色条" data-studio-role="accent" aria-hidden="true" style="display:inline-block;width:4px;height:22px;flex:none;border-radius:999px;background:#059669;"></span>` },
+  { id: 'inline-label', name: '小标签', description: '分类、状态或提示标签', category: '小组件', preview: 'tag', keywords: ['badge', '分类', '状态', '文字旁边'], html: `<span data-studio-module="小标签" data-studio-role="label" style="display:inline-flex;min-height:24px;align-items:center;padding:0 8px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:12px;white-space:nowrap;">推荐</span>` },
+  { id: 'inline-text', name: '短文字', description: '放在同一行的补充文字', category: '小组件', preview: 'text', keywords: ['说明', '副标题', '文字右边', '文字左边'], html: `<span data-studio-module="短文字" data-studio-role="text" style="display:inline-block;color:#64748b;font-size:13px;line-height:1.5;">补充说明</span>` },
+  { id: 'icon-title-inline', name: '图标＋标题', description: '已自动排好横向间距', category: '小组件', preview: 'icon', keywords: ['标题左边图标', '栏目标题', '横向标题'], html: `<span data-studio-module="图标标题" data-studio-role="title-group" style="display:inline-flex;min-width:0;align-items:center;gap:8px;"><span data-studio-role="icon" aria-hidden="true" style="display:inline-flex;width:28px;height:28px;flex:none;align-items:center;justify-content:center;border-radius:7px;background:#eef2ff;color:#4f46e5;">◆</span><strong data-studio-role="title" style="color:#0f172a;font-size:18px;white-space:nowrap;">栏目标题</strong></span>` },
   { id: 'nav-logo', name: 'Logo＋主导航', description: 'Logo、栏目和搜索入口', category: '导航', preview: 'nav', html: `<header data-studio-module="导航栏" style="${section}display:flex;align-items:center;gap:28px;"><img src="${PLACEHOLDER}" alt="网站 Logo" style="width:160px;height:52px;object-fit:contain;"/><nav aria-label="主导航" style="display:flex;flex:1;align-items:center;justify-content:center;gap:30px;"><a href="#" style="color:#059669;font-weight:800;text-decoration:none;">首页</a><a href="#" style="color:#334155;text-decoration:none;">手机游戏</a><a href="#" style="color:#334155;text-decoration:none;">手机应用</a><a href="#" style="color:#334155;text-decoration:none;">新闻资讯</a><a href="#" style="color:#334155;text-decoration:none;">排行榜</a></nav><a href="#" aria-label="搜索" style="color:#475569;text-decoration:none;font-size:20px;">⌕</a></header>` },
   { id: 'nav-compact', name: '简洁栏目导航', description: '适合页面内部栏目切换', category: '导航', preview: 'nav', html: `<nav data-studio-module="栏目导航" aria-label="栏目导航" style="${section}display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;"><a href="#" style="padding:10px 18px;border-radius:8px;background:#059669;color:#fff;text-decoration:none;font-weight:700;">推荐</a><a href="#" style="padding:10px 18px;color:#475569;text-decoration:none;">游戏</a><a href="#" style="padding:10px 18px;color:#475569;text-decoration:none;">应用</a><a href="#" style="padding:10px 18px;color:#475569;text-decoration:none;">专题</a></nav>` },
   { id: 'section-title-tabs', name: '图标栏目标题', description: '图标、标题、切换标签和更多', category: '内容', preview: 'title', html: `<div data-studio-module="图标栏目标题" style="box-sizing:border-box;display:flex;width:100%;min-height:46px;align-items:center;gap:18px;padding:8px 12px;border-bottom:2px solid #6366f1;background:#fff;"><div style="display:flex;align-items:center;gap:8px;white-space:nowrap;"><span aria-hidden="true" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:7px;background:#eef2ff;color:#4f46e5;font-size:17px;">◆</span><h2 style="margin:0;color:#0f172a;font-size:20px;line-height:1.2;">热门应用</h2></div><nav aria-label="栏目切换" style="display:flex;min-width:0;flex:1;align-items:center;gap:6px;"><a href="#" style="padding:6px 10px;border-radius:6px;background:#4f46e5;color:#fff;text-decoration:none;font-size:13px;">推荐</a><a href="#" style="padding:6px 10px;color:#64748b;text-decoration:none;font-size:13px;">游戏</a><a href="#" style="padding:6px 10px;color:#64748b;text-decoration:none;font-size:13px;">应用</a></nav><a href="#" style="color:#0284c7;text-decoration:none;font-size:13px;white-space:nowrap;">更多 ›</a></div>` },
@@ -53,8 +63,8 @@ const MODULES: StudioModule[] = [
   { id: 'download-list', name: '下载资源列表', description: '图标、名称、说明和下载按钮', category: '内容', preview: 'list', html: `<section data-studio-module="下载资源列表" style="${section}"><h2 style="${heading}margin-bottom:12px;">热门下载</h2><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">${[1,2,3,4].map(i => `<article style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #e2e8f0;border-radius:10px;"><img src="${PLACEHOLDER}" alt="应用图标 ${i}" style="width:58px;height:58px;border-radius:12px;object-fit:cover;"/><div style="min-width:0;flex:1;"><strong style="display:block;color:#0f172a;">应用名称 ${i}</strong><span style="color:#94a3b8;font-size:12px;">版本与简短介绍</span></div><a href="#" style="${button}min-height:34px;padding:0 12px;font-size:13px;">下载</a></article>`).join('')}</div></section>` },
   { id: 'banner-ad', name: '横幅广告位', description: '整行广告图，可修改链接', category: '广告', preview: 'banner', html: `<aside data-studio-module="横幅广告" aria-label="广告" style="${section}padding:0;overflow:hidden;"><a href="#" style="display:block;"><img src="${PLACEHOLDER}" alt="横幅广告" style="display:block;width:100%;height:150px;object-fit:cover;"/></a></aside>` },
   { id: 'feature-cards', name: '专题图片广告', description: '专题、攻略或文章入口', category: '广告', preview: 'feature', html: `<section data-studio-module="专题图片广告" style="${section}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"><h2 style="${heading}">精选专题</h2><a href="#" style="color:#0284c7;text-decoration:none;">更多 ›</a></div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">${[1,2,3].map(i => `<a href="#" style="position:relative;display:block;overflow:hidden;border-radius:10px;color:#fff;text-decoration:none;"><img src="${PLACEHOLDER}" alt="专题 ${i}" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;filter:brightness(.72);"/><strong style="position:absolute;left:14px;right:14px;bottom:12px;font-size:16px;">专题或文章标题 ${i}</strong></a>`).join('')}</div></section>` },
-  { id: 'two-columns', name: '一屏两个模块', description: '左右各放一个内容模块', category: '布局', preview: 'columns2', html: `<section data-studio-module="双栏布局" style="${section}display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;"><div data-studio-slot="左侧模块" style="min-height:180px;padding:20px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 style="margin:0 0 8px;">左侧模块</h3><p style="margin:0;color:#64748b;">把内容放在这里</p></div><div data-studio-slot="右侧模块" style="min-height:180px;padding:20px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 style="margin:0 0 8px;">右侧模块</h3><p style="margin:0;color:#64748b;">把内容放在这里</p></div></section>` },
-  { id: 'three-columns', name: '一屏三个模块', description: '三个等宽内容区域', category: '布局', preview: 'columns3', html: `<section data-studio-module="三栏布局" style="${section}display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;">${['左侧模块','中间模块','右侧模块'].map(label => `<div data-studio-slot="${label}" style="min-height:170px;padding:18px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 style="margin:0 0 8px;">${label}</h3><p style="margin:0;color:#64748b;">把内容放在这里</p></div>`).join('')}</section>` },
+  { id: 'two-columns', name: '一屏两个模块', description: '左右各放一个内容模块', category: '布局', preview: 'columns2', html: `<section data-studio-module="双栏布局" data-studio-layout-enabled="true" style="${section}display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;"><div data-studio-slot="左侧模块" data-studio-layout-enabled="true" style="min-height:180px;padding:20px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 data-studio-placeholder="true" style="margin:0 0 8px;">左侧模块</h3><p data-studio-placeholder="true" style="margin:0;color:#64748b;">把内容放在这里</p></div><div data-studio-slot="右侧模块" data-studio-layout-enabled="true" style="min-height:180px;padding:20px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 data-studio-placeholder="true" style="margin:0 0 8px;">右侧模块</h3><p data-studio-placeholder="true" style="margin:0;color:#64748b;">把内容放在这里</p></div></section>` },
+  { id: 'three-columns', name: '一屏三个模块', description: '三个等宽内容区域', category: '布局', preview: 'columns3', html: `<section data-studio-module="三栏布局" data-studio-layout-enabled="true" style="${section}display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;">${['左侧模块','中间模块','右侧模块'].map(label => `<div data-studio-slot="${label}" data-studio-layout-enabled="true" style="min-height:170px;padding:18px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;"><h3 data-studio-placeholder="true" style="margin:0 0 8px;">${label}</h3><p data-studio-placeholder="true" style="margin:0;color:#64748b;">把内容放在这里</p></div>`).join('')}</section>` },
   { id: 'title', name: '标题栏', description: '标题和可选更多入口', category: '基础组件', preview: 'title', html: `<div data-studio-module="标题栏" style="${section}display:flex;align-items:center;justify-content:space-between;padding:12px 16px;"><h2 style="${heading}">区块标题</h2><a href="#" style="color:#0284c7;text-decoration:none;">更多 ›</a></div>` },
   { id: 'text', name: '文字说明', description: '可直接双击修改的段落', category: '基础组件', preview: 'text', html: `<div data-studio-module="文字说明" style="${section}"><p style="margin:0;color:#475569;line-height:1.8;">双击这里修改文字，可以填写模块说明、文章简介或其他内容。</p></div>` },
   { id: 'image', name: '单张图片', description: 'Logo、配图或广告图片', category: '基础组件', preview: 'image', html: `<div data-studio-module="单张图片" style="${section}padding:0;overflow:hidden;"><img src="${PLACEHOLDER}" alt="图片说明" style="display:block;width:100%;height:auto;object-fit:cover;"/></div>` },
@@ -88,9 +98,22 @@ const PAGE_TEMPLATES: PageTemplate[] = [
   },
 ]
 
-const CATEGORIES: ModuleCategory[] = ['常用', '导航', '内容', '广告', '布局', '按钮', '基础组件']
-const COMMON_IDS = new Set(['nav-logo', 'icon-recommend-section', 'section-title-tabs', 'icon-grid', 'app-icon-card', 'app-icon-card-meta', 'compact-list-row', 'more-button', 'view-button', 'download-button', 'banner-ad', 'two-columns', 'three-columns'])
+const CATEGORIES: ModuleCategory[] = ['常用', '小组件', '导航', '内容', '广告', '布局', '按钮', '基础组件']
+const COMMON_IDS = new Set(['small-icon', 'small-image', 'accent-line', 'inline-label', 'icon-title-inline', 'nav-logo', 'icon-recommend-section', 'section-title-tabs', 'icon-grid', 'app-icon-card', 'app-icon-card-meta', 'compact-list-row', 'more-button', 'view-button', 'download-button', 'banner-ad', 'two-columns', 'three-columns'])
 const CONTAINER_TAGS = new Set(['main', 'header', 'footer', 'section', 'article', 'aside', 'nav', 'div', 'ul', 'ol', 'li'])
+const PHRASING_TAGS = new Set(['span', 'strong', 'em', 'b', 'i', 'small', 'time', 'a', 'button', 'label', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+const INLINE_HTML_PATTERN = /^\s*<(?:span|strong|em|b|i|small|time|a|button|label|img)\b/i
+const STRUCTURED_PARENT_CHILDREN: Record<string, Set<string>> = {
+  table: new Set(['caption', 'colgroup', 'thead', 'tbody', 'tfoot', 'tr']),
+  thead: new Set(['tr']),
+  tbody: new Set(['tr']),
+  tfoot: new Set(['tr']),
+  tr: new Set(['td', 'th']),
+  ul: new Set(['li']),
+  ol: new Set(['li']),
+  select: new Set(['option', 'optgroup']),
+  optgroup: new Set(['option']),
+}
 
 function insertionTargetFor(component: Component | undefined): Component | null {
   let current = component
@@ -111,6 +134,47 @@ function insertionTargetLabel(component: Component): string {
     || component.get('tagName')
     || '选中模块'
   )
+}
+
+function componentIndex(component: Component, parent: Component): number {
+  return parent.components().indexOf(component)
+}
+
+function isHorizontalContainer(component: Component): boolean {
+  const inlineStyle = component.getStyle() as Record<string, unknown>
+  const element = component.getEl()
+  const computedStyle = element?.ownerDocument.defaultView?.getComputedStyle(element)
+  const display = String(inlineStyle.display || computedStyle?.display || '')
+  const direction = String(inlineStyle['flex-direction'] || computedStyle?.flexDirection || 'row')
+  return (display === 'flex' || display === 'inline-flex') && direction !== 'column' && direction !== 'column-reverse'
+}
+
+function htmlRootTag(html: string): string {
+  return html.match(/^\s*<([a-z][\w-]*)\b/i)?.[1]?.toLowerCase() || 'div'
+}
+
+function canContainHtml(parent: Component, html: string): boolean {
+  const parentTag = String(parent.get('tagName') || '').toLowerCase()
+  const rootTag = htmlRootTag(html)
+  const allowedChildren = STRUCTURED_PARENT_CHILDREN[parentTag]
+  if (allowedChildren && !allowedChildren.has(rootTag)) return false
+  if ((parentTag === 'a' || parentTag === 'button') && (rootTag === 'a' || rootTag === 'button')) return false
+  if (PHRASING_TAGS.has(parentTag) && !INLINE_HTML_PATTERN.test(html)) return false
+  return true
+}
+
+function safeAnchorFor(component: Component, html: string): Component {
+  let anchor = component
+  while (anchor.parent()) {
+    const parent = anchor.parent()
+    if (!parent || canContainHtml(parent, html)) break
+    anchor = parent
+  }
+  return anchor
+}
+
+function firstComponent(value: Component | Component[] | undefined): Component | undefined {
+  return Array.isArray(value) ? value[0] : value
 }
 
 function ModulePreview({ kind }: { kind: PreviewKind }) {
@@ -141,48 +205,192 @@ function PageTemplatePreview({ kind }: { kind: PageTemplate['preview'] }) {
 }
 
 export default function PageStudioModuleLibrary({ editor, favorites, onManageFavorites }: { editor: Editor | null; favorites: PageStudioFavoriteModule[]; onManageFavorites: () => void }) {
-  const [view, setView] = useState<LibraryView>('templates')
+  const [view, setView] = useState<LibraryView>('modules')
   const [category, setCategory] = useState<ModuleCategory>('常用')
   const [query, setQuery] = useState('')
-  const [insertAt, setInsertAt] = useState<'selection' | 'page'>('page')
+  const [insertAt, setInsertAt] = useState<InsertPosition>('page')
   const [targetLabel, setTargetLabel] = useState('')
+  const [selectedLabel, setSelectedLabel] = useState('')
+  const [insertFeedback, setInsertFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const insertionTargetRef = useRef<Component | null>(null)
+  const selectedRef = useRef<Component | null>(null)
+  const draggedRef = useRef(false)
   const normalizedQuery = query.trim().toLowerCase()
   const modules = useMemo(() => MODULES.filter(module => {
-    const matchesCategory = category === '常用' ? COMMON_IDS.has(module.id) : module.category === category
-    return matchesCategory && (!normalizedQuery || `${module.name} ${module.description}`.toLowerCase().includes(normalizedQuery))
+    const matchesCategory = normalizedQuery ? true : category === '常用' ? COMMON_IDS.has(module.id) : module.category === category
+    return matchesCategory && (!normalizedQuery || `${module.name} ${module.description} ${(module.keywords || []).join(' ')}`.toLowerCase().includes(normalizedQuery))
   }), [category, normalizedQuery])
   const visibleFavorites = favorites.filter(item => !normalizedQuery || `${item.name} ${item.category}`.toLowerCase().includes(normalizedQuery))
 
   useEffect(() => {
     if (!editor) return
+    MODULES.forEach(module => {
+      const id = `${STUDIO_BLOCK_PREFIX}${module.id}`
+      if (!editor.BlockManager.get(id)) {
+        editor.BlockManager.add(id, {
+          label: module.name,
+          category: { id: 'studio-library', label: '内容模块', open: true },
+          content: module.html,
+          select: true,
+          resetId: true,
+        })
+      }
+    })
+  }, [editor])
+
+  useEffect(() => {
+    if (!editor) return
     const updateTarget = () => {
-      const target = insertionTargetFor(editor.getSelected())
+      const selected = editor.getSelected() ?? null
+      const target = insertionTargetFor(selected ?? undefined)
+      selectedRef.current = selected
       insertionTargetRef.current = target
       setTargetLabel(target ? insertionTargetLabel(target) : '')
-      if (target) setInsertAt('selection')
-      else setInsertAt('page')
+      setSelectedLabel(selected ? insertionTargetLabel(selected) : '')
+      setInsertFeedback(null)
+      setInsertAt(current => {
+        if (!selected) return 'page'
+        if (current === 'inside' && !target) return 'page'
+        return current === 'page' && target ? 'inside' : current
+      })
     }
     editor.on('component:selected component:deselected', updateTarget)
     updateTarget()
     return () => {
       editor.off('component:selected component:deselected', updateTarget)
       insertionTargetRef.current = null
+      selectedRef.current = null
     }
   }, [editor])
 
-  function addHtml(html: string, css?: string, forcePage = false) {
-    if (!editor) return
-    const target = !forcePage && insertAt === 'selection' ? insertionTargetRef.current : null
-    if (target?.getAttributes()['data-studio-slot']) {
-      const placeholders = target.components().filter((component: Component) => component.getAttributes()['data-studio-placeholder'] === 'true')
-      placeholders.forEach((component: Component) => component.remove())
-      if (target.getInnerHTML().includes('把内容放在这里')) target.components().reset()
+  function placeholdersFor(target: Component): Component[] {
+    if (!target.getAttributes()['data-studio-slot']) return []
+    const placeholders = target.components().filter((component: Component) => component.getAttributes()['data-studio-placeholder'] === 'true')
+    if (placeholders.length) return placeholders
+
+    const slotLabel = String(target.getAttributes()['data-studio-slot'] || '')
+    const legacyChildren: Component[] = []
+    target.components().forEach((component: Component) => legacyChildren.push(component))
+    const onlyLegacyPlaceholders = legacyChildren.length > 0 && legacyChildren.every(component => {
+      const tagName = String(component.get('tagName') || '').toLowerCase()
+      const text = String(component.getEl()?.textContent || component.getInnerHTML() || '').trim()
+      return (tagName === 'h3' && text === slotLabel) || (tagName === 'p' && text === '把内容放在这里')
+    })
+    return onlyLegacyPlaceholders ? legacyChildren : []
+  }
+
+  function addBeside(html: string, position: 'left' | 'right'): Component | undefined {
+    if (!editor) return undefined
+    const original = selectedRef.current
+    if (!original) return undefined
+    const originalTag = String(original.get('tagName') || '').toLowerCase()
+    if (['table', 'thead', 'tbody', 'tfoot', 'tr', 'select', 'option', 'optgroup'].includes(originalTag)) return undefined
+    if (INLINE_HTML_PATTERN.test(html) && ['li', 'td', 'th'].includes(originalTag) && canContainHtml(original, html)) {
+      const at = position === 'left' ? 0 : original.components().length
+      if (!editor.Components.canMove(original, html, at).result) return undefined
+      return firstComponent(original.append(html, { at }))
     }
-    const added = target ? target.append(html) : editor.addComponents(html)
-    if (css) editor.addStyle(css)
-    const component = Array.isArray(added) ? added[0] : added
-    if (component) editor.select(component)
+    const anchor = safeAnchorFor(original, html)
+    const parent = anchor.parent()
+    if (!parent) return undefined
+    const at = componentIndex(anchor, parent)
+    if (at < 0) return undefined
+
+    if (isHorizontalContainer(parent)) {
+      const destination = position === 'left' ? at : at + 1
+      if (!editor.Components.canMove(parent, html, destination).result) return undefined
+      return firstComponent(parent.append(html, { at: destination }))
+    }
+
+    const parentTag = String(parent.get('tagName') || '').toLowerCase()
+    const inlineWrapper = INLINE_HTML_PATTERN.test(html) && PHRASING_TAGS.has(parentTag)
+    const wrapperDefinition = {
+      tagName: inlineWrapper ? 'span' : 'div',
+      attributes: {
+        'data-studio-layout': 'horizontal-pair',
+        'data-studio-module': '横向组合',
+        'data-studio-layout-enabled': 'true',
+      },
+      style: {
+        display: inlineWrapper ? 'inline-flex' : 'flex',
+        'max-width': '100%',
+        'min-width': '0',
+        'align-items': 'center',
+        gap: '8px',
+      },
+    }
+    if (!editor.Components.canMove(parent, wrapperDefinition, at).result) return undefined
+    const wrapper = firstComponent(parent.append(wrapperDefinition, { at }))
+    if (!wrapper) return undefined
+    const anchorPosition = position === 'left' ? 1 : 0
+    if (!editor.Components.canMove(wrapper, html, 0).result || !editor.Components.canMove(wrapper, anchor, anchorPosition).result) {
+      wrapper.remove()
+      return undefined
+    }
+
+    try {
+      const added = firstComponent(wrapper.append(html, { at: 0 }))
+      if (!added) throw new Error('Unable to add component')
+      anchor.move(wrapper, { at: anchorPosition })
+      if (anchor.parent() !== wrapper) throw new Error('Unable to move selected component')
+      return added
+    } catch {
+      if (anchor.parent() === wrapper) anchor.move(parent, { at })
+      wrapper.remove()
+      return undefined
+    }
+  }
+
+  function addHtml(html: string, css?: string, forcePage = false) {
+    if (!editor) return false
+    let added: Component | undefined
+    const position = forcePage ? 'page' : insertAt
+    const selected = selectedRef.current
+    const target = insertionTargetRef.current
+
+    if (position === 'inside' && target) {
+      if (canContainHtml(target, html) && editor.Components.canMove(target, html).result) {
+        const placeholders = placeholdersFor(target)
+        added = firstComponent(target.append(html))
+        if (added) placeholders.forEach(component => component.remove())
+      }
+    } else if ((position === 'before' || position === 'after') && selected?.parent()) {
+      const anchor = safeAnchorFor(selected, html)
+      const parent = anchor.parent()
+      const at = parent ? componentIndex(anchor, parent) : -1
+      const destination = position === 'before' ? at : at + 1
+      added = parent && at >= 0 && editor.Components.canMove(parent, html, destination).result ? firstComponent(parent.append(html, { at: destination })) : undefined
+    } else if (position === 'left' || position === 'right') {
+      added = addBeside(html, position)
+    } else {
+      added = firstComponent(editor.addComponents(html))
+    }
+    if (added && css) editor.addStyle(css)
+    if (added) editor.select(added)
+    return Boolean(added)
+  }
+
+  function startBlockDrag(blockId: string, event: DragEvent<HTMLButtonElement>) {
+    if (!editor) return
+    const block = editor.BlockManager.get(blockId)
+    if (!block) return
+    draggedRef.current = true
+    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.setData('text/plain', blockId)
+    editor.BlockManager.startDrag(block, event.nativeEvent)
+  }
+
+  function stopBlockDrag() {
+    editor?.BlockManager.endDrag()
+    window.setTimeout(() => { draggedRef.current = false }, 200)
+  }
+
+  function clickToAdd(html: string, css?: string, forcePage = false) {
+    if (draggedRef.current) return
+    const added = addHtml(html, css, forcePage)
+    setInsertFeedback(added
+      ? { tone: 'success', text: '已加入画布，可继续调整文字、图片和间距。' }
+      : { tone: 'error', text: '这个位置不适合该模组，请改选“上方／下方”或直接拖入画布。' })
   }
 
   function switchView(nextView: LibraryView) {
@@ -204,7 +412,7 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
         点击模板会把整套结构加入<strong>页面底部</strong>，不会覆盖你已经做好的内容。
       </div>
       <div className="space-y-3 p-3">
-        {PAGE_TEMPLATES.map(template => <button key={template.id} type="button" disabled={!editor} onClick={() => addHtml(template.html, undefined, true)} className="group block w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
+        {PAGE_TEMPLATES.map(template => <button key={template.id} type="button" disabled={!editor} onClick={() => clickToAdd(template.html, undefined, true)} className="group block w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
           <div className={`h-28 border-b border-slate-100 bg-gradient-to-br ${template.accent}`}><PageTemplatePreview kind={template.preview} /></div>
           <span className="flex items-center justify-between gap-2 px-3 pt-2.5 text-sm font-bold text-slate-800 group-hover:text-emerald-800"><span>{template.name}</span><span className="text-[11px] font-semibold text-emerald-600">一键加入</span></span>
           <span className="block px-3 pb-3 pt-1 text-[11px] leading-4 text-slate-500">{template.description}</span>
@@ -213,20 +421,32 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
     </>}
 
     {(view === 'modules' || view === 'favorites') && <div className="border-b border-slate-200 p-3">
-      <label className="block"><span className="sr-only">搜索{view === 'favorites' ? '收藏' : '模块'}</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={view === 'favorites' ? '搜索我的收藏…' : '搜索导航、列表、广告…'} className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
-      {targetLabel ? <div className="mt-2 flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 p-1">
-        <button type="button" aria-pressed={insertAt === 'selection'} onClick={() => setInsertAt('selection')} className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-[11px] font-medium ${insertAt === 'selection' ? 'bg-white text-emerald-800 shadow-sm' : 'text-emerald-700 hover:bg-white/60'}`} title={`加入“${targetLabel}”里面`}>加入：{targetLabel}</button>
-        <button type="button" aria-pressed={insertAt === 'page'} onClick={() => setInsertAt('page')} className={`shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium ${insertAt === 'page' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:bg-white/60'}`}>页面底部</button>
-      </div> : <p className="mt-2 text-[11px] leading-4 text-slate-500">先选中画布中的模块或栏位即可放进去；未选中时会加入页面底部。</p>}
+      <label className="block"><span className="sr-only">搜索{view === 'favorites' ? '收藏' : '模块'}</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={view === 'favorites' ? '搜索我的收藏…' : '搜索“标题左边图标”、导航、列表…'} className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
+      {selectedLabel ? <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+        <p className="mb-1.5 truncate text-[10px] font-medium text-emerald-800" title={selectedLabel}>点击模组时，放在「{selectedLabel}」的：</p>
+        <div className="grid grid-cols-3 gap-1">
+          {([
+            ['left', '左边'],
+            ['right', '右边'],
+            ['before', '上方'],
+            ['after', '下方'],
+            ['inside', targetLabel ? '容器内' : '放里面'],
+            ['page', '页面底部'],
+          ] as Array<[InsertPosition, string]>).map(([value, label]) => <button key={value} type="button" disabled={value === 'inside' && !targetLabel} aria-pressed={insertAt === value} onClick={() => setInsertAt(value)} title={value === 'inside' && targetLabel ? `放进“${targetLabel}”` : undefined} className={`h-8 rounded-md px-1 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${insertAt === value ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-emerald-100 hover:text-emerald-800'}`}>{label}</button>)}
+        </div>
+      </div> : <p className="mt-2 text-[11px] leading-4 text-slate-500">先选中画布中的内容，再选择放在左、右、上或下；未选中时会加入页面底部。</p>}
+      <p className="mt-2 text-[10px] leading-4 text-slate-500"><span className="font-semibold text-emerald-700">想放得更准：</span>按住下面的模组，直接拖到画布出现的蓝色落点。</p>
+      {insertFeedback ? <p role="status" className={`mt-2 rounded-md px-2 py-1.5 text-[10px] leading-4 ${insertFeedback.tone === 'success' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-50 text-red-700'}`}>{insertFeedback.text}</p> : null}
     </div>}
 
     {view === 'modules' && <>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200 p-2" style={{ scrollbarWidth: 'thin' }}>{CATEGORIES.map(item => <button key={item} type="button" onClick={() => setCategory(item)} className={`h-8 shrink-0 rounded-md px-2.5 text-xs font-medium ${category === item ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>{item}</button>)}</div>
       <div className="grid grid-cols-2 gap-2 p-3">
-        {modules.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html)} className="group overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50">
+        {modules.map(module => <button key={module.id} type="button" disabled={!editor} draggable={Boolean(editor)} onDragStart={event => startBlockDrag(`${STUDIO_BLOCK_PREFIX}${module.id}`, event)} onDragEnd={stopBlockDrag} onClick={() => clickToAdd(module.html)} title="拖入画布可精确放置；点击则使用上方所选位置" className="group cursor-grab overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-emerald-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50">
           <div className="h-16 border-b border-slate-100 bg-slate-50"><ModulePreview kind={module.preview} /></div>
           <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800 group-hover:text-emerald-800">{module.name}</span>
-          <span className="block px-2.5 pb-2 pt-0.5 text-[10px] leading-4 text-slate-500">{module.description}</span>
+          <span className="block px-2.5 pt-0.5 text-[10px] leading-4 text-slate-500">{module.description}</span>
+          <span className="block px-2.5 pb-2 pt-1 text-[9px] font-medium text-emerald-600">拖入画布 · 或点击加入</span>
         </button>)}
       </div>
       {modules.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-400">没有找到符合条件的模块</div>}
@@ -234,9 +454,9 @@ export default function PageStudioModuleLibrary({ editor, favorites, onManageFav
 
     {view === 'favorites' && <>
       <div className="grid grid-cols-2 gap-2 p-3">
-        {visibleFavorites.map(module => <button key={module.id} type="button" disabled={!editor} onClick={() => addHtml(module.html, module.css)} className="group overflow-hidden rounded-lg border border-amber-200 bg-white text-left transition hover:border-amber-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50">
+        {visibleFavorites.map(module => <button key={module.id} type="button" disabled={!editor} draggable={Boolean(editor)} onDragStart={event => startBlockDrag(`${FAVORITE_BLOCK_PREFIX}${module.id}`, event)} onDragEnd={stopBlockDrag} onClick={() => clickToAdd(module.html, module.css)} title="拖入画布可精确放置；点击则使用上方所选位置" className="group cursor-grab overflow-hidden rounded-lg border border-amber-200 bg-white text-left transition hover:border-amber-400 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50">
           <div className="flex h-16 items-center justify-center border-b border-amber-100 bg-amber-50 text-xs font-semibold text-amber-700">已收藏模块</div>
-          <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800">{module.name}</span><span className="block px-2.5 pb-2 pt-0.5 text-[10px] text-slate-500">{module.category}</span>
+          <span className="block px-2.5 pt-2 text-xs font-semibold text-slate-800">{module.name}</span><span className="block px-2.5 pt-0.5 text-[10px] text-slate-500">{module.category}</span><span className="block px-2.5 pb-2 pt-1 text-[9px] font-medium text-amber-700">拖入画布 · 或点击加入</span>
         </button>)}
       </div>
       {visibleFavorites.length === 0 && <div className="px-4 py-10 text-center text-xs leading-5 text-slate-400">{favorites.length === 0 ? '还没有收藏模块；在画布中选中喜欢的模块后点击“存为我的模块”。' : '没有找到符合条件的收藏'}</div>}
