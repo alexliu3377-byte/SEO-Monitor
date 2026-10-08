@@ -121,7 +121,7 @@ export async function GET(request: Request) {
 
     if (error || summaryResult.error) {
       console.error('Keyword layout load failed:', error?.message || summaryResult.error?.message)
-      return NextResponse.json({ error: '词库布局资料读取失败' }, { status: 500 })
+      return NextResponse.json({ error: '词库补充资料读取失败' }, { status: 500 })
     }
 
     return NextResponse.json({
@@ -191,7 +191,7 @@ export async function PATCH(request: Request) {
 
     const { data: rows, error: rowsError } = await service.from('keyword_volume')
       .select('keyword, layout_site_domains, layout_status').in('keyword', keywords)
-    if (rowsError) return NextResponse.json({ error: '关键词布局资料读取失败' }, { status: 500 })
+    if (rowsError) return NextResponse.json({ error: '关键词补充资料读取失败' }, { status: 500 })
 
     const updatedAt = new Date().toISOString()
     const results = await Promise.all((rows ?? []).map((row: { keyword: string; layout_site_domains: string[] | null; layout_status: LayoutStatus }) => {
@@ -210,7 +210,7 @@ export async function PATCH(request: Request) {
       }).eq('keyword', row.keyword)
     }))
     if (results.some((result: { error: unknown }) => result.error)) {
-      return NextResponse.json({ error: mode === 'add' ? '批量布局失败' : '批量取消失败' }, { status: 500 })
+      return NextResponse.json({ error: mode === 'add' ? '批量补充失败' : '批量取消补充失败' }, { status: 500 })
     }
     return NextResponse.json({ ok: true, updated: rows?.length ?? 0 })
   }
@@ -222,7 +222,7 @@ export async function PATCH(request: Request) {
     const requestedDomains = Array.isArray(body.domains)
       ? Array.from(new Set(body.domains.filter((value): value is string => typeof value === 'string').map(normalizeDomain).filter(Boolean)))
       : []
-    if (requestedDomains.length > 100) return NextResponse.json({ error: '单个关键词最多布局 100 个站点' }, { status: 400 })
+    if (requestedDomains.length > 100) return NextResponse.json({ error: '单个关键词最多补充 100 个站点' }, { status: 400 })
 
     let siteGroups: Awaited<ReturnType<typeof loadAccessibleSiteGroups>>
     try {
@@ -255,7 +255,7 @@ export async function PATCH(request: Request) {
       layout_updated_by: access.userId,
       layout_updated_at: new Date().toISOString(),
     }).eq('keyword', keyword)
-    if (error) return NextResponse.json({ error: '站点布局保存失败' }, { status: 500 })
+    if (error) return NextResponse.json({ error: '站点补充保存失败' }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 

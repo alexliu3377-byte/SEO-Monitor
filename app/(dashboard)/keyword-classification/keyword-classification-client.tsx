@@ -46,8 +46,8 @@ type BatchSiteMode = 'add' | 'remove'
 
 const LAYOUT_FILTER_OPTIONS: { value: LayoutFilter; label: string }[] = [
   { value: 'all', label: '全部状态' },
-  { value: 'unassigned', label: '未布局' },
-  { value: 'assigned', label: '已布局' },
+  { value: 'unassigned', label: '未补充' },
+  { value: 'assigned', label: '已补充' },
   { value: 'issue', label: '有问题' },
 ]
 
@@ -123,7 +123,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       if (search) params.set('q', search)
       const response = await fetch(`/api/keyword-classification?${params}`, { cache: 'no-store' })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error || '词库布局资料读取失败')
+      if (!response.ok) throw new Error(body.error || '词库补充资料读取失败')
       const rows = (body.items ?? []) as Row[]
       setItems(rows)
       setSelectedKeywords(new Set())
@@ -140,7 +140,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
         subcategory: row.content_subcategory ?? '',
       }])))
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '词库布局资料读取失败')
+      setError(loadError instanceof Error ? loadError.message : '词库补充资料读取失败')
     } finally {
       setLoading(false)
     }
@@ -289,11 +289,11 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
         body: JSON.stringify({ action: 'set-sites', keyword: row.keyword, domains: nextAssignments }),
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error || '站点布局保存失败')
+      if (!response.ok) throw new Error(body.error || '站点补充保存失败')
       if (closeEditor) setLayoutEditor(null)
       await load()
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '站点布局保存失败')
+      setError(saveError instanceof Error ? saveError.message : '站点补充保存失败')
     } finally {
       setSaving('')
     }
@@ -352,12 +352,12 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
         body: JSON.stringify({ action: 'batch-sites', keywords: [...selectedKeywords], mode, domains }),
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error || (mode === 'add' ? '批量布局失败' : '批量取消失败'))
+      if (!response.ok) throw new Error(body.error || (mode === 'add' ? '批量补充失败' : '批量取消补充失败'))
       setBatchSiteMode(null)
       setBatchSiteDraft([])
       await load()
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : mode === 'add' ? '批量布局失败' : '批量取消失败')
+      setError(saveError instanceof Error ? saveError.message : mode === 'add' ? '批量补充失败' : '批量取消补充失败')
     } finally {
       setBatchSaving(false)
     }
@@ -437,8 +437,8 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
   return (
     <div className="p-6">
       <div className="mb-5">
-        <h1 className="text-2xl font-bold text-slate-950">词库布局</h1>
-        <p className="mt-1 text-sm text-slate-500">查看全部站点的布局情况，或切换到单个站点后直接完成该站布局。</p>
+        <h1 className="text-2xl font-bold text-slate-950">词库补充</h1>
+        <p className="mt-1 text-sm text-slate-500">查看各站点的词库补充情况，或切换到单个站点后直接完成该站补充。</p>
       </div>
 
       {error && <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -460,7 +460,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
       {secondarySummary.length > 0 && (
         <section className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => { setSubcategory(''); setPage(0) }} className={`rounded-md border px-2.5 py-1.5 text-xs ${!subcategory ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600'}`}>全部二级分类</button>
+            <button type="button" onClick={() => { setSubcategory(''); setPage(0) }} className={`rounded-md border px-2.5 py-1.5 text-xs ${!subcategory ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600'}`}>二级分类</button>
             {secondarySummary.map(item => <button key={item.subcategory} type="button" onClick={() => { setSubcategory(item.subcategory ?? ''); setPage(0) }} className={`rounded-md border px-2.5 py-1.5 text-xs ${subcategory === item.subcategory ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{item.subcategory} · {formatNumber(item.keyword_count)}词</button>)}
           </div>
         </section>
@@ -476,31 +476,31 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
             </select>
           </label>
           <select aria-label="一级分类" value={category} onChange={event => { setClassificationStatus(event.target.value ? 'all' : 'confirmed'); setCategory(event.target.value); setSubcategory(''); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
-            <option value="">全部一级分类</option>
+            <option value="">一级分类</option>
             {KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value === '-' ? '未能判断' : value}</option>)}
           </select>
           <select aria-label="二级分类" value={subcategory} disabled={availableSubcategories.length === 0} onChange={event => { setSubcategory(event.target.value); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400">
-            <option value="">{availableSubcategories.length > 0 ? '全部二级分类' : '无二级分类'}</option>
+            <option value="">{availableSubcategories.length > 0 ? '二级分类' : '无二级分类'}</option>
             {availableSubcategories.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
-          <select aria-label="布局状态" value={layoutFilter} onChange={event => { setLayoutFilter(event.target.value as LayoutFilter); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
+          <select aria-label="补充状态" value={layoutFilter} onChange={event => { setLayoutFilter(event.target.value as LayoutFilter); setPage(0) }} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
             {LAYOUT_FILTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[240px] basis-[300px] grow items-stretch gap-2 xl:max-w-[420px]">
-            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词..." className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
+          <form onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setPage(0) }} className="flex h-9 min-w-[220px] basis-[280px] grow items-stretch gap-2 xl:max-w-[420px]">
+            <input aria-label="搜索关键词" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词…（推荐搜：版、v、.）" title="推荐搜索：版、v、." className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-green-500" />
             <button type="submit" disabled={loading} className="inline-flex h-9 min-h-0 shrink-0 items-center justify-center rounded-lg bg-green-500 px-4 text-sm font-medium text-white transition-colors hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:opacity-50">{loading ? '查询中...' : '查询'}</button>
           </form>
-          <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => beginBatchSiteAction('add')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量布局</button>
-          <button type="button" disabled={batchSaving || !canBatchCancel} onClick={() => beginBatchSiteAction('remove')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量取消</button>
+          <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => beginBatchSiteAction('add')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量补充</button>
+          <button type="button" disabled={batchSaving || !canBatchCancel} onClick={() => beginBatchSiteAction('remove')} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">批量取消补充</button>
           <button type="button" disabled={batchSaving || selectedKeywords.size === 0} onClick={() => void markSelectedAsProblem()} className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40">标记问题</button>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1150px] table-fixed" aria-label="关键词布局列表">
+          <table className="w-full min-w-[1150px] table-fixed" aria-label="关键词补充列表">
             <colgroup><col className="w-12" /><col className="w-60" /><col className="w-24" /><col className="w-32" /><col className="w-40" /><col /><col className={canDelete ? 'w-64' : 'w-44'} /></colgroup>
-            <thead className="bg-slate-50"><tr><th className="table-th"><input type="checkbox" aria-label="全选当前页" checked={items.length > 0 && items.every(row => selectedKeywords.has(row.keyword))} onChange={toggleAllKeywords} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">布局站点</th><th className="table-th text-right">操作</th></tr></thead>
+            <thead className="bg-slate-50"><tr><th className="table-th"><input type="checkbox" aria-label="全选当前页" checked={items.length > 0 && items.every(row => selectedKeywords.has(row.keyword))} onChange={toggleAllKeywords} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></th><th className="table-th">关键词</th><th className="table-th text-right">搜索量</th><th className="table-th">一级分类</th><th className="table-th">二级分类</th><th className="table-th">补充站点</th><th className="table-th text-right">操作</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">正在读取词库布局资料…</td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
+              {loading ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">正在读取词库补充资料…</td></tr> : items.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">当前筛选下没有资料</td></tr> : items.map(row => {
                 const draft = drafts[row.keyword] ?? { category: '', subcategory: '' }
                 const subOptions = subcategoriesFor(draft.category)
                 const assignedSites = row.layout_site_domains ?? []
@@ -514,7 +514,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
                   <td className="table-td align-middle"><select aria-label={`${row.keyword}一级分类`} value={draft.category} onChange={event => updateDraft(row.keyword, { category: event.target.value as KeywordPrimaryCategory | '' })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs focus:border-emerald-500 focus:outline-none"><option value="">请选择</option>{KEYWORD_PRIMARY_CATEGORIES.map(value => <option key={value} value={value}>{value === '-' ? '未能判断' : value}</option>)}</select></td>
                   <td className="table-td align-middle">{subOptions.length > 0 ? <select aria-label={`${row.keyword}二级分类`} value={draft.subcategory} onChange={event => updateDraft(row.keyword, { subcategory: event.target.value })} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs focus:border-emerald-500 focus:outline-none"><option value="">请选择</option>{subOptions.map(value => <option key={value} value={value}>{value}</option>)}</select> : <span className="text-slate-300">—</span>}</td>
                   <td className="table-td align-middle"><div className="flex min-w-0 items-center gap-1 overflow-hidden" title={visibleSites.join('、')}>{visibleSites.length === 0 ? <span className="text-slate-300">—</span> : <>{visibleSites.slice(0, 4).map(domain => <span key={domain} className={`inline-flex max-w-36 shrink-0 truncate rounded-md border px-2 py-1 text-xs font-medium ${siteStyle(domain).chip}`}>{domain}</span>)}{visibleSites.length > 4 && <span className="shrink-0 text-xs text-slate-500">+{visibleSites.length - 4}</span>}</>}</div></td>
-                  <td className="table-td align-middle text-right"><span className="inline-flex items-center justify-end gap-1.5">{classificationChanged && <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void confirmClassification(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存分类'}</button>}{selectedSite === 'all' ? <button type="button" disabled={saving === row.keyword || deleting === row.keyword || availableSites.length === 0} onClick={() => openLayoutEditor(row)} className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">布局</button> : <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleCurrentSiteLayout(row)} className={`inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${currentSiteAssigned ? 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{saving === row.keyword ? '保存中' : currentSiteAssigned ? '取消' : '布局'}</button>}<button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleProblem(row)} className={`inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${row.layout_status === 'issue' ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{row.layout_status === 'issue' ? '取消问题' : '标记问题'}</button>{canDelete && row.layout_status === 'issue' && <button type="button" disabled={Boolean(deleting) || saving === row.keyword} onClick={() => void removeKeyword(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{deleting === row.keyword ? '删除中' : '永久删除'}</button>}</span></td>
+                  <td className="table-td align-middle text-right"><span className="inline-flex items-center justify-end gap-1.5">{classificationChanged && <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void confirmClassification(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{saving === row.keyword ? '保存中' : '保存分类'}</button>}{selectedSite === 'all' ? <button type="button" disabled={saving === row.keyword || deleting === row.keyword || availableSites.length === 0} onClick={() => openLayoutEditor(row)} className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">补充</button> : <button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleCurrentSiteLayout(row)} className={`inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${currentSiteAssigned ? 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{saving === row.keyword ? '保存中' : currentSiteAssigned ? '取消补充' : '补充'}</button>}<button type="button" disabled={saving === row.keyword || deleting === row.keyword} onClick={() => void toggleProblem(row)} className={`inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${row.layout_status === 'issue' ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{row.layout_status === 'issue' ? '取消问题' : '标记问题'}</button>{canDelete && row.layout_status === 'issue' && <button type="button" disabled={Boolean(deleting) || saving === row.keyword} onClick={() => void removeKeyword(row)} className="inline-flex h-8 min-h-0 items-center justify-center whitespace-nowrap rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">{deleting === row.keyword ? '删除中' : '永久删除'}</button>}</span></td>
                 </tr>
               })}
             </tbody>
@@ -530,8 +530,8 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
           <section ref={layoutDialogRef} role="dialog" aria-modal="true" aria-labelledby="layout-editor-title" className="relative flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h2 id="layout-editor-title" className="text-lg font-semibold text-slate-950">管理布局站点</h2>
-                <p className="mt-1 truncate text-sm text-slate-500" title={layoutEditor.keyword}>{layoutEditor.keyword} · 取消勾选即可取消布局</p>
+                <h2 id="layout-editor-title" className="text-lg font-semibold text-slate-950">管理补充站点</h2>
+                <p className="mt-1 truncate text-sm text-slate-500" title={layoutEditor.keyword}>{layoutEditor.keyword} · 取消勾选即可取消补充</p>
               </div>
               <button type="button" aria-label="关闭站点选择" disabled={Boolean(saving)} onClick={() => setLayoutEditor(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50">×</button>
             </div>
@@ -542,7 +542,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
               <span className="text-xs text-slate-500">已选择 {layoutDraft.length} 个站点</span>
               <div className="flex gap-2">
                 <button type="button" disabled={Boolean(saving)} onClick={() => setLayoutEditor(null)} className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">取消</button>
-                <button type="button" disabled={Boolean(saving)} onClick={() => void saveSiteAssignments(layoutEditor, layoutDraft, true)} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">{saving ? '保存中…' : '保存布局'}</button>
+                <button type="button" disabled={Boolean(saving)} onClick={() => void saveSiteAssignments(layoutEditor, layoutDraft, true)} className="inline-flex h-9 items-center rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 disabled:opacity-50">{saving ? '保存中…' : '保存补充'}</button>
               </div>
             </div>
           </section>
@@ -555,8 +555,8 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
           <section ref={layoutDialogRef} role="dialog" aria-modal="true" aria-labelledby="batch-site-editor-title" className="relative flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h2 id="batch-site-editor-title" className="text-lg font-semibold text-slate-950">{batchSiteMode === 'add' ? '批量布局站点' : '批量取消站点'}</h2>
-                <p className="mt-1 text-sm text-slate-500">{batchSiteMode === 'add' ? '勾选要加入布局的站点。' : '勾选要从这些关键词中取消的站点。'}</p>
+                <h2 id="batch-site-editor-title" className="text-lg font-semibold text-slate-950">{batchSiteMode === 'add' ? '批量补充站点' : '批量取消补充'}</h2>
+                <p className="mt-1 text-sm text-slate-500">{batchSiteMode === 'add' ? '勾选要补充到的站点。' : '勾选要从这些关键词中取消补充的站点。'}</p>
               </div>
               <button type="button" aria-label="关闭批量站点选择" disabled={batchSaving} onClick={() => setBatchSiteMode(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50">×</button>
             </div>
@@ -565,7 +565,7 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
               <button type="button" disabled={batchSaving} onClick={() => setBatchSiteMode(null)} className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">取消</button>
-              <button type="button" disabled={batchSaving || batchSiteDraft.length === 0} onClick={() => void runBatchSiteAction(batchSiteMode, batchSiteDraft)} className={`inline-flex h-9 items-center rounded-lg px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40 ${batchSiteMode === 'add' ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus:ring-slate-400'}`}>{batchSaving ? '处理中…' : batchSiteMode === 'add' ? '确认布局' : '确认取消'}</button>
+              <button type="button" disabled={batchSaving || batchSiteDraft.length === 0} onClick={() => void runBatchSiteAction(batchSiteMode, batchSiteDraft)} className={`inline-flex h-9 items-center rounded-lg px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40 ${batchSiteMode === 'add' ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus:ring-slate-400'}`}>{batchSaving ? '处理中…' : batchSiteMode === 'add' ? '确认补充' : '确认取消补充'}</button>
             </div>
           </section>
         </div>

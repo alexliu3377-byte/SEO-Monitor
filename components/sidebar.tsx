@@ -53,7 +53,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         href: '/keyword-classification',
-        label: '词库布局',
+        label: '词库补充',
         icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 5h6v6H4V5zm10 0h6v6h-6V5zM4 15h6v4H4v-4zm10 0h6v4h-6v-4z" /></svg>,
       },
       {
