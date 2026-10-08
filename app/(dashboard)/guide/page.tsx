@@ -25,31 +25,41 @@ const ADMIN_NAV: GuideLink[] = [
   { id: 'admin-permissions', label: '权限说明' },
 ]
 
-function PageLink({ href, children }: { href: string; children: React.ReactNode }) {
+function PageLink({ href, children, primary = false }: { href: string; children: React.ReactNode; primary?: boolean }) {
   return (
-    <Link href={href} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-transparent px-3 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+    <Link
+      href={href}
+      className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border px-3.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 ${primary
+        ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm hover:border-emerald-700 hover:bg-emerald-700'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
+      }`}
+    >
       {children}
       <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" /></svg>
     </Link>
   )
 }
 
-function Section({ id, title, description, href, linkLabel, children }: {
+function Section({ id, title, description, href, linkLabel, primaryAction = false, children }: {
   id: string
   title: string
   description?: string
   href?: string
   linkLabel?: string
+  primaryAction?: boolean
   children: React.ReactNode
 }) {
   return (
-    <section id={id} className="scroll-mt-24 overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+    <section id={id} className={`scroll-mt-24 overflow-hidden rounded-xl border bg-white ${primaryAction ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200'}`}>
+      <div className={`flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4 ${primaryAction ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100'}`}>
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+            {primaryAction && <span className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">从这里开始</span>}
+          </div>
           {description && <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>}
         </div>
-        {href && <PageLink href={href}>{linkLabel ?? '打开页面'}</PageLink>}
+        {href && <PageLink href={href} primary={primaryAction}>{linkLabel ?? '打开页面'}</PageLink>}
       </div>
       <div className="px-5 py-4 text-sm leading-6 text-slate-600">{children}</div>
     </section>
@@ -120,7 +130,7 @@ export default function GuidePage() {
             <h2 className="text-base font-semibold text-slate-900">每天要做什么</h2>
             <p className="mt-1 text-sm text-slate-500">按下面顺序完成即可，其他页面都是查询和辅助工具。</p>
             <div className="mt-4 space-y-4">
-              <Section id="daily-tasks" title="1. 认领并提交当天任务" description="任务工作台是组员每天主要操作的页面。" href="/content/task-groups" linkLabel="打开任务工作台">
+              <Section id="daily-tasks" title="1. 认领并提交当天任务" description="任务工作台是组员每天主要操作的页面。" href="/content/task-groups" linkLabel="打开任务工作台" primaryAction>
                 <ol className="space-y-4">
                   <Step number={1} title="选择任务">从来源 Tab 中找到合适的词，点击“认领”；双击整行只是快捷操作。</Step>
                   <Step number={2} title="完成内容">在左侧任务列表填写操作类型、最终关键词和页面 URL。三项完整后才能提交。</Step>
