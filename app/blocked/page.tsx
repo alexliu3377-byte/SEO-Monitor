@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getBrowserClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
 export default function BlockedPage() {
@@ -16,9 +15,16 @@ export default function BlockedPage() {
   }, [])
 
   async function handleLogout() {
-    const supabase = getBrowserClient()
-    await supabase.auth.signOut()
-    router.push('/login')
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+    } finally {
+      router.replace('/login')
+      router.refresh()
+    }
   }
 
   return (

@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { clearSuccessfulLoginLimit, consumeLoginRateLimit } from '@/lib/login-rate-limit'
+import {
+  DAILY_LOGIN_COOKIE_NAME,
+  issueDailyLoginCookie,
+  secondsUntilKualaLumpurMidnight,
+} from '@/lib/daily-login'
 
 function clientIp(req: Request) {
   return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown'
@@ -113,5 +118,13 @@ export async function POST(req: Request) {
     // conservative IP-wide counter, and surface cleanup failures in logs.
     console.error('Unable to clear successful login rate limit:', error)
   }
-  return NextResponse.json({ ok: true })
+  const response = NextResponse.json({ ok: true })
+  response.cookies.set(DAILY_LOGIN_COOKIE_NAME, issueDailyLoginCookie(user.id), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: secondsUntilKualaLumpurMidnight(),
+  })
+  return response
 }

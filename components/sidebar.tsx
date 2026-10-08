@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { getBrowserClient } from '@/lib/supabase'
 import { contentSystemPath } from '@/lib/system-routes'
 import { useUser } from '@/lib/user-context'
 import { isProjectOwner } from '@/lib/project-owner'
@@ -314,10 +313,16 @@ export default function Sidebar() {
   }, [isMobile, mobileOpen])
 
   async function handleLogout() {
-    const supabase = getBrowserClient()
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+    } finally {
+      router.replace('/login')
+      router.refresh()
+    }
   }
 
   const isAppUpdateCenter = pathname.startsWith('/app-updates')

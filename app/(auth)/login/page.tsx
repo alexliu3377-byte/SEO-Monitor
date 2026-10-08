@@ -66,6 +66,7 @@ export default function LoginPage() {
   const [showPwd, setShowPwd]               = useState(false)
   const [loading, setLoading]               = useState(false)
   const [error, setError]                   = useState<string | null>(null)
+  const [notice, setNotice]                 = useState<string | null>(null)
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
   const canvasRef         = useRef<HTMLCanvasElement>(null)
@@ -81,6 +82,15 @@ export default function LoginPage() {
   }, [])
 
   useEffect(() => { refreshCaptcha() }, [refreshCaptcha])
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get('reason')
+    if (reason === 'daily-login-required') {
+      setNotice('为保护组员账号安全，请重新登录。每天首次使用时需要验证一次密码。')
+    } else if (reason === 'account-disabled') {
+      setNotice('这个账号已停用，请联系管理员。')
+    }
+  }, [])
 
   useEffect(() => {
     const siteKey = TURNSTILE_SITE_KEY
@@ -146,7 +156,19 @@ export default function LoginPage() {
       if (turnstileWidgetId.current && window.turnstile) window.turnstile.reset(turnstileWidgetId.current)
       return
     }
-    router.replace('/')
+    const requestedPath = new URLSearchParams(window.location.search).get('next')
+    let destination = '/'
+    if (requestedPath) {
+      try {
+        const requestedUrl = new URL(requestedPath, window.location.origin)
+        if (requestedUrl.origin === window.location.origin) {
+          destination = `${requestedUrl.pathname}${requestedUrl.search}${requestedUrl.hash}`
+        }
+      } catch {
+        destination = '/'
+      }
+    }
+    router.replace(destination)
     router.refresh()
   }
 
@@ -219,6 +241,13 @@ export default function LoginPage() {
               </h1>
               <p className="text-white/60 text-sm mt-1.5">欢迎回来，请登录您的管理账户</p>
             </div>
+
+            {notice && (
+              <div role="status" className="mb-5 rounded-xl px-4 py-3 text-sm leading-5 text-emerald-50"
+                style={{ background: 'rgba(16,185,129,0.16)', border: '1px solid rgba(110,231,183,0.32)' }}>
+                {notice}
+              </div>
+            )}
 
             <form onSubmit={handleLogin} className="space-y-4">
 

@@ -3,6 +3,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { legacyContentRedirect } from './lib/system-routes'
 import { allowsServiceAuthPath } from './lib/service-api-access'
+import { DAILY_LOGIN_COOKIE_NAME, verifyDailyLoginCookie } from './lib/daily-login'
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -48,7 +49,9 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isApi = pathname.startsWith('/api/')
   const allowsServiceAuth = allowsServiceAuthPath(pathname)
-  const isPublicApi = pathname.startsWith('/api/auth/') || allowsServiceAuth
+  const isAuthApi = pathname.startsWith('/api/auth/')
+  const isLogoutApi = pathname === '/api/auth/logout'
+  const isPublicApi = isAuthApi || allowsServiceAuth
 
   if (!user && isApi && !isPublicApi) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -56,6 +59,9 @@ export async function proxy(request: NextRequest) {
   if (user && isApi && !isTrustedBrowserMutation(request)) {
     return NextResponse.json({ error: 'Cross-site request blocked' }, { status: 403 })
   }
+  // Logout must stay available for disabled accounts and users currently
+  // outside their IP allow-list; it only destroys the caller's local session.
+  if (user && isLogoutApi) return supabaseResponse
   if (!user && !isApi && !pathname.startsWith('/login')) {
     const loginUrl = request.nextUrl.clone()
     loginUrl.pathname = '/login'
@@ -93,13 +99,45 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(loginUrl)
       }
 
+      const isSuperAdmin = profile.role === 'super'
+      const dailyLoginValid = isSuperAdmin || verifyDailyLoginCookie(
+        request.cookies.get(DAILY_LOGIN_COOKIE_NAME)?.value,
+        user.id
+      )
+
+      if (!dailyLoginValid) {
+        // Auth endpoints must remain reachable so an old Supabase refresh token
+        // cannot create a login loop. Service requests normally carry no browser
+        // user and keep their existing Bearer-secret behavior above.
+        if (isApi) {
+          if (isAuthApi) return supabaseResponse
+          const response = NextResponse.json(
+            { error: '每日登录已过期，请重新登录', code: 'DAILY_LOGIN_REQUIRED' },
+            { status: 401 }
+          )
+          response.cookies.delete(DAILY_LOGIN_COOKIE_NAME)
+          return response
+        }
+        if (pathname === '/login') {
+          supabaseResponse.cookies.delete(DAILY_LOGIN_COOKIE_NAME)
+          return supabaseResponse
+        }
+        const loginUrl = request.nextUrl.clone()
+        loginUrl.pathname = '/login'
+        loginUrl.search = ''
+        loginUrl.searchParams.set('reason', 'daily-login-required')
+        loginUrl.searchParams.set('next', `${pathname}${request.nextUrl.search}`)
+        const response = NextResponse.redirect(loginUrl)
+        response.cookies.delete(DAILY_LOGIN_COOKIE_NAME)
+        return response
+      }
+
       if (pathname === '/login') {
         const homeUrl = request.nextUrl.clone()
         homeUrl.pathname = '/'
         return NextResponse.redirect(homeUrl)
       }
 
-      const isSuperAdmin = profile.role === 'super'
       const allowedIps: string[] = profile.allowed_ips ?? []
       if (!pathname.startsWith('/blocked') && !isSuperAdmin && allowedIps.length > 0 && !allowedIps.includes(ip)) {
         if (isApi) {

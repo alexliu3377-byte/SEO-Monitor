@@ -761,6 +761,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const viewingMemberIsValid = !!viewingMemberId && !!activeGroup?.members.some(member => member.user_id === viewingMemberId)
   const effectiveViewingId = viewingMemberIsValid ? viewingMemberId! : currentUserIsMember ? currentUserId! : ''
   const isViewingOwn = effectiveViewingId === currentUserId
+  const canOperateViewedMember = !!effectiveViewingId && (isViewingOwn || canManage)
+  const taskActionUnavailableMessage = canOperateViewedMember
+    ? ''
+    : canManage
+      ? '请先选择一名分组成员。'
+      : '你还未加入这个分组，不能提交。'
 
   const claimedSet = useMemo(() => new Set(claimedKeywords.map(k => k.keyword)), [claimedKeywords])
   const submittedSet = useMemo(() => new Set(claimedKeywords.filter(k => k.status === 'submitted').map(k => k.keyword)), [claimedKeywords])
@@ -1519,7 +1525,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }
 
   async function addManualKeyword() {
-    if (!activeGroupId || !addKw.trim() || addingManual) return
+    if (!activeGroupId || !effectiveViewingId || !canOperateViewedMember || !addKw.trim() || addingManual) {
+      if (!canOperateViewedMember) setClaimErrorMsg(taskActionUnavailableMessage)
+      return
+    }
     setAddingManual(true)
     try {
       const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
@@ -1549,7 +1558,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }
 
   async function submitForDate() {
-    if (!activeGroupId || submitting || pendingCount === 0) return
+    if (!activeGroupId || !effectiveViewingId || !canOperateViewedMember || submitting || pendingCount === 0) {
+      if (!canOperateViewedMember) setClaimErrorMsg(taskActionUnavailableMessage)
+      return
+    }
 
     // Validate: all pending claims must have operation_type, final_keyword, and page_url
     const pending = displayedClaims.filter(k => k.status === 'pending')
@@ -3251,8 +3263,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                     </div>
                   )}
                 </div>
-                {isViewingOwn && (
-                  <div className="border-t border-gray-100">
+                <div className="border-t border-gray-100">
+                    {taskActionUnavailableMessage && (
+                      <p className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                        {taskActionUnavailableMessage}
+                      </p>
+                    )}
                     {showAddForm ? (
                       <div className="p-3 space-y-1.5 bg-gray-50/60">
                         <input aria-label="输入内容"
@@ -3299,8 +3315,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       </div>
                     ) : (
                       <div className="px-3 pt-2">
-                        <button onClick={() => setShowAddForm(true)}
-                          className="w-full py-1.5 text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg hover:border-green-300 hover:text-green-500 transition-colors flex items-center justify-center gap-1">
+                        <button onClick={() => setShowAddForm(true)} disabled={!canOperateViewedMember}
+                          title={taskActionUnavailableMessage || '为当前选中的组员手动添加词'}
+                          className="w-full py-1.5 text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg hover:border-green-300 hover:text-green-500 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:text-gray-400">
                           <span className="text-base leading-none">+</span> 手动添加词
                         </button>
                       </div>
@@ -3311,13 +3328,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                           {invalidClaimIds.size} 条词有未填项，请检查标红字段
                         </p>
                       )}
-                      <button onClick={submitForDate} disabled={submitting || pendingCount === 0}
+                      <button onClick={submitForDate} disabled={!canOperateViewedMember || submitting || pendingCount === 0}
+                        title={taskActionUnavailableMessage || undefined}
                         className={`w-full py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${invalidClaimIds.size > 0 ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}>
                         {submitting ? '提交中...' : invalidClaimIds.size > 0 ? `${invalidClaimIds.size} 条未完整` : `提交${selectedDate !== today ? ` (${selectedDate.slice(5).replace('-', '/')})` : ''}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
                       </button>
                     </div>
                   </div>
-                )}
               </div>
 
               {/* Right panel */}

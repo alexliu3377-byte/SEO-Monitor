@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
 import { isProjectOwner } from '@/lib/project-owner'
 
@@ -16,9 +15,16 @@ export default function SystemPortal() {
   const canUsePageStudio = role === 'super' && isProjectOwner(id)
 
   async function logout() {
-    await getBrowserClient().auth.signOut()
-    router.push('/login')
-    router.refresh()
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+    } finally {
+      router.replace('/login')
+      router.refresh()
+    }
   }
 
   return (
