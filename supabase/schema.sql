@@ -281,8 +281,42 @@ ALTER FUNCTION monthly_volume_change_top(date, date, integer) SET statement_time
 CREATE TABLE IF NOT EXISTS monthly_trend_cache (
   month       TEXT PRIMARY KEY,
   payload     JSONB NOT NULL,
-  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_final    BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- Monthly trend overview cache. The API reads these compact rows instead of
+-- issuing two exact-count requests per month. Keep the same raw-row counting
+-- convention as the original overview so historical chart values do not jump.
+CREATE TABLE IF NOT EXISTS monthly_trend_summary_cache (
+  month       TEXT PRIMARY KEY CHECK (month ~ '^\d{4}-\d{2}$'),
+  app_count   BIGINT NOT NULL DEFAULT 0 CHECK (app_count >= 0),
+  game_count  BIGINT NOT NULL DEFAULT 0 CHECK (game_count >= 0),
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_final    BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+ALTER TABLE monthly_trend_summary_cache ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE monthly_trend_summary_cache FROM anon, authenticated;
+GRANT ALL ON TABLE monthly_trend_summary_cache TO service_role;
+
+CREATE OR REPLACE FUNCTION monthly_keyword_counts(p_start date, p_end date)
+RETURNS TABLE(month text, app_count bigint, game_count bigint)
+LANGUAGE sql STABLE
+SET search_path = public AS $$
+  SELECT
+    TO_CHAR(DATE_TRUNC('month', rk.content_date), 'YYYY-MM') AS month,
+    COUNT(*) FILTER (WHERE rk.content_type = 'app')::bigint AS app_count,
+    COUNT(*) FILTER (WHERE rk.content_type = 'game')::bigint AS game_count
+  FROM raw_keywords rk
+  WHERE rk.content_date >= p_start AND rk.content_date <= p_end
+  GROUP BY DATE_TRUNC('month', rk.content_date)
+  ORDER BY DATE_TRUNC('month', rk.content_date)
+$$;
+
+REVOKE ALL ON FUNCTION monthly_keyword_counts(date, date) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION monthly_keyword_counts(date, date) TO service_role;
+ALTER FUNCTION monthly_keyword_counts(date, date) SET statement_timeout = '60s';
 
 -- 2026-08-18：分组报告"成效追踪"/"追踪汇总"背后的重计算结果缓存——group_id
 -- 是主键，一个分组一行，payload 是这个分组全部claim的"增强行"数组（已按
@@ -381,3 +415,33 @@ CREATE TABLE IF NOT EXISTS hot_radar_cache (
   payload      JSONB NOT NULL,
   computed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Public metadata cache used by the content dynamics feed. External sources
+-- are refreshed by GitHub Actions; dashboard requests only paginate this table.
+CREATE TABLE IF NOT EXISTS content_feed_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source        TEXT NOT NULL CHECK (source ~ '^[a-z0-9][a-z0-9_-]{1,31}$'),
+  source_id     TEXT NOT NULL CHECK (LENGTH(source_id) BETWEEN 1 AND 300),
+  category      TEXT NOT NULL CHECK (category ~ '^[a-z0-9][a-z0-9_-]{1,31}$'),
+  title         TEXT NOT NULL CHECK (LENGTH(title) BETWEEN 1 AND 240),
+  url           TEXT NOT NULL CHECK (LENGTH(url) <= 2048 AND url ~ '^https://'),
+  cover_url     TEXT CHECK (cover_url IS NULL OR (LENGTH(cover_url) <= 2048 AND cover_url ~ '^https://')),
+  author        TEXT CHECK (author IS NULL OR LENGTH(author) <= 120),
+  summary       TEXT CHECK (summary IS NULL OR LENGTH(summary) <= 280),
+  published_at  TIMESTAMPTZ,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source, source_id),
+  UNIQUE (source, url)
+);
+
+CREATE INDEX IF NOT EXISTS content_feed_items_published_idx
+  ON content_feed_items (published_at DESC NULLS LAST, first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS content_feed_items_source_published_idx
+  ON content_feed_items (source, published_at DESC NULLS LAST, first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS content_feed_items_category_published_idx
+  ON content_feed_items (category, published_at DESC NULLS LAST, first_seen_at DESC);
+
+ALTER TABLE content_feed_items ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE content_feed_items FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE content_feed_items TO service_role;

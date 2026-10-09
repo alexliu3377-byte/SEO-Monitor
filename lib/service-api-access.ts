@@ -2,6 +2,7 @@ const SERVICE_AUTH_PATHS = [
   '/api/cron',
   '/api/environment/daily-snapshot',
   '/api/hot-radar/refresh',
+  '/api/content-feed/refresh',
   '/api/tracking-cache/refresh',
   '/api/trend-discovery/ingest',
   '/api/trend-discovery/collector-config',

@@ -94,6 +94,37 @@ export type Database = {
         Insert: Database['public']['Tables']['keyword_volume']['Row']
         Update: Partial<Database['public']['Tables']['keyword_volume']['Insert']>
       }
+      content_feed_items: {
+        Row: {
+          id: string
+          source: string
+          source_id: string
+          category: string
+          title: string
+          url: string
+          cover_url: string | null
+          author: string | null
+          summary: string | null
+          published_at: string | null
+          first_seen_at: string
+          last_seen_at: string
+        }
+        Insert: {
+          id?: string
+          source: string
+          source_id: string
+          category: string
+          title: string
+          url: string
+          cover_url?: string | null
+          author?: string | null
+          summary?: string | null
+          published_at?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['content_feed_items']['Insert']>
+      }
     }
   }
 }

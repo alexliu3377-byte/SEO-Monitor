@@ -1,13 +1,14 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
 function Spinner() {
   return (
-    <div className="flex items-center justify-center py-16">
-      <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+    <div className="flex items-center justify-center py-16" role="status" aria-live="polite">
+      <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+      <span className="sr-only">加载中</span>
     </div>
   )
 }
@@ -95,363 +96,34 @@ function MoreButton({ total, shown, onClick }: { total: number; shown: number; o
   )
 }
 
-// ── 月度趋势（2026-08-06 从规则中心移过来——本质是跨站点趋势发现，放"近期
-// 榜单"更贴切，不是规则中心那种单站点研究逻辑）────────────────────────────
-
-interface MonthlyTrendPoint { month: string; app: number; game: number }
-interface MonthlyDrillItem { keyword: string; contentType: string; volume: number; domains: string[] }
-interface MonthlyRankChangeItem { keyword: string; type: string; volume: number; domains: string[] }
-interface StreakSite { domain: string; streak: number; volume: number; dates: string[] }
-interface MonthlyStreakItem { keyword: string; type: string; volume: number; streak: number; siteCount: number; sites: StreakSite[] }
-interface MonthlyVolumeChangeItem { keyword: string; volume: number; volumeChange: number; domains: string[] }
-interface MonthlyDrillData {
-  app: MonthlyDrillItem[]; game: MonthlyDrillItem[]
-  rankup: MonthlyRankChangeItem[]; rankdown: MonthlyRankChangeItem[]
-  continuousTrend: MonthlyStreakItem[]
-  volumeRising: MonthlyVolumeChangeItem[]; volumeFalling: MonthlyVolumeChangeItem[]
-  domainWeights: Record<string, { pc: number; mobile: number }>
-}
-
-// 跟分组任务详情弹窗（app/(dashboard)/task-groups/page.tsx 的"共新增词"/"竞品涨
-// 排名"面板）同一个展示方式——域名下面带一行 PC/M权重，不是单纯罗列域名。
-function DomainListModal({ title, domains, weights, onClose }: { title: string; domains: string[]; weights: Record<string, { pc: number; mobile: number }>; onClose: () => void }) {
-  return (
-    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="px-5 py-3 max-h-64 overflow-y-auto flex flex-wrap gap-1.5">
-          {domains.map(d => {
-            const w = weights[d]
-            return (
-              <span key={d} className="inline-flex items-center gap-1 text-xs bg-gray-100 rounded px-2 py-1 text-gray-700">
-                <span className="flex flex-col leading-tight">
-                  <span>{d}</span>
-                  {w && <span className="text-[10px] text-gray-400">PC{w.pc} · M{w.mobile}</span>}
-                </span>
-              </span>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// 排名连续涨跌"查看"——同一个词可能跨多个站点都在连续涨/跌，展示全部
-// 站点各自连续了多少天，而不是像 DomainListModal 那样只罗列域名。
-function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string; siteCount: number; sites: StreakSite[]; onClose: () => void }) {
-  return (
-    <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-800 truncate">{title}</span>
-          <span className="text-xs text-gray-400 flex-shrink-0 ml-2">共{siteCount}站</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 ml-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="px-5 py-3 max-h-72 overflow-y-auto divide-y divide-gray-50">
-          {sites.map(s => (
-            <div key={s.domain} className="py-2 flex items-center justify-between text-sm">
-              <span className="text-gray-700 truncate">{s.domain}</span>
-              <span className="text-xs text-gray-400 flex-shrink-0 ml-2">连续{s.streak}天 · {s.volume.toLocaleString()}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function MonthlyTrendTab() {
-  const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
-  const [loading, setLoading] = useState(true)
-  const [chartYear, setChartYear] = useState('')
-  const [filterYear, setFilterYear] = useState('')
-  const [drillMonth, setDrillMonth] = useState<string | null>(null)
-  const [drillData, setDrillData] = useState<MonthlyDrillData | null>(null)
-  const [drillLoading, setDrillLoading] = useState(false)
-  const [domainModal, setDomainModal] = useState<{ title: string; domains: string[] } | null>(null)
-  const [streakModal, setStreakModal] = useState<{ title: string; siteCount: number; sites: StreakSite[] } | null>(null)
-
-  useEffect(() => {
-    fetch('/api/charts/monthly-trend').then(r => r.json()).then(d => setMonths(d.months ?? [])).finally(() => setLoading(false))
-  }, [])
-
-  // 数据一到手默认选最新年份+自动打开最新月份，不用用户手动点
-  useEffect(() => {
-    if (months.length === 0) return
-    const latestYear = months[months.length - 1].month.slice(0, 4)
-    setChartYear(latestYear)
-    setFilterYear(latestYear)
-    openDrill(months[months.length - 1].month)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [months])
-
-  function openDrill(month: string) {
-    setDrillMonth(month)
-    setDrillLoading(true)
-    setDrillData(null)
-    fetch(`/api/charts/monthly-trend?month=${month}`).then(r => r.json()).then(d => setDrillData({
-      app: d.app ?? [], game: d.game ?? [], rankup: d.rankup ?? [], rankdown: d.rankdown ?? [], continuousTrend: d.continuousTrend ?? [],
-      volumeRising: d.volumeRising ?? [], volumeFalling: d.volumeFalling ?? [], domainWeights: d.domainWeights ?? {},
-    })).finally(() => setDrillLoading(false))
-  }
-
-  function openDomainModal(title: string, domains: string[]) {
-    setDomainModal({ title, domains })
-  }
-
-  if (loading) return <Spinner />
-
-  const years = Array.from(new Set(months.map(m => m.month.slice(0, 4))))
-  const chartMonths = months.filter(m => m.month.startsWith(chartYear))
-  const filterMonths = months.filter(m => m.month.startsWith(filterYear))
-
-  return (
-    <div>
-      <p className="text-sm text-gray-500 mb-4">全部监控站点按月汇总新增关键词数量（应用/游戏），用来发现"哪个月哪个类目在涨"这种跨站点规律。</p>
-      {months.length === 0 ? (
-        <p className="text-sm text-gray-300 text-center py-10">暂无数据</p>
-      ) : (
-        <>
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-4">
-            <div className="flex items-center justify-between mb-5">
-              <span className="text-sm font-semibold text-gray-700">类目占比</span>
-              <select aria-label="选择选项" value={chartYear} onChange={e => setChartYear(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            {chartMonths.length === 0 ? (
-              <p className="text-sm text-gray-300 text-center py-10">{chartYear}年暂无数据</p>
-            ) : (
-              <div className="flex items-end gap-6 overflow-x-auto px-1">
-                {chartMonths.map(m => {
-                  const total = m.app + m.game
-                  const appPct = total === 0 ? 0 : Math.round(m.app / total * 100)
-                  const gamePct = total === 0 ? 0 : 100 - appPct
-                  return (
-                    <div key={m.month} className="flex flex-col items-center gap-2 flex-shrink-0">
-                      <div className="flex items-end gap-1.5 h-32">
-                        <div className="flex flex-col items-center justify-end h-full">
-                          {appPct > 0 && <span className="text-[11px] text-sky-600 font-medium mb-1">{appPct}%</span>}
-                          <div className="w-6 bg-sky-500 rounded-t transition-all" style={{ height: `${appPct}%` }} />
-                        </div>
-                        <div className="flex flex-col items-center justify-end h-full">
-                          {gamePct > 0 && <span className="text-[11px] text-violet-600 font-medium mb-1">{gamePct}%</span>}
-                          <div className="w-6 bg-violet-500 rounded-t transition-all" style={{ height: `${gamePct}%` }} />
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-500">{parseInt(m.month.slice(5), 10)}月</span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-50">
-              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" />应用</span>
-              <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-violet-500 inline-block" />游戏</span>
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-2.5">
-              <select aria-label="选择选项" value={filterYear} onChange={e => setFilterYear(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg pl-2.5 pr-1.5 py-1 bg-white text-gray-700">
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            {filterMonths.length === 0 ? (
-              <p className="text-sm text-gray-300 py-4">{filterYear}年暂无数据</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {filterMonths.map(m => (
-                  <button key={m.month} onClick={() => openDrill(m.month)}
-                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${drillMonth === m.month ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
-                    {parseInt(m.month.slice(5), 10)}月
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {drillMonth && (drillLoading || !drillData ? <Spinner /> : (
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-              <span className="text-sm font-semibold text-gray-700">{drillMonth} 热门新增词（按搜索量排序）</span>
-            </div>
-            <div className="grid grid-cols-2 divide-x divide-gray-100">
-              <div>
-                <p className="text-xs font-medium text-blue-600 px-4 py-2 bg-blue-50/40">应用</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.app.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.app.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-purple-600 px-4 py-2 bg-purple-50/40">游戏</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.game.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.game.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 新增`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-              <span className="text-sm font-semibold text-gray-700">{drillMonth} 涨跌词（按搜索量排序，不分站点汇总）</span>
-            </div>
-            <div className="grid grid-cols-2 divide-x divide-gray-100">
-              <div>
-                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">涨入</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.rankup.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.rankup.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 涨入`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">跌出</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.rankdown.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.rankdown.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}</span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 跌出`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-              <span className="text-sm font-semibold text-gray-700">{drillMonth} 搜索量变动（跟这个月涨跌词有关联的关键词，现在的搜索需求走势）</span>
-            </div>
-            <div className="grid grid-cols-2 divide-x divide-gray-100">
-              <div>
-                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">上涨</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.volumeRising.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeRising.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-green-600 ml-1">+{i.volumeChange.toLocaleString()}</span></span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量上涨`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">下跌</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.volumeFalling.length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.volumeFalling.map(i => (
-                    <div key={i.keyword} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">{i.volume.toLocaleString()}<span className="text-red-500 ml-1">{i.volumeChange.toLocaleString()}</span></span>
-                        <button onClick={() => openDomainModal(`${i.keyword} · 搜索量下跌`, i.domains)}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.domains.length}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-              <span className="text-sm font-semibold text-gray-700">{drillMonth} 排名连续涨跌（同一个词，这个月连续多天同向变化；多个站点都有的话，只展示连续天数最高的一个，"查看"里看各站明细）</span>
-            </div>
-            <div className="grid grid-cols-2 divide-x divide-gray-100">
-              <div>
-                <p className="text-xs font-medium text-green-600 px-4 py-2 bg-green-50/40">连续上涨</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.continuousTrend.filter(i => i.type === 'rankup').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankup').map((i, idx) => (
-                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => setStreakModal({ title: `${i.keyword} · 连续上涨`, siteCount: i.siteCount, sites: i.sites })}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.siteCount}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-red-500 px-4 py-2 bg-red-50/40">连续下跌</p>
-                <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                  {drillData.continuousTrend.filter(i => i.type === 'rankdown').length === 0 ? <p className="text-xs text-gray-300 text-center py-6">无数据</p> : drillData.continuousTrend.filter(i => i.type === 'rankdown').map((i, idx) => (
-                    <div key={idx} className="px-4 py-1.5 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate">{i.keyword}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                        <span className="text-xs text-gray-400">连续{i.streak}天 · {i.volume.toLocaleString()}</span>
-                        <button onClick={() => setStreakModal({ title: `${i.keyword} · 连续下跌`, siteCount: i.siteCount, sites: i.sites })}
-                          className="text-[11px] text-blue-500 hover:text-blue-700 border border-blue-100 rounded px-1.5 py-0.5">{i.siteCount}站 查看</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {domainModal && <DomainListModal title={domainModal.title} domains={domainModal.domains} weights={drillData?.domainWeights ?? {}} onClose={() => setDomainModal(null)} />}
-      {streakModal && <StreakSitesModal title={streakModal.title} siteCount={streakModal.siteCount} sites={streakModal.sites} onClose={() => setStreakModal(null)} />}
-    </div>
-  )
-}
-
-// ── 新游榜单（TapTap + 好游快爆，原来这个页面唯一的内容）───────────────────
+// ── 新游动态（TapTap + 好游快爆）──────────────────────────────────────────
 
 interface HotItem { rank: number; name: string; labels: string[] }
 interface TodayGame { title: string; tag: string; startDate: string; startTime: string; endDate: string; rating: number | null; labels: string[]; icon: string }
 interface HaoyouItem { name: string; tags: string[]; score: string; status: string; url: string; btnText: string; date: string }
 interface HaoyouHotItem { rank: number; name: string; tags: string[] }
 interface ModalState { title: string; items: React.ReactNode[] }
+interface ContentFeedItem {
+  id: string
+  source: string
+  sourceId: string
+  category: string | null
+  title: string
+  url: string
+  coverUrl: string | null
+  author: string | null
+  summary: string | null
+  publishedAt: string | null
+  firstSeenAt: string
+}
+
+interface ContentFeedResponse {
+  items: ContentFeedItem[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
 
 const haoyouTagColors: Record<string, string> = {
   '限量测试': 'bg-purple-100 text-purple-700',
@@ -731,32 +403,262 @@ function NewGamesTab() {
   )
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// 4399 的“近期收录”只表示内容近期出现在来源页面，不等同于游戏刚发布。
+function Recent4399Tab() {
+  const [items, setItems] = useState<ContentFeedItem[]>([])
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setLoading(true)
+    setError('')
+
+    fetch(`/api/content-feed?sources=4399&page=${page}&pageSize=20`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null)
+        if (!response.ok) {
+          if (response.status === 401) throw new Error('登录已失效，请重新登录后再试')
+          throw new Error(data?.error || '读取 4399 近期收录失败')
+        }
+        if (!data || !Array.isArray(data.items)) throw new Error('4399 近期收录返回格式异常')
+        return data as ContentFeedResponse
+      })
+      .then((data) => {
+        const nextTotalPages = Math.max(1, Number(data.totalPages) || 1)
+        setItems(Array.isArray(data.items) ? data.items : [])
+        setTotalPages(nextTotalPages)
+        // 数据刷新后总页数可能缩小，避免停在已经不存在、且无法返回的空白页。
+        if (page > nextTotalPages) setPage(nextTotalPages)
+      })
+      .catch((requestError: unknown) => {
+        if (requestError instanceof Error && requestError.name === 'AbortError') return
+        setItems([])
+        setError(requestError instanceof Error ? requestError.message : '读取 4399 近期收录失败')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [page, retryKey])
+
+  function formatDate(value: string | null) {
+    if (!value) return '日期未知'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+  }
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-gray-200 bg-white" aria-busy={loading}>
+      <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+        <div>
+          <h2 className="text-base font-bold text-gray-900">4399近期收录</h2>
+          <p className="mt-1 text-xs text-gray-500">按 4399 页面近期出现时间整理，仅代表近期收录，不代表游戏刚发布。</p>
+        </div>
+        {!loading && !error && totalPages > 1 && (
+          <span className="flex-shrink-0 text-xs text-gray-400">第 {page} / {totalPages} 页</span>
+        )}
+      </div>
+
+      {loading ? (
+        <Spinner />
+      ) : error ? (
+        <div className="flex min-h-52 flex-col items-center justify-center gap-3 px-5 py-10 text-center">
+          <p className="text-sm text-red-600" role="alert">{error}</p>
+          <div className="flex items-center gap-2">
+            {page > 1 && (
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+              >
+                返回上一页
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setRetryKey((key) => key + 1)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+            >
+              重新读取
+            </button>
+          </div>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex min-h-52 items-center justify-center px-5 py-10 text-sm text-gray-400" role="status">
+          暂无 4399 近期收录资料
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left">
+              <caption className="sr-only">4399近期收录列表</caption>
+              <thead className="bg-gray-50 text-xs font-medium text-gray-500">
+                <tr>
+                  <th scope="col" className="px-5 py-3">游戏名称</th>
+                  <th scope="col" className="w-40 px-4 py-3">类型</th>
+                  <th scope="col" className="w-32 px-4 py-3">收录日期</th>
+                  <th scope="col" className="w-24 px-5 py-3 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {items.map((item) => {
+                  const itemType = item.summary?.trim() || (item.category === 'new_game' ? '游戏' : '')
+                  return (
+                    <tr key={item.id || item.sourceId} className="text-sm text-gray-700 hover:bg-gray-50/70">
+                      <td className="px-5 py-3">
+                        <p className="max-w-[620px] truncate font-medium text-gray-900" title={item.title}>{item.title}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {itemType ? (
+                          <span className="inline-flex max-w-36 truncate rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600" title={itemType}>{itemType}</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{formatDate(item.publishedAt || item.firstSeenAt)}</td>
+                      <td className="px-5 py-3 text-right">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`查看 ${item.title} 原文（新窗口）`}
+                          className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+                        >
+                          查看原文
+                        </a>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 && (
+            <nav aria-label="4399近期收录分页" className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
+              <button
+                type="button"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-600 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                上一页
+              </button>
+              <span className="text-xs tabular-nums text-gray-400" aria-live="polite">第 {page} / {totalPages} 页</span>
+              <button
+                type="button"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-600 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                下一页
+              </button>
+            </nav>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
 
 export default function ChartsPage() {
-  const [activeTab, setActiveTab] = useState<'monthlyTrend' | 'newGames'>('monthlyTrend')
+  const [activeTab, setActiveTab] = useState<'calendar' | '4399'>('calendar')
+  const [opened4399, setOpened4399] = useState(false)
+  const calendarTabRef = useRef<HTMLButtonElement>(null)
+  const recent4399TabRef = useRef<HTMLButtonElement>(null)
+
+  function selectTab(tab: 'calendar' | '4399') {
+    setActiveTab(tab)
+    if (tab === '4399') setOpened4399(true)
+  }
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    let nextTab: 'calendar' | '4399' | null = null
+    if (event.key === 'ArrowLeft' || event.key === 'Home') nextTab = 'calendar'
+    if (event.key === 'ArrowRight' || event.key === 'End') nextTab = '4399'
+    if (!nextTab) return
+
+    event.preventDefault()
+    selectTab(nextTab)
+    if (nextTab === 'calendar') calendarTabRef.current?.focus()
+    else recent4399TabRef.current?.focus()
+  }
 
   return (
     <div className="p-8">
-      <div className="mb-2">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">近期榜单</h1>
-        <p className="text-gray-500 text-sm mt-1">TapTap · 好游快爆 榜单汇总 · 月度趋势</p>
+        <p className="mt-1 text-sm text-gray-500">查看新游安排与游戏站近期收录动态</p>
       </div>
 
-      <div className="flex border-b border-gray-100 my-6">
-        <button onClick={() => setActiveTab('monthlyTrend')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'monthlyTrend' ? 'text-rose-600 border-rose-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
-          月度趋势
+      <div className="mb-5 flex border-b border-gray-200" role="tablist" aria-label="近期榜单内容">
+        <button
+          ref={calendarTabRef}
+          id="recent-rankings-calendar-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'calendar'}
+          aria-controls="recent-rankings-calendar-panel"
+          tabIndex={activeTab === 'calendar' ? 0 : -1}
+          onClick={() => selectTab('calendar')}
+          onKeyDown={handleTabKeyDown}
+          className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
+            activeTab === 'calendar'
+              ? 'border-green-500 text-green-700'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          新游日历
         </button>
-        <button onClick={() => setActiveTab('newGames')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'newGames' ? 'text-teal-600 border-teal-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
-          新游榜单
+        <button
+          ref={recent4399TabRef}
+          id="recent-rankings-4399-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === '4399'}
+          aria-controls="recent-rankings-4399-panel"
+          tabIndex={activeTab === '4399' ? 0 : -1}
+          onClick={() => selectTab('4399')}
+          onKeyDown={handleTabKeyDown}
+          className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
+            activeTab === '4399'
+              ? 'border-green-500 text-green-700'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          4399近期收录
         </button>
       </div>
 
-      <div>
-        {activeTab === 'monthlyTrend' ? <MonthlyTrendTab /> : <NewGamesTab />}
+      <div
+        id="recent-rankings-calendar-panel"
+        role="tabpanel"
+        aria-labelledby="recent-rankings-calendar-tab"
+        hidden={activeTab !== 'calendar'}
+      >
+        <NewGamesTab />
       </div>
+      {opened4399 && (
+        <div
+          id="recent-rankings-4399-panel"
+          role="tabpanel"
+          aria-labelledby="recent-rankings-4399-tab"
+          hidden={activeTab !== '4399'}
+        >
+          <Recent4399Tab />
+        </div>
+      )}
     </div>
   )
 }

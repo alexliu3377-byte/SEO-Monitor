@@ -8,6 +8,8 @@ import {
   type TrendReviewStatus,
   type TrendStage,
 } from '@/lib/trend-discovery'
+import ContentFeedTab from '@/components/content-feed-tab'
+import MonthlyTrendTab from '@/components/monthly-trend-tab'
 import TrendKeywordDiscovery from './trend-keyword-discovery'
 
 type Role = 'normal' | 'admin' | 'super'
@@ -74,7 +76,7 @@ const STAGE_META: Record<TrendStage, { label: string; className: string }> = {
   cooling: { label: '热度放缓', className: 'bg-slate-50 text-slate-600 border-slate-200' },
 }
 
-const TABS: { key: 'pending' | 'tracked'; label: string }[] = [
+const REVIEW_TABS: { key: 'pending' | 'tracked'; label: string }[] = [
   { key: 'pending', label: '待处理' },
   { key: 'tracked', label: '已布局' },
 ]
@@ -164,8 +166,8 @@ function NodeStatus({ node }: { node: CollectorNode }) {
 }
 
 export default function TrendDiscoveryClient({ initialRole }: { initialRole: Role }) {
-  const [workspaceTab, setWorkspaceTab] = useState<'trends' | 'keywords'>('trends')
-  const [activeTab, setActiveTab] = useState<'pending' | 'tracked'>('pending')
+  const [workspaceTab, setWorkspaceTab] = useState<'monthly' | 'content' | 'trends' | 'keywords'>('monthly')
+  const [reviewTab, setReviewTab] = useState<'pending' | 'tracked'>('pending')
   const [stage, setStage] = useState<TrendStage | ''>('')
   const [platform, setPlatform] = useState('')
   const [searchInput, setSearchInput] = useState('')
@@ -197,13 +199,14 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
     setLoading(true)
     setError('')
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
-    params.set('review', activeTab)
+    params.set('review', reviewTab)
     if (stage) params.set('stage', stage)
     if (platform) params.set('platform', platform)
     if (search) params.set('q', search)
     try {
       const response = await fetch(`/api/trend-discovery?${params}`, { signal, cache: 'no-store' })
       const data = await response.json()
+      if (signal?.aborted) return
       if (!response.ok) throw new Error(data.error || '趋势资料读取失败')
       setTerms(data.terms ?? [])
       setSelectedTermIds(new Set())
@@ -215,13 +218,14 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [activeTab, page, platform, search, stage])
+  }, [page, platform, reviewTab, search, stage])
 
   useEffect(() => {
+    if (workspaceTab !== 'trends') return
     const controller = new AbortController()
     loadTerms(controller.signal)
     return () => controller.abort()
-  }, [loadTerms])
+  }, [loadTerms, workspaceTab])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -354,9 +358,9 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
         <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-5">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950">趋势发现</h1>
-            <p className="mt-1.5 text-sm text-slate-500">从公开社媒内容中发现正在形成的新词。</p>
+            <p className="mt-1.5 text-sm text-slate-500">查看跨站点月度变化、新内容动态和正在形成的新词。</p>
           </div>
-          {canManage && (
+          {workspaceTab === 'trends' && canManage && (
             <button type="button" onClick={openSettings} className="inline-flex h-9 flex-none items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" /></svg>
               设置采集词
@@ -366,12 +370,14 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
       </header>
 
       <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-8">
-        <div className="mb-5 flex gap-6 border-b border-slate-200">
-          <button type="button" onClick={() => setWorkspaceTab('trends')} className={`relative h-11 px-1 text-sm font-semibold transition ${workspaceTab === 'trends' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>趋势词</button>
-          <button type="button" onClick={() => setWorkspaceTab('keywords')} className={`relative h-11 px-1 text-sm font-semibold transition ${workspaceTab === 'keywords' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>新词发现</button>
-        </div>
+        <nav aria-label="趋势发现工作区" className="mb-5 flex gap-6 overflow-x-auto border-b border-slate-200">
+          <button type="button" aria-pressed={workspaceTab === 'monthly'} onClick={() => setWorkspaceTab('monthly')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'monthly' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>月度趋势</button>
+          <button type="button" aria-pressed={workspaceTab === 'content'} onClick={() => setWorkspaceTab('content')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'content' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>内容动态</button>
+          <button type="button" aria-pressed={workspaceTab === 'trends'} onClick={() => setWorkspaceTab('trends')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'trends' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>趋势词</button>
+          <button type="button" aria-pressed={workspaceTab === 'keywords'} onClick={() => setWorkspaceTab('keywords')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'keywords' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>新词发现</button>
+        </nav>
 
-        {workspaceTab === 'trends' ? <>
+        {workspaceTab === 'monthly' ? <MonthlyTrendTab /> : workspaceTab === 'content' ? <ContentFeedTab /> : workspaceTab === 'trends' ? <>
         {initialRole === 'super' && (
           <section className="mb-5">
             <div className="mb-2 flex items-center justify-between">
@@ -393,15 +399,15 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-4 pt-2 sm:px-6">
             <div className="flex gap-6 overflow-x-auto">
-              {TABS.map(tab => (
+              {REVIEW_TABS.map(tab => (
                 <button
                   key={tab.key}
                   type="button"
-                  onClick={() => { setActiveTab(tab.key); setPage(1) }}
-                  className={`relative min-h-12 flex-none whitespace-nowrap text-sm font-medium transition-colors ${activeTab === tab.key ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-800'}`}
+                  onClick={() => { setReviewTab(tab.key); setPage(1) }}
+                  className={`relative min-h-12 flex-none whitespace-nowrap text-sm font-medium transition-colors ${reviewTab === tab.key ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   {tab.label}
-                  {activeTab === tab.key && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-emerald-600" />}
+                  {reviewTab === tab.key && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-emerald-600" />}
                 </button>
               ))}
             </div>
@@ -487,7 +493,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                     </td>
                   </tr>
                 ) : terms.map(term => {
-                  const stage = STAGE_META[term.trend_stage]
+                  const stageMeta = STAGE_META[term.trend_stage]
                   return (
                     <tr key={term.id} className={`group hover:bg-emerald-50/30 ${selectedTermIds.has(term.id) ? 'bg-emerald-50/50' : ''}`}>
                       <td className="px-4 py-2.5"><input type="checkbox" aria-label={`选择${term.display_term}`} checked={selectedTermIds.has(term.id)} onChange={() => toggleTerm(term.id)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" /></td>
@@ -498,7 +504,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
                         <span className={`text-sm font-bold tabular-nums ${term.trend_score >= 70 ? 'text-rose-600' : term.trend_score >= 45 ? 'text-orange-600' : 'text-slate-700'}`}>{term.trend_score}</span>
                       </td>
                       <td className="px-3 py-2.5">
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${stage.className}`}>{stage.label}</span>
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${stageMeta.className}`}>{stageMeta.label}</span>
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">

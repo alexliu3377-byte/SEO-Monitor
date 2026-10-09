@@ -82,6 +82,8 @@ test('trend collector service routes bypass browser login but unrelated APIs do 
   assert.equal(allowsServiceAuthPath('/api/trend-discovery/ingest'), true)
   assert.equal(allowsServiceAuthPath('/api/trend-discovery/collector-config'), true)
   assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim/history'), true)
+  assert.equal(allowsServiceAuthPath('/api/content-feed/refresh'), true)
+  assert.equal(allowsServiceAuthPath('/api/content-feed'), false)
   assert.equal(allowsServiceAuthPath('/api/admin/users'), false)
 })
 

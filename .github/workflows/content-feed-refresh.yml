@@ -1,0 +1,49 @@
+name: Content Feed Refresh
+
+on:
+  schedule:
+    # Public metadata changes throughout the day. Four bounded refreshes keep
+    # the dashboard current without contacting sources when a user opens it.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: content-feed-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refresh cached content sources
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          test -n "$CRON_SECRET" || { echo "CRON_SECRET is missing"; exit 1; }
+          test -n "$VERCEL_URL" || { echo "NEXT_PUBLIC_VERCEL_URL is missing"; exit 1; }
+
+          RESPONSE=$(curl -fsS --retry 2 --retry-delay 3 --max-time 120 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${VERCEL_URL%/}/api/content-feed/refresh")
+          echo "$RESPONSE"
+
+          RESPONSE="$RESPONSE" python3 - <<'PY'
+          import json, os, sys
+
+          payload = json.loads(os.environ['RESPONSE'])
+          for result in payload.get('results', []):
+              state = 'ok' if result.get('ok') else 'failed'
+              warnings = '; '.join(result.get('warnings') or []) or '-'
+              print(f"{result.get('source')}: {state}, stored={result.get('stored', 0)}, error={result.get('error') or '-'}, warnings={warnings}")
+          if not payload.get('success'):
+              print('No content source refreshed successfully', file=sys.stderr)
+              sys.exit(1)
+          if not payload.get('complete'):
+              print('Warning: one or more sources failed; successful sources were still saved')
+          PY

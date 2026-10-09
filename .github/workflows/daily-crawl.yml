@@ -299,6 +299,32 @@ jobs:
           echo "$RESPONSE"
           RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
 
+  # Keep this separate from environment/hot-radar refreshes: a slow monthly
+  # aggregate must not make post_index_refresh fail and block keyword classification.
+  monthly_trend_refresh:
+    needs: [setup, retry]
+    if: ${{ always() && needs.setup.outputs.step == 'index-pages' && needs.setup.outputs.site == '' && needs.retry.result != 'cancelled' && needs.retry.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Refresh monthly trend overview and drilldowns
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          MONTH=$(TZ=Asia/Kuala_Lumpur date +%Y-%m)
+          MONTH_START=$(TZ=Asia/Kuala_Lumpur date +%Y-%m-01)
+          PREVIOUS_MONTH=$(TZ=Asia/Kuala_Lumpur date -d "$MONTH_START -1 month" +%Y-%m)
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?refresh=1"
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?month=$PREVIOUS_MONTH"
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?month=$MONTH&refresh=1"
+
   tracking_setup:
     needs: [setup, retry]
     if: ${{ always() && needs.setup.outputs.step == 'index-pages' && needs.setup.outputs.site == '' && needs.retry.result != 'cancelled' && needs.retry.result != 'skipped' }}
@@ -387,15 +413,18 @@ jobs:
           RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
 
   # Keyword classification is deliberately last. Crawls, retries, tracking,
-  # environment/hot-radar refreshes and every group cache must finish first.
+  # all caches and environment/hot-radar refreshes must finish first. The
+  # monthly cache is best-effort, so a failed refresh must not suppress Gemini.
   classify_new_keywords:
-    needs: [setup, post_index_refresh, post_tracking_refresh]
+    needs: [setup, post_index_refresh, post_tracking_refresh, monthly_trend_refresh]
     if: >-
       always() &&
       needs.setup.outputs.step == 'index-pages' &&
       needs.setup.outputs.site == '' &&
       needs.post_index_refresh.result == 'success' &&
-      needs.post_tracking_refresh.result == 'success'
+      needs.post_tracking_refresh.result == 'success' &&
+      needs.monthly_trend_refresh.result != 'cancelled' &&
+      needs.monthly_trend_refresh.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
