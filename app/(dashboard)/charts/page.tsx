@@ -27,6 +27,28 @@ function RankBadge({ rank }: { rank: number }) {
   )
 }
 
+function ExternalSourceLink({ href, label, randomTapTapSearch = false }: {
+  href: string
+  label: string
+  randomTapTapSearch?: boolean
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`${label}（新窗口）`}
+      title={label}
+      onClick={randomTapTapSearch ? event => {
+        event.currentTarget.href = `https://www.taptap.cn/search/${Math.floor(Math.random() * 99_999) + 1}`
+      } : undefined}
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-xs font-semibold text-blue-500 transition-colors hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <span aria-hidden="true">↗</span>
+    </a>
+  )
+}
+
 function SectionHeader({ title, color, updatedAt }: { title: string; color: string; updatedAt: string }) {
   return (
     <div className="flex items-center gap-3 mb-4">
@@ -656,11 +678,11 @@ function Recent4399Tab() {
 
 type RankingTab = 'search' | 'taptap' | 'haoyou' | '4399'
 
-const RANKING_TABS: Array<{ id: RankingTab; label: string }> = [
+const RANKING_TABS: Array<{ id: RankingTab; label: string; sourceUrl?: string; randomTapTapSearch?: boolean }> = [
   { id: 'search', label: '搜索趋势' },
-  { id: 'taptap', label: 'TapTap' },
-  { id: 'haoyou', label: '好游快爆' },
-  { id: '4399', label: '4399' },
+  { id: 'taptap', label: 'TapTap', sourceUrl: 'https://www.taptap.cn/search/1', randomTapTapSearch: true },
+  { id: 'haoyou', label: '好游快爆', sourceUrl: 'https://www.3839.com/timeline.html' },
+  { id: '4399', label: '4399', sourceUrl: 'https://a.4399.cn/game-new.html' },
 ]
 
 export default function ChartsPage() {
@@ -697,25 +719,33 @@ export default function ChartsPage() {
 
       <div className="mb-5 flex border-b border-gray-200" role="tablist" aria-label="近期榜单内容">
         {RANKING_TABS.map((tab) => (
-          <button
+          <div
             key={tab.id}
-            ref={(element) => { tabRefs.current[tab.id] = element }}
-            id={`recent-rankings-${tab.id}-tab`}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            aria-controls={`recent-rankings-${tab.id}-panel`}
-            tabIndex={activeTab === tab.id ? 0 : -1}
-            onClick={() => selectTab(tab.id)}
-            onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
-            className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
-              activeTab === tab.id
-                ? 'border-green-500 text-green-700'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
+            role="presentation"
+            className={`flex items-center border-b-2 transition-colors ${activeTab === tab.id ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500'}`}
           >
-            {tab.label}
-          </button>
+            <button
+              ref={(element) => { tabRefs.current[tab.id] = element }}
+              id={`recent-rankings-${tab.id}-tab`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`recent-rankings-${tab.id}-panel`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              onClick={() => selectTab(tab.id)}
+              onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+              className={`py-2.5 pl-4 text-sm font-medium transition-colors hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${tab.sourceUrl ? 'pr-1' : 'pr-4'}`}
+            >
+              {tab.label}
+            </button>
+            {tab.sourceUrl && (
+              <ExternalSourceLink
+                href={tab.sourceUrl}
+                label={`打开 ${tab.label} 来源页面`}
+                randomTapTapSearch={tab.randomTapTapSearch}
+              />
+            )}
+          </div>
         ))}
       </div>
 
