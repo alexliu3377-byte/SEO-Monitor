@@ -9,6 +9,7 @@ import {
   parseCcplayNews,
   parseContentFeedSources,
 } from '../lib/content-feed'
+import { parseBrowserContentFeedItem } from '../lib/content-feed-browser'
 
 test('52pojie GBK RSS is decoded and reduced to public metadata', () => {
   const rss = `<?xml version="1.0" encoding="gbk"?>
@@ -87,9 +88,24 @@ test('source filters are comma-separated, deduplicated and strict', () => {
     invalid: ['unknown'],
   })
   assert.deepEqual(parseContentFeedSources(', ,'), {
-    sources: ['52pojie', '4399', 'ccplay'],
+    sources: ['52pojie', '4399', 'ccplay', 'xiaohongshu', 'xiaoheihe_guide', 'xiaoheihe_ns', 'bilibili'],
     invalid: [],
   })
+})
+
+test('browser content accepts only the configured official source host', () => {
+  const item = parseBrowserContentFeedItem('bilibili', {
+    sourceId: 'BV1234567890',
+    title: '本周值得关注的新游戏',
+    url: 'https://www.bilibili.com/video/BV1234567890?spm_id_from=333.999',
+    author: '示例 UP 主',
+  })
+  assert.equal(item?.category, 'video')
+  assert.equal(item?.url, 'https://www.bilibili.com/video/BV1234567890')
+  assert.equal(parseBrowserContentFeedItem('bilibili', {
+    title: '伪造链接',
+    url: 'https://example.com/video/BV1234567890',
+  }), null)
 })
 
 test('database upsert rows deliberately preserve first_seen_at', () => {

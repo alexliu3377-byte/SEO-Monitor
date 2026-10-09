@@ -2,7 +2,16 @@ import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
 import iconv from 'iconv-lite'
 
-export const CONTENT_FEED_SOURCES = ['52pojie', '4399', 'ccplay'] as const
+export const CONTENT_FEED_SOURCES = [
+  '52pojie',
+  '4399',
+  'ccplay',
+  'xiaohongshu',
+  'xiaoheihe_guide',
+  'xiaoheihe_ns',
+  'bilibili',
+] as const
+export const CONTENT_FEED_REFRESH_SOURCES = ['52pojie', '4399', 'ccplay'] as const
 export const CONTENT_FEED_CATEGORIES = [
   'software',
   'new_game',
@@ -10,6 +19,9 @@ export const CONTENT_FEED_CATEGORIES = [
   'game_activity',
   'game_review',
   'game_guide',
+  'resource_share',
+  'ns_game',
+  'video',
 ] as const
 
 export type ContentFeedSource = typeof CONTENT_FEED_SOURCES[number]
@@ -44,7 +56,9 @@ export type ContentFeedFetchResult = {
   warnings: string[]
 }
 
-const SOURCE_URLS: Record<ContentFeedSource, string> = {
+type ContentFeedRefreshSource = typeof CONTENT_FEED_REFRESH_SOURCES[number]
+
+const SOURCE_URLS: Record<ContentFeedRefreshSource, string> = {
   '52pojie': 'https://www.52pojie.cn/forum.php?mod=rss&fid=16',
   '4399': 'https://a.4399.cn/game-new.html',
   ccplay: 'https://m2.ccplay.cn/news',
@@ -370,7 +384,12 @@ async function fetchCcplay(): Promise<ContentFeedFetchResult> {
 export async function fetchContentFeedSource(source: ContentFeedSource): Promise<ContentFeedFetchResult> {
   if (source === '52pojie') return { items: await fetch52Pojie(), warnings: [] }
   if (source === '4399') return { items: await fetch4399(), warnings: [] }
-  return fetchCcplay()
+  if (source === 'ccplay') return fetchCcplay()
+  throw new Error(`${source} must be refreshed by the browser collector`)
+}
+
+export function isContentFeedRefreshSource(source: ContentFeedSource): source is ContentFeedRefreshSource {
+  return (CONTENT_FEED_REFRESH_SOURCES as readonly string[]).includes(source)
 }
 
 export function parseContentFeedSources(value: string | null): {

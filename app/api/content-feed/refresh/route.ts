@@ -2,7 +2,9 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import {
   contentFeedDatabaseRows,
+  CONTENT_FEED_REFRESH_SOURCES,
   fetchContentFeedSource,
+  isContentFeedRefreshSource,
   parseContentFeedSources,
   type ContentFeedSource,
 } from '@/lib/content-feed'
@@ -68,9 +70,14 @@ export async function POST(request: Request) {
   }
 
   const params = new URL(request.url).searchParams
-  const selected = parseContentFeedSources(params.get('sources'))
+  const requestedSources = params.get('sources')
+  const selected = parseContentFeedSources(requestedSources || CONTENT_FEED_REFRESH_SOURCES.join(','))
   if (selected.invalid.length > 0) {
     return NextResponse.json({ error: `Unsupported sources: ${selected.invalid.join(', ')}` }, { status: 400 })
+  }
+  const browserOnly = selected.sources.filter(source => !isContentFeedRefreshSource(source))
+  if (browserOnly.length > 0) {
+    return NextResponse.json({ error: `Browser collector required: ${browserOnly.join(', ')}` }, { status: 400 })
   }
 
   const service = createServiceClient() as any

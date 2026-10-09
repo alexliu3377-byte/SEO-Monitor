@@ -122,13 +122,13 @@ async function loadRemoteQueries(config: CollectorConfig): Promise<void> {
   }
 }
 
-function parsePlatformArgument(config: CollectorConfig): TrendPlatform[] {
+function parsePlatformArgument(config: CollectorConfig, allowDisabled = false): TrendPlatform[] {
   const index = process.argv.indexOf('--platform')
   const value = index >= 0 ? process.argv[index + 1] : 'all'
   if (value === 'all') {
     return (Object.keys(config.platforms) as TrendPlatform[]).filter(platform => config.platforms[platform].enabled)
   }
-  if (!isTrendPlatform(value) || !config.platforms[value].enabled) {
+  if (!isTrendPlatform(value) || (!allowDisabled && !config.platforms[value].enabled)) {
     throw new Error(`平台参数无效或尚未启用：${value ?? ''}`)
   }
   return [value]
@@ -745,7 +745,7 @@ async function main() {
   loadLocalEnvironment()
   const config = loadConfig()
   if (process.argv.includes('--setup')) {
-    const platforms = parsePlatformArgument(config)
+    const platforms = parsePlatformArgument(config, true)
     for (const platform of platforms) await setupPlatform(platform)
     console.log('登录状态已经保存在本机独立资料目录中。')
     return

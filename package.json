@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts",
     "trend:setup": "tsx scripts/trend-collector.ts --setup",
     "trend:collect": "tsx scripts/trend-collector.ts",
+    "content:collect": "tsx scripts/content-source-collector.ts",
     "app-updates:crawl": "tsx scripts/app-update-crawl.ts",
     "app-store:discover": "tsx scripts/app-store-discover.ts",
     "marketplace:discover": "tsx scripts/marketplace-discover.ts",

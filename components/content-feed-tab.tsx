@@ -27,8 +27,12 @@ type ContentFeedResponse = {
 const PAGE_SIZE = 20
 
 const SOURCE_OPTIONS = [
-  { value: '52pojie,ccplay', label: '全部来源' },
-  { value: '52pojie', label: '52破解' },
+  { value: '52pojie,xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili,ccplay', label: '全部' },
+  { value: '52pojie', label: '吾爱破解' },
+  { value: 'xiaohongshu', label: '小红书' },
+  { value: 'xiaoheihe_guide', label: '小黑盒攻略' },
+  { value: 'xiaoheihe_ns', label: '小黑盒 NS' },
+  { value: 'bilibili', label: 'B站' },
   { value: 'ccplay', label: '虫虫助手' },
 ]
 
@@ -39,10 +43,17 @@ const CATEGORY_OPTIONS = [
   { value: 'game_activity', label: '活动' },
   { value: 'game_review', label: '评测' },
   { value: 'game_guide', label: '攻略' },
+  { value: 'resource_share', label: '资源分享' },
+  { value: 'ns_game', label: 'NS 游戏' },
+  { value: 'video', label: '视频' },
 ]
 
 const SOURCE_META: Record<string, { label: string; className: string }> = {
-  '52pojie': { label: '52破解', className: 'border-violet-200 bg-violet-50 text-violet-700' },
+  '52pojie': { label: '吾爱破解', className: 'border-violet-200 bg-violet-50 text-violet-700' },
+  xiaohongshu: { label: '小红书', className: 'border-rose-200 bg-rose-50 text-rose-700' },
+  xiaoheihe_guide: { label: '小黑盒攻略', className: 'border-slate-300 bg-slate-100 text-slate-700' },
+  xiaoheihe_ns: { label: '小黑盒 NS', className: 'border-indigo-200 bg-indigo-50 text-indigo-700' },
+  bilibili: { label: 'B站', className: 'border-sky-200 bg-sky-50 text-sky-700' },
   ccplay: { label: '虫虫助手', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
 }
 
@@ -52,6 +63,9 @@ const CATEGORY_META: Record<string, { label: string; className: string }> = {
   game_activity: { label: '活动', className: 'bg-orange-50 text-orange-700' },
   game_review: { label: '评测', className: 'bg-violet-50 text-violet-700' },
   game_guide: { label: '攻略', className: 'bg-emerald-50 text-emerald-700' },
+  resource_share: { label: '资源分享', className: 'bg-rose-50 text-rose-700' },
+  ns_game: { label: 'NS 游戏', className: 'bg-indigo-50 text-indigo-700' },
+  video: { label: '视频', className: 'bg-sky-50 text-sky-700' },
 }
 
 function formatDate(value: string | null) {
@@ -81,7 +95,7 @@ function categoryMeta(category: string) {
 }
 
 export default function ContentFeedTab() {
-  const [sources, setSources] = useState('52pojie,ccplay')
+  const [sources, setSources] = useState(SOURCE_OPTIONS[0].value)
   const [category, setCategory] = useState('')
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<ContentFeedItem[]>([])
@@ -137,25 +151,26 @@ export default function ContentFeedTab() {
 
   return (
     <section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">公开内容动态</h2>
-          <p className="mt-1 text-xs text-slate-400">目前收录 52破解和虫虫助手，按发布时间显示最新内容。</p>
+          <h2 className="text-sm font-semibold text-slate-900">内容趋势</h2>
+          <p className="mt-1 text-xs text-slate-400">按来源查看软件、资源分享、攻略和视频更新；页面只读取已缓存资料。</p>
         </div>
-        <div className="flex w-full gap-2 sm:w-auto">
-          <label className="min-w-0 flex-1 sm:w-36 sm:flex-none">
-            <span className="sr-only">来源</span>
-            <select
-              value={sources}
-              onChange={event => {
-                setSources(event.target.value)
-                setPage(1)
-              }}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            >
-              {SOURCE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="内容来源">
+            {SOURCE_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={sources === option.value}
+                onClick={() => { setSources(option.value); setPage(1) }}
+                className={`h-8 shrink-0 whitespace-nowrap rounded-md px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${sources === option.value ? 'bg-emerald-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <label className="min-w-0 flex-1 sm:w-32 sm:flex-none">
             <span className="sr-only">类型</span>
             <select

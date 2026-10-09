@@ -61,6 +61,24 @@ npm run trend:collect -- --platform douyin
 
 每次成功送回资料后，网站会一并执行保留规则：运行记录和互动快照保留 30 天，公开内容摘要保留最近 90 天；已经人工标记为“已布局”的候选词长期保留。
 
+## 内容趋势来源
+
+吾爱破解和虫虫助手由线上定时任务读取。小红书、小黑盒和 B站使用同一台独立采集电脑，避免公司 IP 和 Vercel 出口直接访问这些动态页面。
+
+首次使用小黑盒、B站时，先运行对应平台登录初始化：
+
+```powershell
+npm run trend:setup -- --platform xiaoheihe
+```
+
+B站无需登录时可直接试跑；遇到风控则在 `.trend-browser/bilibili` 对应的浏览器资料目录完成验证。每日运行一次：
+
+```powershell
+npm run content:collect
+```
+
+也可以单独检查某个来源：`npm run content:collect -- --source bilibili`。采集器只提交标题、链接、作者、摘要和公开时间，不上传 Cookie、图片文件或正文。
+
 ## 使用边界
 
 - 仅使用专门的内部调研账号。

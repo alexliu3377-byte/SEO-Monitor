@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { cleanTrendText, isTrendQueryPlatform, parseTrendSignalInput, parseTrendSuggestionInput } from '@/lib/trend-discovery'
 import { authorizeTrendCollector, parseCollectorPlatform } from '@/lib/trend-discovery-server'
 import { createServiceClient } from '@/lib/supabase-server'
+import { contentFeedDatabaseRows } from '@/lib/content-feed'
+import { parseBrowserContentFeedItem } from '@/lib/content-feed-browser'
 
 export const maxDuration = 60
 
@@ -255,6 +257,28 @@ export async function POST(request: Request) {
     .select('id, external_id')
   if (signalError) return jsonError('趋势信号写入失败', 500)
   const storedMap = new Map<string, string>((storedSignals ?? []).map((row: any) => [row.external_id, row.id] as [string, string]))
+
+  // The requested Xiaohongshu resource-sharing query is also a content source.
+  // Mirror only that focused query into the content feed; other trend searches
+  // remain in Trend Discovery and do not add noise to Content Trends.
+  if (platform === 'xiaohongshu') {
+    const feedItems = validSignals
+      .filter(signal => signal.queryTerm === '游戏资源分享')
+      .map(signal => parseBrowserContentFeedItem('xiaohongshu', {
+        sourceId: signal.externalId,
+        title: signal.title,
+        url: signal.sourceUrl,
+        summary: signal.excerpt,
+        publishedAt: signal.publishedAt,
+      }))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    if (feedItems.length > 0) {
+      const { error: feedError } = await service
+        .from('content_feed_items')
+        .upsert(contentFeedDatabaseRows(feedItems, completedIso), { onConflict: 'source,source_id' })
+      if (feedError) return jsonError('小红书内容趋势写入失败', 500)
+    }
+  }
 
   const snapshots = validSignals.flatMap(signal => {
     const signalId = storedMap.get(signal.externalId)
