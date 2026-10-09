@@ -321,14 +321,14 @@ function NewGamesTab() {
               : undefined}
           />
 
-          {/* 热搜榜 */}
+          {/* 热门榜 */}
           <Card
-            title="热搜榜 TOP 20" subtitle="每 20 分钟更新" icon="🔥" accent="bg-teal-50"
+            title="热门榜 TOP 10" subtitle="本系统每 6 小时更新" icon="🔥" accent="bg-teal-50"
             list={hotLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
               : hotItems.length === 0 ? <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
               : <ul>{hotItemNodes.slice(0, PREVIEW)}</ul>}
             footer={!hotLoading && hotItemNodes.length > PREVIEW
-              ? <MoreButton total={hotItemNodes.length} shown={PREVIEW} onClick={() => openModal('TapTap 热搜榜', hotItemNodes)} />
+              ? <MoreButton total={hotItemNodes.length} shown={PREVIEW} onClick={() => openModal('TapTap 热门榜', hotItemNodes)} />
               : undefined}
           />
 
