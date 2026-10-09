@@ -533,7 +533,7 @@ function Recent4399Tab() {
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={`查看 ${item.title} 原文（新窗口）`}
-                          className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+                          className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
                         >
                           查看原文
                         </a>
