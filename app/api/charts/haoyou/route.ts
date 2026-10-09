@@ -3,6 +3,11 @@ import * as cheerio from 'cheerio'
 import * as iconv from 'iconv-lite'
 import { Element } from 'domhandler'
 import { createClient } from '@/lib/supabase-server'
+import {
+  parseHaoyouPopularRanking,
+  parseHaoyouSearchTrends,
+  type HaoyouPopularItem,
+} from '@/lib/haoyou-ranking'
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -26,13 +31,17 @@ export interface HaoyouHotItem {
   rank: number
   name: string
   tags: string[]
+  score: string
+  url: string
 }
+
+const SIX_HOURS = 21_600
 
 async function loadPage() {
   try {
     const res = await fetch('https://www.3839.com/timeline.html', {
       headers: HEADERS,
-      next: { revalidate: 3600 },
+      next: { revalidate: SIX_HOURS },
       signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return null
@@ -53,7 +62,8 @@ function isPc($: ReturnType<typeof cheerio.load>, li: Element): boolean {
 }
 
 function isPaid($: ReturnType<typeof cheerio.load>, li: Element): boolean {
-  return $(li).find('a.btn').text().includes('¥')
+  const row = $(li)
+  return row.find('[data-price-gid]').length > 0 || /[¥￥]\s*\d|付费|买断制/.test(row.text())
 }
 
 function parseItem($: ReturnType<typeof cheerio.load>, li: Element): HaoyouItem | null {
@@ -118,36 +128,36 @@ function parsePanel($: ReturnType<typeof cheerio.load>, panelRel: string): Parse
   return { today, upcoming, baoliao }
 }
 
-async function fetchHotChart(): Promise<HaoyouHotItem[]> {
+async function fetchHotChart(): Promise<HaoyouPopularItem[]> {
   try {
-    const res = await fetch('https://www.3839.com/top/hot.html', {
-      headers: HEADERS,
-      next: { revalidate: 3600 },
+    const res = await fetch('https://www.3839.com/app/hykb_web/index.php?m=top&ac=rank_list&type=hot2&page=1&offset=0', {
+      headers: { ...HEADERS, 'X-Requested-With': 'XMLHttpRequest' },
+      next: { revalidate: SIX_HOURS },
       signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return []
-    const buf = Buffer.from(await res.arrayBuffer())
-    const peek = buf.subarray(0, 4096).toString('ascii')
-    const meta = peek.match(/<meta[^>]+charset=["']?\s*([^"'\s;>]+)/i)?.[1]?.toLowerCase() ?? 'utf-8'
-    const charset = (meta === 'gb2312' || meta === 'gb18030') ? 'gbk' : meta
-    const $h = cheerio.load(iconv.decode(buf, charset))
-
-    const items: HaoyouHotItem[] = []
-    $h('ul.foreList li, ol li, .rankList li, .list li').each((_, el) => {
-      if (items.length >= 20) return false as unknown as void
-      const $el = $h(el)
-      const name = $el.find('.name em').first().text().trim()
-        || $el.find('em').first().text().trim()
-        || $el.find('a').first().text().trim()
-      if (!name || name.length < 2) return
-      const tags = $el.find('p.tags .it').map((_, t) => $h(t).text().trim()).get()
-      items.push({ rank: items.length + 1, name, tags })
-    })
-    return items
+    const payload = await res.json().catch(() => null) as { code?: number; html?: string } | null
+    return payload?.code === 100 && payload.html ? parseHaoyouPopularRanking(payload.html) : []
   } catch { return [] }
 }
 
-export async function GET() {
+async function fetchSearchTrends() {
+  try {
+    const response = await fetch('https://www.3839.com/top/hot.html', {
+      headers: HEADERS,
+      next: { revalidate: SIX_HOURS },
+      signal: AbortSignal.timeout(12000),
+    })
+    if (!response.ok) return []
+    const buffer = Buffer.from(await response.arrayBuffer())
+    const peek = buffer.subarray(0, 4096).toString('ascii')
+    const meta = peek.match(/<meta[^>]+charset=["']?\s*([^"'\s;>]+)/i)?.[1]?.toLowerCase() ?? 'utf-8'
+    const charset = (meta === 'gb2312' || meta === 'gb18030') ? 'gbk' : meta
+    return parseHaoyouSearchTrends(iconv.decode(buffer, charset))
+  } catch { return [] }
+}
+
+export async function GET(request: Request) {
   // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
   // 完全没做校验，无鉴权无限流地代理抓取第三方站点，跟同目录其它图表接口的
   // 设计意图（"要求登录"）不一致。
@@ -155,10 +165,12 @@ export async function GET() {
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const $ = await loadPage()
-  if (!$) return NextResponse.json({ upcomingToday: [], upcoming: [], upcomingBaoliao: [], updates: [], hotItems: [] })
+  if (new URL(request.url).searchParams.get('view') === 'search') {
+    return NextResponse.json({ searchItems: await fetchSearchTrends() })
+  }
 
-  const [hotItems] = await Promise.all([fetchHotChart()])
+  const [$, hotItems] = await Promise.all([loadPage(), fetchHotChart()])
+  if (!$) return NextResponse.json({ upcomingToday: [], upcoming: [], baoliao: [], updates: [], hotItems })
 
   const upcomingPanel = parsePanel($, '1')
   const updatesPanel = parsePanel($, '3')

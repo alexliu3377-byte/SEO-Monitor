@@ -101,7 +101,8 @@ function MoreButton({ total, shown, onClick }: { total: number; shown: number; o
 interface HotItem { rank: number; name: string; labels: string[] }
 interface TodayGame { title: string; tag: string; startDate: string; startTime: string; endDate: string; rating: number | null; labels: string[]; icon: string }
 interface HaoyouItem { name: string; tags: string[]; score: string; status: string; url: string; btnText: string; date: string }
-interface HaoyouHotItem { rank: number; name: string; tags: string[] }
+interface HaoyouHotItem { rank: number; name: string; tags: string[]; score: string; url: string }
+interface SearchTrendItem { rank: number; name: string; source: 'TapTap' | '好游快爆'; labels?: string[]; url?: string }
 interface ModalState { title: string; items: React.ReactNode[] }
 interface ContentFeedItem {
   id: string
@@ -194,7 +195,7 @@ function GameItem({ g, showDate }: { g: TodayGame; showDate?: boolean }) {
   )
 }
 
-function NewGamesTab() {
+function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
   const [hotItems, setHotItems] = useState<HotItem[]>([])
   const [hotLoading, setHotLoading] = useState(true)
   const [todayGames, setTodayGames] = useState<TodayGame[]>([])
@@ -216,21 +217,24 @@ function NewGamesTab() {
   useEffect(() => {
     const now = new Date()
     const ts = `${String(now.getMonth() + 1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
-    fetch('/api/charts/taptap-hot')
-      .then((r) => r.json())
-      .then((d) => { setHotItems(d.items ?? []); setHotUpdatedAt(ts) })
-      .catch(() => {})
-      .finally(() => setHotLoading(false))
+    if (source === 'taptap') {
+      fetch('/api/charts/taptap-hot')
+        .then((r) => r.json())
+        .then((d) => { setHotItems(d.items ?? []); setHotUpdatedAt(ts) })
+        .catch(() => {})
+        .finally(() => setHotLoading(false))
 
-    fetch('/api/charts/taptap-today')
-      .then((r) => r.json())
-      .then((d) => {
-        setTodayGames(d.todayGames ?? [])
-        setUpcomingGames(d.upcomingGames ?? [])
-        setTopEvents(d.topEvents ?? [])
-      })
-      .catch(() => {})
-      .finally(() => setTodayLoading(false))
+      fetch('/api/charts/taptap-today')
+        .then((r) => r.json())
+        .then((d) => {
+          setTodayGames(d.todayGames ?? [])
+          setUpcomingGames(d.upcomingGames ?? [])
+          setTopEvents(d.topEvents ?? [])
+        })
+        .catch(() => {})
+        .finally(() => setTodayLoading(false))
+      return
+    }
 
     fetch('/api/charts/haoyou')
       .then((r) => r.json())
@@ -244,13 +248,13 @@ function NewGamesTab() {
       })
       .catch(() => {})
       .finally(() => setHaoyouLoading(false))
-  }, [])
+  }, [source])
 
   function openModal(title: string, items: React.ReactNode[]) {
     setModal({ title, items })
   }
 
-  const PREVIEW = 10
+  const PREVIEW = 20
 
   // Pre-build ranked list items for reuse
   const hotItemNodes = hotItems.map((g) => (
@@ -270,7 +274,8 @@ function NewGamesTab() {
   const haoyouHotNodes = haoyouHotItems.map((g) => (
     <li key={g.rank} className="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">
       <RankBadge rank={g.rank} />
-      <p className="flex-1 text-xs font-medium text-gray-800 truncate">{g.name}</p>
+      <a href={g.url} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs font-medium text-gray-800 hover:text-green-700" title={g.name}>{g.name}</a>
+      {g.score && <span className="flex-shrink-0 text-[11px] font-semibold text-green-600">{g.score}</span>}
       {g.tags[0] && (
         <span className="text-xs px-1.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">{g.tags[0]}</span>
       )}
@@ -280,9 +285,9 @@ function NewGamesTab() {
   return (
     <div className="space-y-10">
       {/* ── TapTap ── */}
-      <div>
+      {source === 'taptap' && <div>
         <SectionHeader title="TapTap" color="bg-teal-500" updatedAt={hotUpdatedAt || '加载中…'} />
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid gap-5 xl:grid-cols-3">
 
           {/* 今日游戏 */}
           <Card
@@ -333,12 +338,12 @@ function NewGamesTab() {
           />
 
         </div>
-      </div>
+      </div>}
 
       {/* ── 好游快爆 ── */}
-      <div>
+      {source === 'haoyou' && <div>
         <SectionHeader title="好游快爆" color="bg-green-500" updatedAt={haoyouUpdatedAt || '加载中…'} />
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid gap-5 xl:grid-cols-3">
 
           {/* 即将上线 */}
           {(() => {
@@ -386,7 +391,7 @@ function NewGamesTab() {
 
           {/* 热门榜 */}
           <Card
-            title="热门榜 TOP 20" subtitle="实时热门游戏" icon="🔥" accent="bg-green-50"
+            title="免费热门榜 TOP 20" subtitle="已排除付费与买断制游戏 · 每 6 小时更新" icon="🔥" accent="bg-green-50"
             list={haoyouLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
               : haoyouHotItems.length === 0 ? <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
               : <ul>{haoyouHotNodes.slice(0, PREVIEW)}</ul>}
@@ -396,9 +401,84 @@ function NewGamesTab() {
           />
 
         </div>
-      </div>
+      </div>}
 
       {modal && <MoreModal title={modal.title} items={modal.items} onClose={() => setModal(null)} />}
+    </div>
+  )
+}
+
+function SearchTrendList({ items, loading, emptyText, tone }: {
+  items: SearchTrendItem[]
+  loading: boolean
+  emptyText: string
+  tone: 'teal' | 'green'
+}) {
+  if (loading) return <Spinner />
+  if (items.length === 0) return <div className="flex min-h-48 items-center justify-center px-5 text-sm text-gray-400">{emptyText}</div>
+
+  return (
+    <ol className="divide-y divide-gray-100 px-4 py-2">
+      {items.map((item) => (
+        <li key={`${item.source}-${item.rank}-${item.name}`} className="flex min-h-9 items-center gap-3 py-1.5">
+          <RankBadge rank={item.rank} />
+          {item.url ? (
+            <a href={item.url} target="_blank" rel="noopener noreferrer" className={`min-w-0 flex-1 truncate text-sm text-gray-800 ${tone === 'teal' ? 'hover:text-teal-700' : 'hover:text-green-700'}`} title={item.name}>
+              {item.name}
+            </a>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-sm text-gray-800" title={item.name}>{item.name}</span>
+          )}
+          {item.labels?.[0] && <span className="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">{item.labels[0]}</span>}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function SearchTrendsTab() {
+  const [tapTapItems, setTapTapItems] = useState<SearchTrendItem[]>([])
+  const [haoyouItems, setHaoyouItems] = useState<SearchTrendItem[]>([])
+  const [tapTapLoading, setTapTapLoading] = useState(true)
+  const [haoyouLoading, setHaoyouLoading] = useState(true)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/charts/taptap-search-trends', { signal: controller.signal })
+      .then((response) => response.json())
+      .then((data) => setTapTapItems(Array.isArray(data.items) ? data.items : []))
+      .catch(() => {})
+      .finally(() => { if (!controller.signal.aborted) setTapTapLoading(false) })
+
+    fetch('/api/charts/haoyou?view=search', { signal: controller.signal })
+      .then((response) => response.json())
+      .then((data) => setHaoyouItems(Array.isArray(data.searchItems) ? data.searchItems : []))
+      .catch(() => {})
+      .finally(() => { if (!controller.signal.aborted) setHaoyouLoading(false) })
+    return () => controller.abort()
+  }, [])
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-2">
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="border-b border-teal-100 bg-teal-50 px-5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-gray-900">TapTap 热门搜索</h2>
+            <span className="whitespace-nowrap text-[11px] text-teal-700">每日读取一次</span>
+          </div>
+        </div>
+        <SearchTrendList items={tapTapItems} loading={tapTapLoading} emptyText="今日暂未取得 TapTap 热门搜索" tone="teal" />
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="border-b border-green-100 bg-green-50 px-5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-gray-900">好游快爆热门搜索</h2>
+            <span className="whitespace-nowrap text-[11px] text-green-700">每 6 小时更新</span>
+          </div>
+        </div>
+        <SearchTrendList items={haoyouItems} loading={haoyouLoading} emptyText="暂未取得好游快爆热门搜索" tone="green" />
+      </section>
     </div>
   )
 }
@@ -572,93 +652,75 @@ function Recent4399Tab() {
   )
 }
 
-export default function ChartsPage() {
-  const [activeTab, setActiveTab] = useState<'calendar' | '4399'>('calendar')
-  const [opened4399, setOpened4399] = useState(false)
-  const calendarTabRef = useRef<HTMLButtonElement>(null)
-  const recent4399TabRef = useRef<HTMLButtonElement>(null)
+type RankingTab = 'search' | 'taptap' | 'haoyou' | '4399'
 
-  function selectTab(tab: 'calendar' | '4399') {
+const RANKING_TABS: Array<{ id: RankingTab; label: string }> = [
+  { id: 'search', label: '搜索趋势' },
+  { id: 'taptap', label: 'TapTap' },
+  { id: 'haoyou', label: '好游快爆' },
+  { id: '4399', label: '4399' },
+]
+
+export default function ChartsPage() {
+  const [activeTab, setActiveTab] = useState<RankingTab>('search')
+  const [openedTabs, setOpenedTabs] = useState<Set<RankingTab>>(() => new Set(['search']))
+  const tabRefs = useRef<Partial<Record<RankingTab, HTMLButtonElement | null>>>({})
+
+  function selectTab(tab: RankingTab) {
     setActiveTab(tab)
-    if (tab === '4399') setOpened4399(true)
+    setOpenedTabs((current) => new Set(current).add(tab))
   }
 
-  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
-    let nextTab: 'calendar' | '4399' | null = null
-    if (event.key === 'ArrowLeft' || event.key === 'Home') nextTab = 'calendar'
-    if (event.key === 'ArrowRight' || event.key === 'End') nextTab = '4399'
-    if (!nextTab) return
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, currentTab: RankingTab) {
+    const currentIndex = RANKING_TABS.findIndex((tab) => tab.id === currentTab)
+    let nextIndex = currentIndex
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + RANKING_TABS.length) % RANKING_TABS.length
+    else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % RANKING_TABS.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = RANKING_TABS.length - 1
+    else return
 
     event.preventDefault()
+    const nextTab = RANKING_TABS[nextIndex].id
     selectTab(nextTab)
-    if (nextTab === 'calendar') calendarTabRef.current?.focus()
-    else recent4399TabRef.current?.focus()
+    tabRefs.current[nextTab]?.focus()
   }
 
   return (
     <div className="p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">近期榜单</h1>
-        <p className="mt-1 text-sm text-gray-500">查看新游安排与游戏站近期收录动态</p>
+        <p className="mt-1 text-sm text-gray-500">查看用户搜索方向、平台榜单与新游动态</p>
       </div>
 
       <div className="mb-5 flex border-b border-gray-200" role="tablist" aria-label="近期榜单内容">
-        <button
-          ref={calendarTabRef}
-          id="recent-rankings-calendar-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'calendar'}
-          aria-controls="recent-rankings-calendar-panel"
-          tabIndex={activeTab === 'calendar' ? 0 : -1}
-          onClick={() => selectTab('calendar')}
-          onKeyDown={handleTabKeyDown}
-          className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
-            activeTab === 'calendar'
-              ? 'border-green-500 text-green-700'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          新游日历
-        </button>
-        <button
-          ref={recent4399TabRef}
-          id="recent-rankings-4399-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeTab === '4399'}
-          aria-controls="recent-rankings-4399-panel"
-          tabIndex={activeTab === '4399' ? 0 : -1}
-          onClick={() => selectTab('4399')}
-          onKeyDown={handleTabKeyDown}
-          className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
-            activeTab === '4399'
-              ? 'border-green-500 text-green-700'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          4399近期收录
-        </button>
+        {RANKING_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            ref={(element) => { tabRefs.current[tab.id] = element }}
+            id={`recent-rankings-${tab.id}-tab`}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`recent-rankings-${tab.id}-panel`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => selectTab(tab.id)}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+            className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${
+              activeTab === tab.id
+                ? 'border-green-500 text-green-700'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div
-        id="recent-rankings-calendar-panel"
-        role="tabpanel"
-        aria-labelledby="recent-rankings-calendar-tab"
-        hidden={activeTab !== 'calendar'}
-      >
-        <NewGamesTab />
-      </div>
-      {opened4399 && (
-        <div
-          id="recent-rankings-4399-panel"
-          role="tabpanel"
-          aria-labelledby="recent-rankings-4399-tab"
-          hidden={activeTab !== '4399'}
-        >
-          <Recent4399Tab />
-        </div>
-      )}
+      {openedTabs.has('search') && <div id="recent-rankings-search-panel" role="tabpanel" aria-labelledby="recent-rankings-search-tab" hidden={activeTab !== 'search'}><SearchTrendsTab /></div>}
+      {openedTabs.has('taptap') && <div id="recent-rankings-taptap-panel" role="tabpanel" aria-labelledby="recent-rankings-taptap-tab" hidden={activeTab !== 'taptap'}><SourceRankingTab source="taptap" /></div>}
+      {openedTabs.has('haoyou') && <div id="recent-rankings-haoyou-panel" role="tabpanel" aria-labelledby="recent-rankings-haoyou-tab" hidden={activeTab !== 'haoyou'}><SourceRankingTab source="haoyou" /></div>}
+      {openedTabs.has('4399') && <div id="recent-rankings-4399-panel" role="tabpanel" aria-labelledby="recent-rankings-4399-tab" hidden={activeTab !== '4399'}><Recent4399Tab /></div>}
     </div>
   )
 }
