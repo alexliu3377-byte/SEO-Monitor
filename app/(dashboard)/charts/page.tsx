@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
+import { SimplePagination } from '@/components/simple-pagination'
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
@@ -124,6 +125,7 @@ interface ContentFeedResponse {
   page: number
   pageSize: number
   totalPages: number
+  types?: string[]
 }
 
 const haoyouTagColors: Record<string, string> = {
@@ -459,7 +461,7 @@ function SearchTrendsTab() {
   }, [])
 
   return (
-    <div className="grid gap-5 xl:grid-cols-2">
+    <div className="grid gap-4 md:grid-cols-3">
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
         <div className="border-b border-teal-100 bg-teal-50 px-5 py-3">
           <div className="flex items-center justify-between gap-3">
@@ -479,6 +481,13 @@ function SearchTrendsTab() {
         </div>
         <SearchTrendList items={haoyouItems} loading={haoyouLoading} emptyText="暂未取得好游快爆热门搜索" tone="green" />
       </section>
+
+      <section className="overflow-hidden rounded-xl border border-dashed border-gray-200 bg-white">
+        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
+          <h2 className="text-sm font-semibold text-gray-500">其他来源</h2>
+        </div>
+        <div className="flex min-h-48 items-center justify-center px-4 text-sm text-gray-300">暂未接入</div>
+      </section>
     </div>
   )
 }
@@ -488,6 +497,9 @@ function Recent4399Tab() {
   const [items, setItems] = useState<ContentFeedItem[]>([])
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [itemType, setItemType] = useState('')
+  const [types, setTypes] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryKey, setRetryKey] = useState(0)
@@ -497,7 +509,9 @@ function Recent4399Tab() {
     setLoading(true)
     setError('')
 
-    fetch(`/api/content-feed?sources=4399&page=${page}&pageSize=20`, { signal: controller.signal })
+    const params = new URLSearchParams({ sources: '4399', page: String(page), pageSize: '20', includeTypes: '1' })
+    if (itemType) params.set('type', itemType)
+    fetch(`/api/content-feed?${params}`, { signal: controller.signal })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) {
@@ -510,7 +524,9 @@ function Recent4399Tab() {
       .then((data) => {
         const nextTotalPages = Math.max(1, Number(data.totalPages) || 1)
         setItems(Array.isArray(data.items) ? data.items : [])
+        setTotal(Number(data.total) || 0)
         setTotalPages(nextTotalPages)
+        setTypes(Array.isArray(data.types) ? data.types : [])
         // 数据刷新后总页数可能缩小，避免停在已经不存在、且无法返回的空白页。
         if (page > nextTotalPages) setPage(nextTotalPages)
       })
@@ -524,7 +540,7 @@ function Recent4399Tab() {
       })
 
     return () => controller.abort()
-  }, [page, retryKey])
+  }, [itemType, page, retryKey])
 
   function formatDate(value: string | null) {
     if (!value) return '日期未知'
@@ -540,14 +556,20 @@ function Recent4399Tab() {
 
   return (
     <section className="overflow-hidden rounded-xl border border-gray-200 bg-white" aria-busy={loading}>
-      <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+      <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div>
-          <h2 className="text-base font-bold text-gray-900">4399近期收录</h2>
+          <h2 className="text-sm font-semibold text-gray-900">4399近期收录</h2>
           <p className="mt-1 text-xs text-gray-500">按 4399 页面近期出现时间整理，仅代表近期收录，不代表游戏刚发布。</p>
         </div>
-        {!loading && !error && totalPages > 1 && (
-          <span className="flex-shrink-0 text-xs text-gray-400">第 {page} / {totalPages} 页</span>
-        )}
+        <select
+          aria-label="筛选游戏类型"
+          value={itemType}
+          onChange={(event) => { setItemType(event.target.value); setPage(1) }}
+          className="h-8 w-full rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-700 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100 sm:w-36"
+        >
+          <option value="">全部类型</option>
+          {types.map(type => <option key={type} value={type}>{type}</option>)}
+        </select>
       </div>
 
       {loading ? (
@@ -625,27 +647,7 @@ function Recent4399Tab() {
             </table>
           </div>
 
-          {totalPages > 1 && (
-            <nav aria-label="4399近期收录分页" className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
-              <button
-                type="button"
-                disabled={page <= 1 || loading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-600 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                上一页
-              </button>
-              <span className="text-xs tabular-nums text-gray-400" aria-live="polite">第 {page} / {totalPages} 页</span>
-              <button
-                type="button"
-                disabled={page >= totalPages || loading}
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-600 transition-colors hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                下一页
-              </button>
-            </nav>
-          )}
+          <SimplePagination page={page - 1} total={total} disabled={loading} onChange={(nextPage) => setPage(nextPage + 1)} />
         </>
       )}
     </section>

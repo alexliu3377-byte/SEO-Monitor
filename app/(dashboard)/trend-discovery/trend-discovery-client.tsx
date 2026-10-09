@@ -11,6 +11,7 @@ import {
 import ContentFeedTab from '@/components/content-feed-tab'
 import MonthlyTrendTab from '@/components/monthly-trend-tab'
 import TrendKeywordDiscovery from './trend-keyword-discovery'
+import { SimplePagination } from '@/components/simple-pagination'
 
 type Role = 'normal' | 'admin' | 'super'
 
@@ -192,7 +193,6 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   const [queryDrafts, setQueryDrafts] = useState<TrendQueryDrafts>({ xiaohongshu: '', douyin: '' })
 
   const pageSize = 20
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const selectedScore = selected ? trendScoreBreakdown(selected) : null
 
   const loadTerms = useCallback(async (signal?: AbortSignal) => {
@@ -529,16 +529,7 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             </table>
           </div>
 
-          {!loading && totalPages > 1 && (
-            <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4 text-sm text-slate-500">
-              <span>共 {total} 个候选词</span>
-              <div className="flex items-center gap-2">
-                <button type="button" disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">上一页</button>
-                <span className="px-1 tabular-nums">{page} / {totalPages}</span>
-                <button type="button" disabled={page >= totalPages} onClick={() => setPage(value => Math.min(totalPages, value + 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">下一页</button>
-              </div>
-            </div>
-          )}
+          {!loading && <SimplePagination page={page - 1} total={total} disabled={loading} onChange={nextPage => setPage(nextPage + 1)} />}
         </section>
         </> : <TrendKeywordDiscovery />}
       </main>

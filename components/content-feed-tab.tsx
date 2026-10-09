@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { SimplePagination } from '@/components/simple-pagination'
 
 type ContentFeedItem = {
   id: string
@@ -100,6 +101,7 @@ export default function ContentFeedTab() {
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<ContentFeedItem[]>([])
   const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
@@ -132,6 +134,7 @@ export default function ContentFeedTab() {
       }
 
       setItems(data.items)
+      setTotal(Number(data.total) || 0)
       setTotalPages(nextTotalPages)
     } catch (loadError) {
       if ((loadError as Error).name !== 'AbortError') {
@@ -277,27 +280,7 @@ export default function ContentFeedTab() {
         </table>
       </div>
 
-      {!loading && !error && totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-500 sm:px-5">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage(value => Math.max(1, value - 1))}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            上一页
-          </button>
-          <span className="min-w-16 text-center tabular-nums">{page} / {totalPages}</span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage(value => Math.min(totalPages, value + 1))}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            下一页
-          </button>
-        </div>
-      )}
+      {!loading && !error && <SimplePagination page={page - 1} total={total} disabled={loading} onChange={nextPage => setPage(nextPage + 1)} />}
     </section>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { SimplePagination } from '@/components/simple-pagination'
 import type { TrendQueryPlatform } from '@/lib/trend-discovery'
 
 type SuggestionStatus = 'pending' | 'added' | 'ignored'
@@ -51,7 +52,6 @@ export default function TrendKeywordDiscovery() {
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null)
   const [error, setError] = useState('')
   const pageSize = 20
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const loadSuggestions = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -201,7 +201,7 @@ export default function TrendKeywordDiscovery() {
         </table>
       </div>
 
-      {!loading && totalPages > 1 && <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4 text-sm text-slate-500"><span>共 {total} 个新词</span><div className="flex items-center gap-2"><button disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">上一页</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage(value => Math.min(totalPages, value + 1))} className="h-9 rounded-lg border border-slate-200 px-3 disabled:opacity-40">下一页</button></div></div>}
+      {!loading && <SimplePagination page={page - 1} total={total} disabled={loading} onChange={nextPage => setPage(nextPage + 1)} />}
 
       {selectedSuggestion && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="新词详情" onMouseDown={event => { if (event.currentTarget === event.target) setSelectedSuggestion(null) }}>

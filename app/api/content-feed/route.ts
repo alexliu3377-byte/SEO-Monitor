@@ -45,6 +45,7 @@ export async function GET(request: Request) {
   if (category && !(CONTENT_FEED_CATEGORIES as readonly string[]).includes(category)) {
     return NextResponse.json({ error: '分类参数无效' }, { status: 400 })
   }
+  const itemType = (params.get('type') ?? '').trim().slice(0, 80)
 
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
@@ -56,9 +57,15 @@ export async function GET(request: Request) {
     .order('first_seen_at', { ascending: false })
     .range(from, to)
   if (category) query = query.eq('category', category)
+  if (itemType) query = query.eq('summary', itemType)
 
-  const { data, error, count } = await query
+  const includeTypes = params.get('includeTypes') === '1' && sourceFilter.sources.length === 1 && sourceFilter.sources[0] === '4399'
+  const typePromise = includeTypes
+    ? service.from('content_feed_items').select('summary').eq('source', '4399').not('summary', 'is', null).limit(500)
+    : Promise.resolve({ data: [], error: null })
+  const [{ data, error, count }, typeResult] = await Promise.all([query, typePromise])
   if (error) return databaseError(error)
+  if (typeResult.error) return databaseError(typeResult.error)
   const total = count ?? 0
   const items = (data ?? []).map((row: Record<string, unknown>) => ({
     id: row.id,
@@ -80,6 +87,9 @@ export async function GET(request: Request) {
     page,
     pageSize,
     totalPages: Math.ceil(total / pageSize),
+    types: [...new Set<string>(((typeResult.data ?? []) as Array<{ summary?: unknown }>)
+      .map((row: { summary?: unknown }) => typeof row.summary === 'string' ? row.summary.trim() : '')
+      .filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN')),
   }, {
     headers: { 'Cache-Control': 'private, max-age=30' },
   })
