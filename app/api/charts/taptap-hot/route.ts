@@ -6,6 +6,14 @@ const UA =
 
 type HotItem = { rank: number; name: string; labels: string[] }
 
+function rotatingNumericSearch(): string {
+  // 与下方 30 分钟缓存周期一致：同一周期复用同一个数字，下一周期再换，
+  // 避免固定搜索词，也避免每次请求随机导致缓存完全失效。
+  const bucket = Math.floor(Date.now() / 1_800_000)
+  const mixed = Math.imul(bucket, 2_654_435_761) >>> 0
+  return String((mixed % 999_999) + 1)
+}
+
 export async function GET() {
   // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
   // 完全没做校验，无鉴权无限流地代理抓取第三方站点。
@@ -16,7 +24,8 @@ export async function GET() {
   try {
     // TapTap 改版后，排行榜页不再输出顶部搜索热搜；搜索结果页右侧仍
     // 服务端渲染完整热搜列表，沿用下面的稳定 class 解析即可。
-    const res = await fetch('https://www.taptap.cn/search/2', {
+    const searchNumber = rotatingNumericSearch()
+    const res = await fetch(`https://www.taptap.cn/search/${searchNumber}`, {
       headers: {
         'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'zh-CN,zh;q=0.9',
