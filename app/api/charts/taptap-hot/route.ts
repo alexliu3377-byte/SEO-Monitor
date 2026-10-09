@@ -14,7 +14,9 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const res = await fetch('https://www.taptap.cn/top/download', {
+    // TapTap 改版后，排行榜页不再输出顶部搜索热搜；搜索结果页右侧仍
+    // 服务端渲染完整热搜列表，沿用下面的稳定 class 解析即可。
+    const res = await fetch('https://www.taptap.cn/search/2', {
       headers: {
         'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'zh-CN,zh;q=0.9',
