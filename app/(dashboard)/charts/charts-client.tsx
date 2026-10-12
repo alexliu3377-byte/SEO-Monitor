@@ -8,8 +8,8 @@ import { SimplePagination } from '@/components/simple-pagination'
 const ContentFeedTab = dynamic(() => import('@/components/content-feed-tab'), {
   loading: () => <PanelLoading label="正在读取内容动态" />,
 })
-const TrendDiscoveryClient = dynamic(() => import('../trend-discovery/trend-discovery-client'), {
-  loading: () => <PanelLoading label="正在读取 SEO 趋势" />,
+const MonthlyTrendTab = dynamic(() => import('@/components/monthly-trend-tab'), {
+  loading: () => <PanelLoading label="正在读取月度趋势" />,
 })
 
 function PanelLoading({ label }: { label: string }) {
@@ -736,20 +736,19 @@ function Recent4399Tab() {
   )
 }
 
-type Role = 'normal' | 'admin' | 'super'
-type DiscoverySection = 'game' | 'app' | 'research'
-type GameView = 'search' | 'rankings' | 'content'
+type DiscoverySection = 'monthly' | 'game' | 'app' | 'content'
+type GameView = 'search' | 'rankings'
 type RankingSource = 'taptap' | 'haoyou' | '4399'
 
 const SECTIONS: Array<{ id: DiscoverySection; label: string }> = [
+  { id: 'monthly', label: '月度趋势' },
   { id: 'game', label: '游戏' },
   { id: 'app', label: '应用' },
-  { id: 'research', label: 'SEO 趋势' },
+  { id: 'content', label: '资讯动态' },
 ]
 const GAME_VIEWS: Array<{ id: GameView; label: string }> = [
   { id: 'search', label: '搜索趋势' },
   { id: 'rankings', label: '平台榜单' },
-  { id: 'content', label: '资讯动态' },
 ]
 const RANKING_SOURCES: Array<{ id: RankingSource; label: string }> = [
   { id: 'taptap', label: 'TapTap' },
@@ -761,11 +760,14 @@ function oneOf<T extends string>(value: string | null, values: readonly T[], fal
   return values.includes(value as T) ? value as T : fallback
 }
 
-export default function ChartsClient({ initialRole }: { initialRole: Role }) {
+export default function ChartsClient() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const section = oneOf(searchParams.get('section'), SECTIONS.map(item => item.id), 'game')
+  const requestedSection = searchParams.get('section')
+  const section = requestedSection === 'research'
+    ? 'monthly'
+    : oneOf(requestedSection, SECTIONS.map(item => item.id), 'monthly')
   const gameView = oneOf(searchParams.get('view'), GAME_VIEWS.map(item => item.id), 'search')
   const rankingSource = oneOf(searchParams.get('source'), RANKING_SOURCES.map(item => item.id), 'taptap')
 
@@ -781,7 +783,7 @@ export default function ChartsClient({ initialRole }: { initialRole: Role }) {
     <div className="p-5 sm:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">内容发现</h1>
-        <p className="mt-1 text-sm text-gray-500">按游戏、应用或 SEO 趋势查看值得关注的内容</p>
+        <p className="mt-1 text-sm text-gray-500">查看月度变化、游戏与应用机会，以及近期资讯动态</p>
       </div>
 
       <div className="mb-5 flex gap-7 overflow-x-auto border-b border-slate-200" aria-label="内容类型">
@@ -790,13 +792,13 @@ export default function ChartsClient({ initialRole }: { initialRole: Role }) {
         ))}
       </div>
 
+      {section === 'monthly' && <MonthlyTrendTab />}
       {section === 'game' && (
         <>
           <div className="mb-5 inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1" aria-label="游戏发现栏目">
             {GAME_VIEWS.map(item => <button key={item.id} type="button" aria-pressed={gameView === item.id} onClick={() => navigate({ view: item.id })} className={`h-9 flex-none whitespace-nowrap rounded-md px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${gameView === item.id ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{item.label}</button>)}
           </div>
           {gameView === 'search' && <SearchTrendsTab />}
-          {gameView === 'content' && <ContentFeedTab key="game-feed" kind="game" />}
           {gameView === 'rankings' && (
             <>
               <div className="mb-4 flex flex-wrap gap-2" aria-label="榜单来源">
@@ -808,7 +810,7 @@ export default function ChartsClient({ initialRole }: { initialRole: Role }) {
         </>
       )}
       {section === 'app' && <ContentFeedTab key="app-feed" kind="app" />}
-      {section === 'research' && <TrendDiscoveryClient initialRole={initialRole} embedded includeContent={false} />}
+      {section === 'content' && <ContentFeedTab key="content-feed" kind="all" />}
     </div>
   )
 }

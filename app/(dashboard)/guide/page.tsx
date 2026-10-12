@@ -169,9 +169,9 @@ export default function GuidePage() {
                 <div className="mt-3 divide-y divide-slate-100"><QuickRow name="昨日新词">查看指定日期新出现的关键词。</QuickRow><QuickRow name="排名波动">分别查看涨入和跌出，不把“未找到”当作下跌。</QuickRow><QuickRow name="更新词库">查看持续出现、适合更新现有内容的词。</QuickRow></div>
               </Section>
 
-              <Section id="tool-trends" title="热词雷达与内容发现" href="/content/charts?section=research" linkLabel="打开内容发现">
-                <div className="divide-y divide-slate-100"><QuickRow name="热词雷达">根据站点排名、搜索量和竞品数据查看已形成的数据趋势。</QuickRow><QuickRow name="趋势词">根据公开社媒内容识别正在升温的候选词，并解释趋势分来源。</QuickRow><QuickRow name="新词发现">查看平台搜索推荐词；管理员可加入采集或忽略。</QuickRow></div>
-                <p className="mt-3 text-xs text-slate-500">社媒推荐词是后续采集线索，不等于已经形成趋势；是否成立仍要看公开内容证据。</p>
+              <Section id="tool-trends" title="热词雷达与内容发现" href="/content/charts?section=monthly" linkLabel="打开内容发现">
+                <div className="divide-y divide-slate-100"><QuickRow name="热词雷达">根据站点排名、搜索量和竞品数据查看已形成的数据趋势。</QuickRow><QuickRow name="月度趋势">按月份查看跨站点的游戏、应用与新增关键词变化。</QuickRow><QuickRow name="资讯动态">按来源和类型查看近期采集到的资讯资料。</QuickRow></div>
+                <p className="mt-3 text-xs text-slate-500">各栏目按需读取，资讯动态每页只加载当前筛选的 20 条资料。</p>
               </Section>
 
               <Section id="tool-research" title="研究中心" href="/content/research" linkLabel="打开研究中心">

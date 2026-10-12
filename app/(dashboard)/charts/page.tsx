@@ -19,7 +19,7 @@ export default async function ChartsPage() {
 
   return (
     <Suspense fallback={<PageLoading />}>
-      <ChartsClient initialRole={profile.role} />
+      <ChartsClient />
     </Suspense>
   )
 }
