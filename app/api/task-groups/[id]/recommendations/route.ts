@@ -38,6 +38,8 @@ interface RecommendationRow extends SignalRow {
   memberName: string
   ownUrl: string | null
   ownCreatedAt: string | null
+  sameUrlCount: number
+  sameUrlKeywords: Array<{ keyword: string; rank_position: number | null; volume: number }>
 }
 
 function malaysiaDate(offsetDays = 0) {
@@ -117,6 +119,36 @@ async function loadSignals(service: any, siteIds: string[], type: 'rankdown' | '
     .range(from, to))
 }
 
+async function loadSignalsForKeywords(
+  service: any,
+  siteIds: string[],
+  type: 'rankdown' | 'rankup',
+  keywords: string[],
+) {
+  if (siteIds.length === 0 || keywords.length === 0) return []
+  const keywordChunks = chunks(keywords, 60)
+  const rows: SignalRow[] = []
+  // Keep concurrency bounded: this avoids one huge encoded `.in()` request while
+  // still making the rank-up tab responsive for members with a long history.
+  for (let index = 0; index < keywordChunks.length; index += 4) {
+    const batch = keywordChunks.slice(index, index + 4)
+    const batchRows = await Promise.all(batch.map(keywordChunk => fetchAllRows<SignalRow>((from, to) => service
+      .from('keyword_signal_rollup')
+      .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
+      .in('site_id', siteIds)
+      .in('keyword', keywordChunk)
+      .eq('type', type)
+      .gte('last_seen', malaysiaDate(-30))
+      .order('last_seen', { ascending: false })
+      .order('max_volume', { ascending: false })
+      .order('site_id', { ascending: true })
+      .order('keyword', { ascending: true })
+      .range(from, to))))
+    for (const result of batchRows) rows.push(...result)
+  }
+  return rows
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
@@ -184,6 +216,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   if (type === 'rankdown') {
     const signals = dedupeSignals(await loadSignals(service, ownSiteIds, 'rankdown'))
+    const signalsByUrl = new Map<string, SignalRow[]>()
+    for (const signal of signals) {
+      const url = normalizeUrl(signal.url)
+      if (!url) continue
+      const sameUrlSignals = signalsByUrl.get(url) ?? []
+      sameUrlSignals.push(signal)
+      signalsByUrl.set(url, sameUrlSignals)
+    }
     for (const memberId of targetUsers) {
       const history = historyByUser.get(memberId)
       if (!history) continue
@@ -193,6 +233,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         if (dismissed.has(`${memberId}\n${keyword}`)) continue
         const priority = cooldownPriority(signal.keyword, Number(signal.volume) || 0, history)
         if (!priority.eligible) continue
+        const sameUrlSignals = signalsByUrl.get(normalizeUrl(signal.url)) ?? [signal]
         recommendations.push({
           ...signal,
           volume: Number(signal.volume) || 0,
@@ -200,6 +241,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           memberName: memberMap.get(memberId) || '',
           ownUrl: signal.url,
           ownCreatedAt: null,
+          sameUrlCount: sameUrlSignals.length,
+          sameUrlKeywords: sameUrlSignals
+            .map(row => ({ keyword: row.keyword, rank_position: row.rank_position, volume: Number(row.volume) || 0 }))
+            .sort((a, b) => b.volume - a.volume),
           priority: priority.daysSinceEligible,
         })
       }
@@ -223,7 +268,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const competitorSiteIds = allSiteRows
       .filter(site => !globalOwnDomains.has(normalizeDomains([site.domain])[0] ?? ''))
       .map(site => site.id)
-    const signals = dedupeSignals(await loadSignals(service, competitorSiteIds, 'rankup'))
+
+    // Preserve the existing ownership rule: the latest submitted page for a keyword owns the recommendation.
+    // Build this small candidate set first; querying every competitor rank-up signal before matching it
+    // made the tab time out as the signal table grew.
+    const latestClaim = new Map<string, ClaimRow>()
+    for (const claim of claims) {
+      if (!claim.page_url) continue
+      const keyword = (claim.final_keyword || claim.keyword).trim().toLowerCase()
+      const existing = latestClaim.get(keyword)
+      if (!existing || claim.created_at > existing.created_at) latestClaim.set(keyword, claim)
+    }
+    const candidateKeywords = Array.from(new Set(Array.from(latestClaim.values())
+      .map(claim => (claim.final_keyword || claim.keyword).trim())
+      .filter(Boolean)))
+    const signals = dedupeSignals(await loadSignalsForKeywords(service, competitorSiteIds, 'rankup', candidateKeywords))
     const signalKeywords = signals.map(signal => signal.keyword)
     const ownRanked = new Set<string>()
     for (const keywordChunk of chunks(signalKeywords, 100)) {
@@ -239,14 +298,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       for (const row of rows) ownRanked.add(row.keyword.toLowerCase())
     }
 
-    // Preserve the existing ownership rule: the latest submitted page for a keyword owns the recommendation.
-    const latestClaim = new Map<string, ClaimRow>()
-    for (const claim of claims) {
-      if (!claim.page_url) continue
-      const keyword = (claim.final_keyword || claim.keyword).trim().toLowerCase()
-      const existing = latestClaim.get(keyword)
-      if (!existing || claim.created_at > existing.created_at) latestClaim.set(keyword, claim)
-    }
     for (const signal of signals) {
       const keyword = signal.keyword.toLowerCase()
       if (ownRanked.has(keyword)) continue
@@ -264,6 +315,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         memberName: memberMap.get(claim.user_id) || '',
         ownUrl: claim.page_url,
         ownCreatedAt: claim.created_at,
+        sameUrlCount: 0,
+        sameUrlKeywords: [],
         priority: priority.daysSinceEligible,
       })
     }

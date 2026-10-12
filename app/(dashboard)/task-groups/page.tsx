@@ -45,6 +45,13 @@ interface SubmissionHistoryRow {
   claimed_date: string
 }
 
+interface BulkTaskRow {
+  line: string
+  keyword: string
+  url: string
+  error: string | null
+}
+
 type RightTab = 'distribute' | 'recommend' | 'search' | 'volumeRising' | 'cross' | 'rank' | 'streak' | 'newWords' | 'wordLib' | 'rankdown'
 type RecSubTab = 'rankdown' | 'rankup'
 type Badge = 'new' | 'updated' | null
@@ -55,6 +62,8 @@ interface RecommendationRow {
   keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null
   volume: number; url: string | null; title: string | null
   memberId: string; memberName: string; ownUrl: string | null; ownCreatedAt: string | null
+  sameUrlCount: number
+  sameUrlKeywords: Array<{ keyword: string; rank_position: number | null; volume: number }>
 }
 
 const PAGE_SIZE = 20
@@ -89,6 +98,46 @@ function getBaselineVolume(row: VolumeRisingWord) {
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '—' }
 function normalizeUrl(raw: string): string {
   return raw.trim().replace(/^https?:\/\/(www\.|m\.)?/, '')
+}
+
+function parseBulkTaskRows(value: string): BulkTaskRow[] {
+  const seen = new Set<string>()
+  return value
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !/^关键词\s*(?:\t|,|，|\|)\s*(?:页面)?url$/i.test(line))
+    .map(line => {
+      const cells = line.split('\t').map(cell => cell.trim()).filter(Boolean)
+      let keyword = cells[0] ?? ''
+      let rawUrl = cells[1] ?? ''
+
+      if (cells.length < 2) {
+        const urlMatch = line.match(/(?:https?:\/\/|www\.)[^\s,，|]+/i)
+        if (urlMatch?.index !== undefined) {
+          keyword = line.slice(0, urlMatch.index).replace(/[\s,，|]+$/, '').trim()
+          rawUrl = urlMatch[0]
+        } else {
+          const separated = line.split(/\s*[,，|]\s*/).map(cell => cell.trim()).filter(Boolean)
+          if (separated.length >= 2) {
+            keyword = separated[0]
+            rawUrl = separated[1]
+          }
+        }
+      }
+
+      const url = normalizeUrl(rawUrl)
+      let error: string | null = null
+      if (!keyword) error = '缺少关键词'
+      else if (keyword.length > 200) error = '关键词超过 200 字'
+      else if (!url || !url.includes('.')) error = '缺少有效 URL'
+
+      const identity = keyword.trim().replace(/\s+/g, ' ').toLowerCase()
+      if (!error && seen.has(identity)) error = '本批次关键词重复'
+      if (!error) seen.add(identity)
+
+      return { line, keyword, url, error }
+    })
 }
 
 function normalizeClaimUrlForComparison(raw: string): string {
@@ -751,6 +800,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [addFinalKw, setAddFinalKw] = useState('')
   const [addUrl, setAddUrl] = useState('')
   const [addingManual, setAddingManual] = useState(false)
+  const [showBulkAdd, setShowBulkAdd] = useState(false)
+  const [bulkAddText, setBulkAddText] = useState('')
+  const [bulkAddOpType, setBulkAddOpType] = useState<'新增' | '更新'>('新增')
+  const [addingBulk, setAddingBulk] = useState(false)
+  const [bulkAddMessage, setBulkAddMessage] = useState('')
 
   const claimingRef = useRef<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -778,6 +832,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }, [claimedKeywords])
   const pendingCount = displayedClaims.filter(k => k.status === 'pending').length
   const submittedCount = displayedClaims.filter(k => k.status === 'submitted').length
+  const bulkTaskRows = useMemo(() => parseBulkTaskRows(bulkAddText), [bulkAddText])
+  const validBulkTaskRows = bulkTaskRows.filter(row => !row.error).slice(0, 200)
 
   const groupRankDomains = useMemo(() => new Set(activeGroup?.rank_domains || []), [activeGroup])
   const groupNewDomains = useMemo(() => new Set(activeGroup?.new_domains || []), [activeGroup])
@@ -1593,6 +1649,70 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     } finally { setAddingManual(false) }
   }
 
+  async function addBulkKeywords() {
+    if (!activeGroupId || !effectiveViewingId || !canOperateViewedMember || addingBulk) {
+      if (!canOperateViewedMember) setClaimErrorMsg(taskActionUnavailableMessage)
+      return
+    }
+    if (bulkTaskRows.length > 200) {
+      setBulkAddMessage('一次最多添加 200 条，请拆成两批。')
+      return
+    }
+    if (validBulkTaskRows.length === 0 || bulkTaskRows.some(row => row.error)) {
+      setBulkAddMessage('请先修正标红的内容，再批量添加。')
+      return
+    }
+
+    setAddingBulk(true)
+    setBulkAddMessage('')
+    const added: ClaimedKeyword[] = []
+    const failed: Array<{ row: BulkTaskRow; message: string }> = []
+
+    for (let index = 0; index < validBulkTaskRows.length; index += 5) {
+      const chunk = validBulkTaskRows.slice(index, index + 5)
+      const results = await Promise.all(chunk.map(async row => {
+        try {
+          const response = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              keyword: row.keyword,
+              source: '批量添加',
+              search_volume: 0,
+              userId: effectiveViewingId,
+              claimed_date: selectedDate,
+              operation_type: bulkAddOpType,
+              final_keyword: row.keyword,
+              page_url: row.url,
+            }),
+          })
+          const data = await response.json().catch(() => ({})) as { keyword?: ClaimedKeyword; error?: string }
+          if (!response.ok || !data.keyword) return { row, error: data.error || '添加失败' }
+          return { row, keyword: data.keyword }
+        } catch {
+          return { row, error: '网络异常' }
+        }
+      }))
+      for (const result of results) {
+        if ('keyword' in result && result.keyword) added.push(result.keyword)
+        else failed.push({ row: result.row, message: result.error || '添加失败' })
+      }
+    }
+
+    if (added.length > 0) {
+      setClaimedKeywords(current => [...current, ...added.filter(item => !current.some(existing => existing.id === item.id))])
+    }
+    if (failed.length === 0) {
+      setBulkAddText('')
+      setBulkAddMessage('')
+      setShowBulkAdd(false)
+    } else {
+      setBulkAddText(failed.map(item => item.row.line).join('\n'))
+      setBulkAddMessage(`已添加 ${added.length} 条；${failed.length} 条未添加。第一条原因：${failed[0].message}`)
+    }
+    setAddingBulk(false)
+  }
+
   async function submitForDate() {
     if (!activeGroupId || !effectiveViewingId || !canOperateViewedMember || submitting || pendingCount === 0) {
       if (!canOperateViewedMember) setClaimErrorMsg(taskActionUnavailableMessage)
@@ -1652,18 +1772,23 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     } finally { setSubmitting(false) }
   }
 
-  async function openDetail(keyword: string, source: string, url?: string | null) {
+  async function openDetail(
+    keyword: string,
+    source: string,
+    url?: string | null,
+    sameUrlKeywords?: Array<{ keyword: string; rank_position: number | null; volume: number }>,
+  ) {
     setDetailKw(keyword)
     setDetailSource(source)
 
-    // 跌排更新/跌词更新按URL合并显示后，"详情"改成看同一个URL下还命中了
-    // 哪些其它词——siteRankdownData 已经在内存里，不用发请求，直接过滤。
+    // 跌排更新/跌词更新按 URL 合并显示后，详情展示该页面命中的全部词。
+    // 今日推荐由服务端分页，直接使用接口随当前行返回的同页词；旧列表仍从
+    // 已加载的 siteRankdownData 过滤，避免为了打开弹窗再读取一次全量数据。
     if (source === '跌排更新' || source === '跌词更新') {
       setDetailUrlSiblings(
-        !url ? [] : siteRankdownData
+        sameUrlKeywords ?? (!url ? [] : siteRankdownData
           .filter(r => r.url && normalizeUrl(r.url).toLowerCase() === normalizeUrl(url).toLowerCase())
-          .filter(r => r.keyword !== keyword)
-          .sort((a, b) => b.volume - a.volume)
+          .sort((a, b) => b.volume - a.volume))
       )
       setDetailLoading(false)
       return
@@ -2166,10 +2291,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   <th className="px-2 py-2 text-left font-medium">排名页面</th>
                   {canManage && <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">组员</th>}
                   {!isRankdown && <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">提交日期</th>}
-                  <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '现排名' : '竞品排名'}</th>
-                  <th className="w-14 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '跌幅' : '涨幅'}</th>
+                  <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '原排名' : '竞品排名'}</th>
+                  <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '现排名' : '涨幅'}</th>
                   <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">搜索量</th>
-                  <th className="w-32"><span className="sr-only">操作</span></th>
+                  {isRankdown && <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">同页词</th>}
+                  <th className="w-28 px-2 py-2 text-center font-medium whitespace-nowrap">操作</th>
                 </tr></thead>
                 <tbody>
                   {recommendationRows.map(row => {
@@ -2195,18 +2321,31 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         </td>
                         {canManage && <td className="truncate px-2 py-2 text-center text-xs text-gray-500" title={row.memberName}>{row.memberName || '—'}</td>}
                         {!isRankdown && <td className="px-2 py-2 text-center text-xs text-gray-500">{row.ownCreatedAt ? fmtDate(row.ownCreatedAt.slice(0, 10)) : '—'}</td>}
-                        <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">{row.rank_position ?? <span className="text-gray-400">脱排</span>}</td>
+                        <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
+                          {isRankdown ? row.prev_rank ?? '—' : row.rank_position ?? '—'}
+                        </td>
                         <td className={`px-2 py-2 text-center text-xs font-medium ${isRankdown ? 'text-red-500' : 'text-green-600'}`}>
-                          {row.rank_position != null && row.prev_rank != null
-                            ? `${isRankdown ? '▼' : '▲'}${Math.abs(row.rank_position - row.prev_rank)}`
-                            : '—'}
+                          {isRankdown
+                            ? row.rank_position ?? <span className="font-medium text-red-500">脱排</span>
+                            : row.rank_position != null && row.prev_rank != null
+                              ? `▲${Math.abs(row.rank_position - row.prev_rank)}`
+                              : '—'}
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{row.volume > 0 ? fmtVol(row.volume) : '—'}</td>
-                        <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1">
+                        {isRankdown && <td className="px-2 py-2 text-center whitespace-nowrap">
+                          {row.sameUrlCount > 0
+                            ? <span className="text-xs font-medium tabular-nums text-gray-600">{row.sameUrlCount} 个</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </td>}
+                        <td className="w-28 px-2 py-2 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1">
                             <ClaimAction keyword={row.keyword} claimed={claimed} onClaim={() => claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId)} compact />
-                            {isRankdown && <button onClick={() => openDetail(row.keyword, '跌排更新', row.url)}
-                              className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500 transition-colors hover:text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>}
+                            {isRankdown && row.sameUrlCount > 0 && (
+                              <button onClick={() => openDetail(row.keyword, '跌排更新', row.url, row.sameUrlKeywords)}
+                                className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500 transition-colors hover:border-blue-200 hover:text-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500">
+                                详情
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -2283,8 +2422,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
                 <th className="px-2 py-2 text-left font-medium">排名页面</th>
                 {canManage && <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">组员</th>}
+                <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">原排名</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
-                <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">跌幅</th>
                 <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">搜索量</th>
                 <th className="w-32"><span className="sr-only">操作</span></th>
               </tr></thead>
@@ -2326,11 +2465,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       {canManage && (
                         <td className="px-2 py-2 text-center text-xs text-gray-500 truncate" title={memberName ?? ''}>{memberName ?? '—'}</td>
                       )}
-                      <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
-                        {r.rank_position ?? <span className="text-gray-400">脱排</span>}
-                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">{r.prev_rank ?? '—'}</td>
                       <td className="px-2 py-2 text-center text-xs font-medium text-red-500">
-                        {r.rank_position == null ? <span className="text-gray-400">脱排</span> : r.prev_rank != null ? `▼${r.rank_position - r.prev_rank}` : '—'}
+                        {r.rank_position ?? <span className="font-medium text-red-500">脱排</span>}
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                       <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
@@ -2891,16 +3028,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="px-3 py-2 text-left font-medium">关键词</th>
                   <th className="px-2 py-2 text-left font-medium">页面URL</th>
-                  <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">现排名</th>
-                  <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">上次</th>
-                  <th className="px-2 py-2 text-center font-medium w-12 whitespace-nowrap">跌幅</th>
+                  <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">原排名</th>
+                  <th className="px-2 py-2 text-center font-medium w-16 whitespace-nowrap">现排名</th>
                   <th className="px-2 py-2 text-center font-medium w-14 whitespace-nowrap">搜索量</th>
                   <th className="w-32"><span className="sr-only">操作</span></th>
                 </tr></thead>
                 <tbody>
                   {dateRows.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE).map((r, i) => {
                     const claimed = claimedSet.has(r.keyword)
-                    const drop = (r.rank_position != null && r.prev_rank != null) ? r.rank_position - r.prev_rank : null
                     return (
                       <tr key={`rd-${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume) }}
                         className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
@@ -2922,12 +3057,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                             </a>
                           ) : <span className="text-xs text-gray-300">—</span>}
                         </td>
-                        <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">
-                          {r.rank_position ?? <span className="text-gray-400">脱排</span>}
-                        </td>
-                        <td className="px-2 py-2 text-center text-xs text-gray-400">{r.prev_rank ?? '—'}</td>
-                        <td className="px-2 py-2 text-center text-xs font-medium">
-                          {r.rank_position == null ? <span className="text-gray-400">脱排</span> : drop != null ? <span className="text-red-500">▼{drop}</span> : <span className="text-gray-300">新</span>}
+                        <td className="px-2 py-2 text-center text-xs font-medium text-gray-700">{r.prev_rank ?? '—'}</td>
+                        <td className="px-2 py-2 text-center text-xs font-medium text-red-500">
+                          {r.rank_position ?? <span className="font-medium text-red-500">脱排</span>}
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                         <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
@@ -2963,7 +3095,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
   ]
   function SourceTag({ s }: { s: string }) {
-    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨', '分发词': '分发' }
+    const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '批量添加': '批量', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨', '分发词': '分发' }
     return <span className="text-[10px] text-gray-300 flex-shrink-0">{map[s] ?? s}</span>
   }
 
@@ -2971,7 +3103,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   function DetailBody() {
     if (detailLoading) return <Spinner />
     if (detailSource === '跌排更新' || detailSource === '跌词更新') {
-      if (detailUrlSiblings.length === 0) return <p className="text-sm text-gray-400 text-center py-10">这个URL下没有其它命中的词</p>
+      if (detailUrlSiblings.length === 0) return <p className="text-sm text-gray-400 text-center py-10">这个页面没有可显示的关键词</p>
       return (
         <table aria-label="数据表格" className="w-full">
           <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
@@ -3424,11 +3556,16 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         </div>
                       </div>
                     ) : (
-                      <div className="px-3 pt-2">
+                      <div className="grid grid-cols-2 gap-2 px-3 pt-2">
                         <button onClick={() => setShowAddForm(true)} disabled={!canOperateViewedMember}
                           title={taskActionUnavailableMessage || '为当前选中的组员手动添加词'}
                           className="w-full py-1.5 text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg hover:border-green-300 hover:text-green-500 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:text-gray-400">
-                          <span className="text-base leading-none">+</span> 手动添加词
+                          <span className="text-base leading-none">+</span> 手动添加
+                        </button>
+                        <button onClick={() => { setBulkAddMessage(''); setShowBulkAdd(true) }} disabled={!canOperateViewedMember}
+                          title={taskActionUnavailableMessage || '批量粘贴关键词和 URL'}
+                          className="w-full py-1.5 text-xs font-medium text-green-600 border border-dashed border-green-200 bg-green-50/50 rounded-lg hover:border-green-400 hover:bg-green-50 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50">
+                          <span className="text-sm leading-none">＋</span> 批量添加
                         </button>
                       </div>
                     )}
@@ -3513,6 +3650,71 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showBulkAdd && (
+        <div role="dialog" aria-modal="true" aria-labelledby="bulk-add-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => { if (!addingBulk) setShowBulkAdd(false) }}>
+          <div className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+              <div>
+                <h3 id="bulk-add-title" className="font-semibold text-gray-900">批量添加今日任务</h3>
+                <p className="mt-1 text-xs text-gray-500">从 Excel 复制“关键词、URL”两列，一行会生成一条待提交任务。</p>
+              </div>
+              <button type="button" aria-label="关闭批量添加" disabled={addingBulk} onClick={() => setShowBulkAdd(false)} className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-40">×</button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-600">统一操作类型</span>
+                <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+                  {(['新增', '更新'] as const).map(operation => (
+                    <button key={operation} type="button" onClick={() => setBulkAddOpType(operation)}
+                      className={`rounded-md px-4 py-1.5 text-xs font-medium transition-colors ${bulkAddOpType === operation ? operation === '新增' ? 'bg-green-500 text-white shadow-sm' : 'bg-blue-500 text-white shadow-sm' : 'text-gray-500 hover:bg-white'}`}>
+                      全部{operation}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                value={bulkAddText}
+                onChange={event => { setBulkAddText(event.target.value); setBulkAddMessage('') }}
+                rows={10}
+                autoFocus
+                spellCheck={false}
+                placeholder={'关键词\thttps://example.com/page\n第二个关键词\thttps://example.com/page-2'}
+                className="w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm leading-6 text-gray-700 outline-none focus:border-green-400 focus:bg-white focus:ring-2 focus:ring-green-100"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-gray-500">已识别 {bulkTaskRows.length} 条 · 可添加 {validBulkTaskRows.length} 条</span>
+                <span className={bulkTaskRows.some(row => row.error) ? 'text-red-500' : 'text-gray-400'}>最多 200 条，关键词会同时作为“最终做的词”</span>
+              </div>
+              {bulkTaskRows.length > 0 && (
+                <div className="max-h-48 overflow-auto rounded-lg border border-gray-100">
+                  <table className="w-full table-fixed text-left text-xs">
+                    <thead className="sticky top-0 bg-gray-50 text-gray-400"><tr><th className="w-10 px-3 py-2 font-medium">#</th><th className="w-2/5 px-2 py-2 font-medium">关键词</th><th className="px-2 py-2 font-medium">URL</th><th className="w-28 px-3 py-2 font-medium">检查</th></tr></thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {bulkTaskRows.slice(0, 12).map((row, index) => (
+                        <tr key={`${row.line}-${index}`} className={row.error ? 'bg-red-50/60' : ''}>
+                          <td className="px-3 py-2 text-gray-300">{index + 1}</td>
+                          <td className="truncate px-2 py-2 text-gray-700" title={row.keyword}>{row.keyword || '—'}</td>
+                          <td className="truncate px-2 py-2 font-mono text-gray-500" title={row.url}>{row.url || '—'}</td>
+                          <td className={`px-3 py-2 ${row.error ? 'text-red-500' : 'text-green-600'}`}>{row.error || '可添加'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bulkTaskRows.length > 12 && <p className="border-t border-gray-100 py-2 text-center text-xs text-gray-400">其余 {bulkTaskRows.length - 12} 条已识别</p>}
+                </div>
+              )}
+              {bulkAddMessage && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">{bulkAddMessage}</p>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
+              <button type="button" disabled={addingBulk} onClick={() => setShowBulkAdd(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40">取消</button>
+              <button type="button" disabled={addingBulk || validBulkTaskRows.length === 0 || bulkTaskRows.some(row => row.error) || bulkTaskRows.length > 200} onClick={() => void addBulkKeywords()} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40">
+                {addingBulk ? '添加中…' : `批量添加${validBulkTaskRows.length ? ` (${validBulkTaskRows.length})` : ''}`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3678,8 +3880,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
               <div>
-                <h3 className="font-semibold text-gray-900">{detailKw}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">{detailSource === '搜索上涨' ? '搜索量变化与近30天排名记录' : '近30天出现记录'}</p>
+                <h3 className="font-semibold text-gray-900">{detailSource === '跌排更新' || detailSource === '跌词更新' ? `${detailKw} · 同页词` : detailKw}</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{detailSource === '跌排更新' || detailSource === '跌词更新' ? '同一个排名页面命中的关键词' : detailSource === '搜索上涨' ? '搜索量变化与近30天排名记录' : '近30天出现记录'}</p>
               </div>
               <button type="button" aria-label="关闭关键词详情" onClick={() => setDetailKw(null)} className="inline-flex h-11 w-11 items-center justify-center text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
             </div>
