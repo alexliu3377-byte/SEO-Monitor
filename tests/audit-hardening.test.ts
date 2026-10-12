@@ -98,10 +98,11 @@ test('task-group members use canonical profile names', async () => {
     }),
   }
   const result = await normalizeTaskGroupMembers(service, [
-    { user_id: id, username: 'Stale Name', member_type: 'both' },
+    { user_id: id, username: 'Stale Name', member_type: 'game' },
   ])
   assert.equal(result.error, undefined)
   assert.equal(result.members[0].username, 'Canonical Name')
+  // 旧客户端即使仍传应用／游戏，成员保存时也统一为不区分。
   assert.equal(result.members[0].member_type, 'both')
 })
 

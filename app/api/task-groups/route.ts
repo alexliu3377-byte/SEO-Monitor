@@ -17,7 +17,7 @@ async function getCaller() {
 }
 
 interface RawGroup { id: string; name: string; type: string; created_at: string; competitor_domains: string[]; site_domains: string[] }
-interface RawMember { group_id: string; user_id: string; username: string | null; member_type: string | null }
+interface RawMember { group_id: string; user_id: string; username: string | null }
 
 export async function GET() {
   const caller = await getCaller()
@@ -30,16 +30,16 @@ export async function GET() {
     fetchAllRows<RawGroup>((from, to) => service.from('task_groups').select('*')
       .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to)),
     fetchAllRows<RawMember>((from, to) => service.from('task_group_members')
-      .select('group_id, user_id, username, member_type')
+      .select('group_id, user_id, username')
       .order('group_id', { ascending: true }).order('user_id', { ascending: true }).range(from, to)),
   ])
 
   const rawMembers = members
   const displayNames = await resolveUserDisplayNames(service, rawMembers.map(m => m.user_id), rawMembers)
-  const membersByGroup = new Map<string, { user_id: string; username: string; member_type: string }[]>()
+  const membersByGroup = new Map<string, { user_id: string; username: string }[]>()
   for (const m of rawMembers) {
     if (!membersByGroup.has(m.group_id)) membersByGroup.set(m.group_id, [])
-    membersByGroup.get(m.group_id)!.push({ user_id: m.user_id, username: displayNames.get(m.user_id) || '', member_type: m.member_type || 'app' })
+    membersByGroup.get(m.group_id)!.push({ user_id: m.user_id, username: displayNames.get(m.user_id) || '' })
   }
 
   const allGroups = groups.map(g => ({

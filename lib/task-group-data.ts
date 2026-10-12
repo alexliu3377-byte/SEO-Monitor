@@ -1,4 +1,9 @@
-type MemberInput = { user_id: string; username?: string | null; member_type?: string | null }
+type MemberInput = {
+  user_id: string
+  username?: string | null
+  // 兼容旧客户端传值；服务端不再按它区分成员。
+  member_type?: string | null
+}
 
 export type NormalizedTaskGroupMember = {
   user_id: string
@@ -47,9 +52,8 @@ export async function normalizeTaskGroupMembers(
     members: members.map(member => ({
       user_id: member.user_id,
       username: usernameById.get(member.user_id)!,
-      member_type: ['app', 'game', 'both'].includes(member.member_type || '')
-        ? member.member_type as 'app' | 'game' | 'both'
-        : 'app',
+      // 分组成员不再区分应用／游戏；保留数据库字段仅为兼容旧结构。
+      member_type: 'both',
     })),
   }
 }

@@ -11,7 +11,7 @@ import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
-interface TaskMember { user_id: string; username: string; member_type?: 'app' | 'game' | 'both' }
+interface TaskMember { user_id: string; username: string }
 interface TaskGroup { id: string; name: string; type: string; created_at: string; members: TaskMember[]; rank_domains: string[]; new_domains: string[]; associated_domains: string[]; site_domains: string[] }
 interface UserOption { id: string; email: string; username: string | null; role: string }
 interface SiteInfo { id: string; domain: string; name: string; category: 'large' | 'medium' | 'small'; is_enabled: boolean; has_rank_data: boolean; friend_links?: string[] | null }
@@ -384,8 +384,6 @@ interface MemberModalProps {
   onSiteDomainsChange: (s: Set<string>) => void
   selUsers: Set<string>
   onSelUsersChange: (s: Set<string>) => void
-  mTypes: Record<string, 'app' | 'game'>
-  onMTypesChange: (t: Record<string, 'app' | 'game'>) => void
   rankDomains: Set<string>
   onRankDomainsChange: (s: Set<string>) => void
   newDomains: Set<string>
@@ -399,7 +397,6 @@ function MemberModal({
   name, onNameChange,
   siteDomains, onSiteDomainsChange,
   selUsers, onSelUsersChange,
-  mTypes, onMTypesChange,
   rankDomains, onRankDomainsChange,
   newDomains, onNewDomainsChange,
   onSubmit, busy,
@@ -524,31 +521,20 @@ function MemberModal({
             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-40 overflow-y-auto">
               {userOptions.length === 0 ? <div className="px-3 py-3 text-sm text-gray-400">加载中...</div> : userOptions.map(u => {
                 const isSelected = selUsers.has(u.id)
-                const mType = mTypes[u.id] || 'app'
                 return (
                   <div key={u.id} className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${isSelected ? 'bg-gray-50' : 'hover:bg-gray-50'}`}>
                     <input aria-label="选择此项" type="checkbox" checked={isSelected}
                       onChange={e => {
-                        const next = new Set(selUsers); const nextTypes = { ...mTypes }
-                        if (e.target.checked) { next.add(u.id); nextTypes[u.id] = nextTypes[u.id] || 'app' }
-                        else { next.delete(u.id); delete nextTypes[u.id] }
-                        onSelUsersChange(next); onMTypesChange(nextTypes)
+                        const next = new Set(selUsers)
+                        if (e.target.checked) next.add(u.id)
+                        else next.delete(u.id)
+                        onSelUsersChange(next)
                       }}
                       className="rounded border-gray-300 text-green-600 focus:ring-green-500 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium text-gray-900">{u.username || u.email.split('@')[0]}</span>
                       <span className="ml-1.5 text-xs text-gray-400">{u.email}</span>
                     </div>
-                    {isSelected && (
-                      <div className="flex gap-1 flex-shrink-0">
-                        {(['app', 'game'] as const).map(t => (
-                          <button key={t} onClick={() => onMTypesChange({ ...mTypes, [u.id]: t })}
-                            className={`text-xs px-2.5 py-1 rounded-full font-medium border transition-colors ${mType === t ? t === 'app' ? 'bg-blue-500 text-white border-blue-500' : 'bg-purple-500 text-white border-purple-500' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
-                            {t === 'app' ? '应用' : '游戏'}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 )
               })}
@@ -784,7 +770,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // Group management
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
-  const [memberTypes, setMemberTypes] = useState<Record<string, 'app' | 'game'>>({})
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
@@ -795,7 +780,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [deleting, setDeleting] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [editName, setEditName] = useState('')
-  const [editMemberTypes, setEditMemberTypes] = useState<Record<string, 'app' | 'game'>>({})
   const [editSelectedUsers, setEditSelectedUsers] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [allSites, setAllSites] = useState<SiteInfo[]>([])
@@ -2084,7 +2068,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }
 
   async function openCreateModal() {
-    setShowCreate(true); setCreateName(''); setSelectedUsers(new Set()); setMemberTypes({})
+    setShowCreate(true); setCreateName(''); setSelectedUsers(new Set())
     setSelectedRankDomains(new Set()); setSelectedNewDomains(new Set())
     const [usersRes] = await Promise.all([fetch('/api/admin/users?activeOnly=1'), loadAllSites()])
     const data = await usersRes.json()
@@ -2096,7 +2080,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     setCreating(true)
     try {
       const members = userOptions.filter(u => selectedUsers.has(u.id))
-        .map(u => ({ user_id: u.id, username: u.username || u.email.split('@')[0], member_type: memberTypes[u.id] || 'app' }))
+        .map(u => ({ user_id: u.id, username: u.username || u.email.split('@')[0] }))
       const res = await fetch('/api/task-groups', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: createName.trim() || members.map(m => m.username).join(' · '), type: 'both', members, rank_domains: Array.from(selectedRankDomains), new_domains: Array.from(selectedNewDomains), associated_domains: [], site_domains: Array.from(selectedSiteDomains) }),
@@ -2113,9 +2097,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     setEditSelectedRankDomains(new Set(group.rank_domains || []))
     setEditSelectedNewDomains(new Set(group.new_domains || []))
     setEditSelectedSiteDomains(new Set(group.site_domains || []))
-    const types: Record<string, 'app' | 'game'> = {}
-    for (const m of group.members) types[m.user_id] = m.member_type === 'game' ? 'game' : 'app'
-    setEditMemberTypes(types); setShowEdit(true)
+    setShowEdit(true)
     const promises: Promise<unknown>[] = [loadAllSites()]
     if (userOptions.length === 0) promises.push(fetch('/api/admin/users?activeOnly=1').then(r => r.json()).then(d => setUserOptions(d.users || [])))
     await Promise.all(promises)
@@ -2126,7 +2108,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     setSaving(true)
     try {
       const members = userOptions.filter(u => editSelectedUsers.has(u.id))
-        .map(u => ({ user_id: u.id, username: u.username || u.email.split('@')[0], member_type: editMemberTypes[u.id] || 'app' }))
+        .map(u => ({ user_id: u.id, username: u.username || u.email.split('@')[0] }))
       const res = await fetch(`/api/task-groups/${activeGroup.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName.trim() || members.map(m => m.username).join(' · '), members, rank_domains: Array.from(editSelectedRankDomains), new_domains: Array.from(editSelectedNewDomains), associated_domains: [], site_domains: Array.from(editSelectedSiteDomains) }),
@@ -3811,7 +3793,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           name={createName} onNameChange={setCreateName}
           siteDomains={selectedSiteDomains} onSiteDomainsChange={setSelectedSiteDomains}
           selUsers={selectedUsers} onSelUsersChange={setSelectedUsers}
-          mTypes={memberTypes} onMTypesChange={setMemberTypes}
           rankDomains={selectedRankDomains} onRankDomainsChange={setSelectedRankDomains}
           newDomains={selectedNewDomains} onNewDomainsChange={setSelectedNewDomains}
           onSubmit={handleCreate} busy={creating}
@@ -3824,7 +3805,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           name={editName} onNameChange={setEditName}
           siteDomains={editSelectedSiteDomains} onSiteDomainsChange={setEditSelectedSiteDomains}
           selUsers={editSelectedUsers} onSelUsersChange={setEditSelectedUsers}
-          mTypes={editMemberTypes} onMTypesChange={setEditMemberTypes}
           rankDomains={editSelectedRankDomains} onRankDomainsChange={setEditSelectedRankDomains}
           newDomains={editSelectedNewDomains} onNewDomainsChange={setEditSelectedNewDomains}
           onSubmit={handleEdit} busy={saving}

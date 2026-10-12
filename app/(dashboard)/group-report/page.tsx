@@ -15,13 +15,13 @@ const SHOW_SUBMISSION_DETAILS = false
 interface Group {
   id: string; name: string; type: string
   site_domains: string[]; competitor_domains: string[]
-  members: { user_id: string; username: string; member_type: string }[]
+  members: { user_id: string; username: string }[]
 }
 
 interface BySourceItem { source: string; count: number; volume: number }
 interface DayEntry { date: string; count: number; volume: number }
 interface MemberReport {
-  userId: string; username: string; memberType: string
+  userId: string; username: string
   total: { count: number; volume: number }
   bySource: BySourceItem[]; byDate: DayEntry[]
 }
@@ -132,19 +132,14 @@ function Spinner() {
   )
 }
 
-function ReportCard({ title, memberType, total, bySource, isTotal }: {
-  title: string; memberType?: string
+function ReportCard({ title, total, bySource, isTotal }: {
+  title: string
   total: { count: number; volume: number }; bySource: BySourceItem[]; isTotal?: boolean
 }) {
   return (
     <div className={`flex-shrink-0 w-56 rounded-xl border overflow-hidden ${isTotal ? 'border-green-200 bg-green-50/30' : 'border-gray-200 bg-white'}`}>
       <div className={`px-4 py-3 flex items-center gap-2 border-b ${isTotal ? 'border-green-100 bg-green-50/60' : 'border-gray-100 bg-gray-50/60'}`}>
         <span className="text-sm font-semibold text-gray-800 truncate flex-1">{title}</span>
-        {memberType && (
-          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${memberType === 'game' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-            {memberType === 'game' ? '游戏' : '应用'}
-          </span>
-        )}
       </div>
       <div className="divide-y divide-gray-50">
         <div className="grid grid-cols-[1fr_40px_56px] px-4 py-2.5 bg-gray-50/40">
@@ -543,7 +538,6 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                     <thead className="bg-gray-50/80 text-left text-xs font-medium text-gray-500">
                       <tr>
                         <th className="w-48 px-4 py-2.5">成员</th>
-                        <th className="w-20 px-3 py-2.5">类型</th>
                         <th className="w-24 px-3 py-2.5 text-right">提交量</th>
                         <th className="w-28 px-3 py-2.5 text-right">搜索量</th>
                         <th className="px-5 py-2.5">来源构成</th>
@@ -553,7 +547,6 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       {canSeeAll && group.groupTotal && (
                         <tr className="bg-green-50/30">
                           <td className="px-4 py-2.5 text-sm font-semibold text-gray-900">全部组员合计</td>
-                          <td className="px-3 py-2.5 text-xs text-gray-400">—</td>
                           <td className="px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-gray-800">{group.groupTotal.total.count || '—'}</td>
                           <td className="px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-gray-800">{fmtVol(group.groupTotal.total.volume)}</td>
                           <td className="px-5 py-2.5">
@@ -566,7 +559,6 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       {group.members.map(member => (
                         <tr key={member.userId} className="hover:bg-gray-50/70">
                           <td className="px-4 py-2.5 text-sm font-medium text-gray-900">{member.username}</td>
-                          <td className="px-3 py-2.5 text-xs text-gray-500">{member.memberType === 'game' ? '游戏' : '应用'}</td>
                           <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-700">{member.total.count || '—'}</td>
                           <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-700">{fmtVol(member.total.volume)}</td>
                           <td className="px-5 py-2.5">
@@ -1161,7 +1153,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       <ReportCard title="全部成员合计" total={report.groupTotal.total} bySource={report.groupTotal.bySource} isTotal />
                     )}
                     {report.members.map(m => (
-                      <ReportCard key={m.userId} title={m.username} memberType={m.memberType} total={m.total} bySource={m.bySource} />
+                      <ReportCard key={m.userId} title={m.username} total={m.total} bySource={m.bySource} />
                     ))}
                   </div>
 

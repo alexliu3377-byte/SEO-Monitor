@@ -30,7 +30,7 @@ function getDateRange(period: string): { startDate: string; endDate: string } {
 }
 
 interface RawRow { user_id: string; keyword: string; source: string; search_volume: number; claimed_date: string; operation_type: string | null; final_keyword: string | null; page_url: string | null }
-interface RawMember { user_id: string; username: string | null; member_type: string | null }
+interface RawMember { user_id: string; username: string | null }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = await createClient()
@@ -53,13 +53,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // Get group members (username stored in task_group_members directly)
   const { data: membersRaw } = await service
     .from('task_group_members')
-    .select('user_id, username, member_type')
+    .select('user_id, username')
     .eq('group_id', groupId)
 
-  const members: { userId: string; username: string; memberType: string }[] = (membersRaw || []).map((m: RawMember) => ({
+  const members: { userId: string; username: string }[] = (membersRaw || []).map((m: RawMember) => ({
     userId: m.user_id,
     username: m.username || '',
-    memberType: m.member_type || 'app',
   }))
 
   if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
@@ -93,13 +92,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   for (const member of members) member.username = usernameOf.get(member.userId)!
   for (const userId of allUserIds) {
     if (!members.some(m => m.userId === userId)) {
-      members.push({ userId, username: usernameOf.get(userId)!, memberType: 'app' })
+      members.push({ userId, username: usernameOf.get(userId)! })
     }
   }
 
   // Build per-member aggregation
   const memberMap = new Map<string, {
-    userId: string; username: string; memberType: string
+    userId: string; username: string
     sourceMap: Map<string, { count: number; volume: number }>
     dateMap: Map<string, { count: number; volume: number }>
     total: { count: number; volume: number }
@@ -108,7 +107,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   for (const m of members) {
     if (!canSeeAll && m.userId !== user.id) continue
     memberMap.set(m.userId, {
-      userId: m.userId, username: m.username, memberType: m.memberType,
+      userId: m.userId, username: m.username,
       sourceMap: new Map(), dateMap: new Map(),
       total: { count: 0, volume: 0 },
     })
@@ -145,7 +144,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const memberResults = Array.from(memberMap.values()).map(m => ({
     userId: m.userId,
     username: m.username,
-    memberType: m.memberType,
     total: m.total,
     bySource: sortSources(m.sourceMap),
     byDate: Array.from(m.dateMap.entries())

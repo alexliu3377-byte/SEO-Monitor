@@ -113,7 +113,7 @@ function cleanTitleClient(title: string, suffixes: string[]): string {
 }
 
 export default function CompetitorDailyPage() {
-  const { role, accessibleSiteIds } = useUser()
+  const { role } = useUser()
   const [rows, setRows] = useState<CompetitorRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -194,7 +194,11 @@ export default function CompetitorDailyPage() {
       interface KwStatRow { site_id: string; stat_date: string; app_count: number; game_count: number }
 
       const [sitesApiRes, { data: statsRaw }, { data: groupsRaw }] = await Promise.all([
-        fetch('/api/sites').then(r => r.json() as Promise<{ sites: SiteRow[] }>),
+        fetch('/api/competitor-daily/sites').then(async r => {
+          const body = await r.json() as { sites?: SiteRow[]; error?: string }
+          if (!r.ok) throw new Error(body.error || '站点读取失败')
+          return { sites: body.sites ?? [] }
+        }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (supabase.from('competitor_kw_stats') as any)
           .select('site_id, stat_date, app_count, game_count')
@@ -211,9 +215,8 @@ export default function CompetitorDailyPage() {
         }
       }
       const allSites = (sitesApiRes.sites || []) as SiteRow[]
-      const sites = accessibleSiteIds
-        ? allSites.filter(s => accessibleSiteIds.includes(s.id))
-        : allSites
+      // 接口已按竞品日收的专属规则完成过滤，前端不要再用通用站点权限重复过滤。
+      const sites = allSites
       const stats = (statsRaw || []) as KwStatRow[]
 
       const result: CompetitorRow[] = sites.map((site) => {

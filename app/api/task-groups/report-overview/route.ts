@@ -32,7 +32,7 @@ function getDateRange(period: string): { startDate: string; endDate: string } {
 }
 
 interface RawGroup { id: string; name: string; created_at: string; site_domains: string[] }
-interface RawMember { group_id: string; user_id: string; username: string | null; member_type: string | null }
+interface RawMember { group_id: string; user_id: string; username: string | null }
 interface RawClaim { group_id: string; user_id: string; source: string; search_volume: number }
 interface SourceTotal { count: number; volume: number }
 
@@ -75,7 +75,7 @@ export async function GET(req: Request) {
       .order('id', { ascending: true })
       .range(from, to)),
     fetchAllRows<RawMember>((from, to) => service.from('task_group_members')
-      .select('group_id, user_id, username, member_type')
+      .select('group_id, user_id, username')
       .order('group_id', { ascending: true })
       .order('user_id', { ascending: true })
       .range(from, to)),
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
     const currentMembers = members.filter(member => member.group_id === group.id && (canSeeAll || member.user_id === user.id))
     const historicalMembers = claims
       .filter(claim => claim.group_id === group.id && !currentMembers.some(member => member.user_id === claim.user_id))
-      .map(claim => ({ group_id: group.id, user_id: claim.user_id, username: null, member_type: 'app' }))
+      .map(claim => ({ group_id: group.id, user_id: claim.user_id, username: null }))
       .filter((member, index, rows) => rows.findIndex(row => row.user_id === member.user_id) === index)
     const groupMembers = [...currentMembers, ...historicalMembers]
       .map(member => {
@@ -135,7 +135,6 @@ export async function GET(req: Request) {
         return {
           userId: member.user_id,
           username: displayNames.get(member.user_id) || member.username || member.user_id.slice(0, 8),
-          memberType: member.member_type || 'app',
           total: entry?.total ?? { count: 0, volume: 0 },
           bySource: entry ? sortSources(entry.sources) : [],
         }
