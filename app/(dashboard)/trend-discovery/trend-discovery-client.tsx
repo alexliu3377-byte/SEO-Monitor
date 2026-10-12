@@ -166,7 +166,15 @@ function NodeStatus({ node }: { node: CollectorNode }) {
   )
 }
 
-export default function TrendDiscoveryClient({ initialRole }: { initialRole: Role }) {
+export default function TrendDiscoveryClient({
+  initialRole,
+  embedded = false,
+  includeContent = true,
+}: {
+  initialRole: Role
+  embedded?: boolean
+  includeContent?: boolean
+}) {
   const [workspaceTab, setWorkspaceTab] = useState<'monthly' | 'content' | 'trends' | 'keywords'>('monthly')
   const [reviewTab, setReviewTab] = useState<'pending' | 'tracked'>('pending')
   const [stage, setStage] = useState<TrendStage | ''>('')
@@ -353,8 +361,8 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
   }
 
   return (
-    <div className="min-h-full bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
+    <div className={embedded ? '' : 'min-h-full bg-slate-50'}>
+      {!embedded && <header className="border-b border-slate-200 bg-white px-5 py-6 sm:px-8">
         <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-5">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950">趋势发现</h1>
@@ -367,12 +375,12 @@ export default function TrendDiscoveryClient({ initialRole }: { initialRole: Rol
             </button>
           )}
         </div>
-      </header>
+      </header>}
 
-      <main className="mx-auto max-w-[1500px] px-4 py-6 sm:px-8">
+      <main className={embedded ? '' : 'mx-auto max-w-[1500px] px-4 py-6 sm:px-8'}>
         <nav aria-label="趋势发现工作区" className="mb-5 flex gap-6 overflow-x-auto border-b border-slate-200">
           <button type="button" aria-pressed={workspaceTab === 'monthly'} onClick={() => setWorkspaceTab('monthly')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'monthly' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>月度趋势</button>
-          <button type="button" aria-pressed={workspaceTab === 'content'} onClick={() => setWorkspaceTab('content')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'content' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>内容动态</button>
+          {includeContent && <button type="button" aria-pressed={workspaceTab === 'content'} onClick={() => setWorkspaceTab('content')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'content' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>内容动态</button>}
           <button type="button" aria-pressed={workspaceTab === 'trends'} onClick={() => setWorkspaceTab('trends')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'trends' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>趋势词</button>
           <button type="button" aria-pressed={workspaceTab === 'keywords'} onClick={() => setWorkspaceTab('keywords')} className={`relative h-11 flex-none whitespace-nowrap px-1 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${workspaceTab === 'keywords' ? 'text-emerald-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-emerald-600' : 'text-slate-500 hover:text-slate-800'}`}>新词发现</button>
         </nav>

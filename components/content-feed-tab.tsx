@@ -27,7 +27,7 @@ type ContentFeedResponse = {
 
 const PAGE_SIZE = 20
 
-const SOURCE_OPTIONS = [
+const ALL_SOURCE_OPTIONS = [
   { value: '52pojie,xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili,ccplay', label: '全部' },
   { value: '52pojie', label: '吾爱破解' },
   { value: 'xiaohongshu', label: '小红书' },
@@ -36,6 +36,17 @@ const SOURCE_OPTIONS = [
   { value: 'bilibili', label: 'B站' },
   { value: 'ccplay', label: '虫虫助手' },
 ]
+
+const GAME_SOURCE_OPTIONS = [
+  { value: 'xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili,ccplay', label: '全部' },
+  { value: 'xiaohongshu', label: '小红书' },
+  { value: 'xiaoheihe_guide', label: '小黑盒攻略' },
+  { value: 'xiaoheihe_ns', label: '小黑盒 NS' },
+  { value: 'bilibili', label: 'B站' },
+  { value: 'ccplay', label: '虫虫助手' },
+]
+
+const APP_SOURCE_OPTIONS = [{ value: '52pojie', label: '吾爱破解' }]
 
 const CATEGORY_OPTIONS = [
   { value: '', label: '全部类型' },
@@ -48,6 +59,8 @@ const CATEGORY_OPTIONS = [
   { value: 'ns_game', label: 'NS 游戏' },
   { value: 'video', label: '视频' },
 ]
+
+const GAME_CATEGORY_OPTIONS = CATEGORY_OPTIONS.filter(option => option.value !== 'software')
 
 const SOURCE_META: Record<string, { label: string; className: string }> = {
   '52pojie': { label: '吾爱破解', className: 'border-violet-200 bg-violet-50 text-violet-700' },
@@ -95,9 +108,12 @@ function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? { label: category || '其他', className: 'bg-slate-100 text-slate-600' }
 }
 
-export default function ContentFeedTab() {
-  const [sources, setSources] = useState(SOURCE_OPTIONS[0].value)
-  const [category, setCategory] = useState('')
+export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game' | 'app' }) {
+  const sourceOptions = kind === 'game' ? GAME_SOURCE_OPTIONS : kind === 'app' ? APP_SOURCE_OPTIONS : ALL_SOURCE_OPTIONS
+  const categoryOptions = kind === 'game' ? GAME_CATEGORY_OPTIONS : CATEGORY_OPTIONS
+  const defaultSources = sourceOptions[0].value
+  const [sources, setSources] = useState(defaultSources)
+  const [category, setCategory] = useState(kind === 'app' ? 'software' : '')
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<ContentFeedItem[]>([])
   const [totalPages, setTotalPages] = useState(1)
@@ -105,6 +121,12 @@ export default function ContentFeedTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
+
+  useEffect(() => {
+    setSources(defaultSources)
+    setCategory(kind === 'app' ? 'software' : '')
+    setPage(1)
+  }, [defaultSources, kind])
 
   const loadItems = useCallback(async (signal?: AbortSignal) => {
     let needsPageReload = false
@@ -156,12 +178,12 @@ export default function ContentFeedTab() {
     <section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">内容趋势</h2>
-          <p className="mt-1 text-xs text-slate-400">按来源查看软件、资源分享、攻略和视频更新；页面只读取已缓存资料。</p>
+          <h2 className="text-sm font-semibold text-slate-900">{kind === 'game' ? '游戏资讯动态' : kind === 'app' ? '应用内容动态' : '内容动态'}</h2>
+          <p className="mt-1 text-xs text-slate-400">每次只读取当前筛选的 20 条缓存资料，翻页时再读取下一页。</p>
         </div>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {kind !== 'app' && <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="内容来源">
-            {SOURCE_OPTIONS.map(option => (
+            {sourceOptions.map(option => (
               <button
                 key={option.value}
                 type="button"
@@ -184,10 +206,10 @@ export default function ContentFeedTab() {
               }}
               className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
             >
-              {CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              {categoryOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-        </div>
+        </div>}
       </div>
 
       <div className="overflow-x-auto">

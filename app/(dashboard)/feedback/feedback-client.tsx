@@ -63,7 +63,7 @@ const TYPE: Record<FeedbackType, { label: string; className: string }> = {
   other: { label: '其他', className: 'bg-slate-100 text-slate-600' },
 }
 const PAGE: Record<FeedbackPage, string> = {
-  home: '首页快报', charts: '近期榜单', 'task-groups': '任务工作台', 'group-report': '成效报告',
+  home: '首页快报', charts: '内容发现', 'task-groups': '任务工作台', 'group-report': '成效报告',
   research: '研究中心', 'hot-keywords': '热词雷达', 'site-intel': '站点情报', 'weight-monitor': '权重监控',
   'index-monitor': '收录监控', 'competitor-daily': '竞品日收', 'index-pages': '收录页面', sites: '网站管理',
   'crawl-log': '抓取日志', 'development-log': '开发日志', settings: '账户设置', feedback: '反馈优化',
