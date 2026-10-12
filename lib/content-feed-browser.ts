@@ -34,6 +34,11 @@ function safeSourceUrl(source: BrowserContentFeedSource, value: unknown): string
     const hostname = url.hostname.toLowerCase().replace(/\.$/, '')
     const allowed = SOURCE_RULES[source].hosts.some(host => hostname === host || hostname.endsWith(`.${host}`))
     if (url.protocol !== 'https:' || url.username || url.password || url.port || !allowed) return null
+    // Xiaoheihe currently serves shared posts from the www host. Links copied
+    // from profile cards sometimes omit it and then open as a 404/failure.
+    if (source.startsWith('xiaoheihe_') && hostname === 'xiaoheihe.cn') {
+      url.hostname = 'www.xiaoheihe.cn'
+    }
     url.hash = ''
     for (const key of [...url.searchParams.keys()]) {
       if (/^(?:spm|from|source|share|share_source|share_medium|share_plat|share_session_id|timestamp|unique_k)$/i.test(key)) {

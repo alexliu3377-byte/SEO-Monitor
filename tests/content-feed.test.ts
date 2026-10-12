@@ -108,6 +108,17 @@ test('browser content accepts only the configured official source host', () => {
   }), null)
 })
 
+test('browser content normalizes Xiaoheihe share links to the working www host', () => {
+  const item = parseBrowserContentFeedItem('xiaoheihe_guide', {
+    sourceId: '193512794',
+    title: '本周新游玩什么',
+    url: 'https://xiaoheihe.cn/app/bbs/link/193512794',
+    author: '小黑盒攻略',
+  })
+  assert.equal(item?.source, 'xiaoheihe_guide')
+  assert.equal(item?.url, 'https://www.xiaoheihe.cn/app/bbs/link/193512794')
+})
+
 test('database upsert rows deliberately preserve first_seen_at', () => {
   const rows = contentFeedDatabaseRows([parseCcplayNews(`<div class="info_item"><a href="/news/1.html">
     <div class="info_msg"><p>标题</p><div class="info_opt"><span>2026-10-09</span><span>作者</span></div></div>
