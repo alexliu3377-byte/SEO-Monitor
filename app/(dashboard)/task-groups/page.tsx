@@ -123,6 +123,15 @@ function parseBulkTaskRows(value: string): BulkTaskRow[] {
           if (separated.length >= 2) {
             keyword = separated[0]
             rawUrl = separated[1]
+          } else {
+            // Pasting from chat or plain text often turns the two Excel columns
+            // into spaces. Treat a trailing numeric token as the page ID and
+            // reuse the latest complete URL as its directory template.
+            const shorthandMatch = line.match(/^(.*?)\s+(\d+)\s*$/)
+            if (shorthandMatch) {
+              keyword = shorthandMatch[1].trim()
+              rawUrl = shorthandMatch[2]
+            }
           }
         }
       }
@@ -3666,7 +3675,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
               <div>
                 <h3 id="bulk-add-title" className="font-semibold text-gray-900">批量添加今日任务</h3>
-                <p className="mt-1 text-xs text-gray-500">从 Excel 复制“关键词、URL”两列；完整 URL 后续可只填页面数字 ID。</p>
+                <p className="mt-1 text-xs text-gray-500">复制“关键词、URL”两列；空格或 Tab 都可分隔，完整 URL 后续可只填数字 ID。</p>
               </div>
               <button type="button" aria-label="关闭批量添加" disabled={addingBulk} onClick={() => setShowBulkAdd(false)} className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-40">×</button>
             </div>
