@@ -126,7 +126,7 @@ export default function SystemPortalPage() {
 }
 
 export function ContentDashboardPage() {
-  const { role, accessibleSiteIds } = useUser()
+  const { role } = useUser()
   const [sites, setSites] = useState<Site[]>([])
   const [indexSnaps, setIndexSnaps] = useState<IndexSnap[]>([])
   const [weightRecs, setWeightRecs] = useState<WeightRec[]>([])
@@ -183,12 +183,16 @@ export function ContentDashboardPage() {
       const rangeFrom = chartFrom < d8 ? chartFrom : d8
 
       const [
-        { data: sitesRaw },
+        sitesApiRes,
         { data: snapsRaw },
         { data: wrecsRaw },
         { data: kwStatsRaw },
       ] = await Promise.all([
-        db.from('sites').select('id, domain, name, category'),
+        fetch('/api/competitor-daily/sites').then(async response => {
+          const body = await response.json() as { sites?: Site[]; error?: string }
+          if (!response.ok) throw new Error(body.error || '站点读取失败')
+          return body
+        }),
         db.from('index_snapshots')
           .select('site_id, snapshot_date, index_count')
           .gte('snapshot_date', rangeFrom)
@@ -204,10 +208,9 @@ export function ContentDashboardPage() {
           .lte('stat_date', yesterday),
       ])
 
-      const rawList = (sitesRaw || []) as Site[]
-      const siteList = accessibleSiteIds
-        ? rawList.filter(s => accessibleSiteIds.includes(s.id))
-        : rawList
+      // 首页与竞品日收使用同一套可见范围：普通站点全员可见，
+      // 重点／侧重站点只对获授权的普通组员开放；管理员与超管查看全部。
+      const siteList = sitesApiRes.sites ?? []
       setSites(siteList)
       setIndexSnaps((snapsRaw || []) as IndexSnap[])
       setWeightRecs((wrecsRaw || []) as WeightRec[])

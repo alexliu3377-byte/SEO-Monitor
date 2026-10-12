@@ -13,7 +13,7 @@ export async function GET() {
     const service = createServiceClient()
     let query = service
       .from('sites')
-      .select('id, domain, name, focus_level, list_url, has_rank_data, has_rank_title, friend_links, is_enabled')
+      .select('id, domain, name, category, focus_level, list_url, has_rank_data, has_rank_title, friend_links, is_enabled')
       .order('created_at', { ascending: false })
 
     if (profile.role === 'normal') {
