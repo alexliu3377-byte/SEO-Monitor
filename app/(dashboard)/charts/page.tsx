@@ -59,17 +59,26 @@ function SectionHeader({ title, color, updatedAt }: { title: string; color: stri
   )
 }
 
-function Card({ title, subtitle, icon, list, footer, accent }: {
+function Card({ title, subtitle, icon, list, footer, accent, sourceUrl, sourceLabel }: {
   title: string; subtitle?: string; icon: string
   list: React.ReactNode; footer?: React.ReactNode; accent?: string
+  sourceUrl?: string; sourceLabel?: string
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
       <div className={`px-4 py-3 border-b border-gray-100 ${accent || 'bg-gray-50'}`}>
         <div className="flex items-center gap-2">
           <span className="text-sm">{icon}</span>
-          <div>
-            <p className="text-sm font-semibold text-gray-900">{title}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <p className="truncate text-sm font-semibold text-gray-900">{title}</p>
+              {sourceUrl && (
+                <ExternalSourceLink
+                  href={sourceUrl}
+                  label={sourceLabel || `打开 ${title} 来源页面`}
+                />
+              )}
+            </div>
             {subtitle && <p className="text-[10px] text-gray-400">{subtitle}</p>}
           </div>
         </div>
@@ -315,6 +324,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
           {/* 今日游戏 */}
           <Card
+            sourceUrl="https://www.taptap.cn/upcoming"
+            sourceLabel="打开 TapTap 今日游戏来源页面"
             title={`今日游戏${todayGames.length ? ` · ${todayGames.length} 款` : ''}`}
             subtitle="首发 / 新游预约 / 测试" icon="🎮" accent="bg-teal-50"
             list={todayLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p> : (
@@ -340,6 +351,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
           {/* 即将上线 */}
           <Card
+            sourceUrl="https://www.taptap.cn/upcoming"
+            sourceLabel="打开 TapTap 即将上线来源页面"
             title={`即将上线${upcomingGames.length ? ` · ${upcomingGames.length} 款` : ''}`}
             subtitle="未来 30 天预约 / 首发" icon="📅" accent="bg-teal-50"
             list={todayLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
@@ -352,6 +365,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
           {/* 热门榜 */}
           <Card
+            sourceUrl="https://www.taptap.cn/top/download"
+            sourceLabel="打开 TapTap 热门榜来源页面"
             title="热门榜 TOP 10" subtitle="本系统每 6 小时更新" icon="🔥" accent="bg-teal-50"
             list={hotLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
               : hotItems.length === 0 ? <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
@@ -376,6 +391,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
             const preview = hasBaoliao ? PREVIEW - 1 : PREVIEW
             return (
               <Card
+                sourceUrl="https://www.3839.com/timeline.html"
+                sourceLabel="打开好游快爆即将上线来源页面"
                 title={`即将上线${allUpcoming.length ? ` · ${allUpcoming.length} 款` : ''}`}
                 subtitle="手机游戏 / 免费" icon="🚀" accent="bg-green-50"
                 list={haoyouLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p> : (
@@ -403,6 +420,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
           {/* 即将更新 */}
           <Card
+            sourceUrl="https://www.3839.com/timeline.html"
+            sourceLabel="打开好游快爆即将更新来源页面"
             title={`即将更新${haoyouUpdates.length ? ` · ${haoyouUpdates.length} 款` : ''}`}
             subtitle="手机游戏 / 免费" icon="🔄" accent="bg-green-50"
             list={haoyouLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
@@ -415,6 +434,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
           {/* 热门榜 */}
           <Card
+            sourceUrl="https://www.3839.com/top/hot.html"
+            sourceLabel="打开好游快爆热门榜来源页面"
             title="免费热门榜 TOP 20" subtitle="已排除付费与买断制游戏 · 每 6 小时更新" icon="🔥" accent="bg-green-50"
             list={haoyouLoading ? <p className="text-xs text-gray-400 py-4 text-center">加载中…</p>
               : haoyouHotItems.length === 0 ? <p className="text-xs text-gray-400 py-4 text-center">暂无数据</p>
@@ -487,7 +508,14 @@ function SearchTrendsTab() {
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
         <div className="border-b border-teal-100 bg-teal-50 px-5 py-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-gray-900">TapTap 热门搜索</h2>
+            <div className="flex min-w-0 items-center gap-1">
+              <h2 className="truncate text-sm font-semibold text-gray-900">TapTap 热门搜索</h2>
+              <ExternalSourceLink
+                href="https://www.taptap.cn/search/1"
+                label="打开 TapTap 热门搜索来源页面"
+                randomTapTapSearch
+              />
+            </div>
             <span className="whitespace-nowrap text-[11px] text-teal-700">每日读取一次</span>
           </div>
         </div>
@@ -497,7 +525,13 @@ function SearchTrendsTab() {
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
         <div className="border-b border-green-100 bg-green-50 px-5 py-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-gray-900">好游快爆热门搜索</h2>
+            <div className="flex min-w-0 items-center gap-1">
+              <h2 className="truncate text-sm font-semibold text-gray-900">好游快爆热门搜索</h2>
+              <ExternalSourceLink
+                href="https://www.3839.com/top/hot.html"
+                label="打开好游快爆热门搜索来源页面"
+              />
+            </div>
             <span className="whitespace-nowrap text-[11px] text-green-700">每 6 小时更新</span>
           </div>
         </div>
@@ -579,8 +613,14 @@ function Recent4399Tab() {
   return (
     <section className="overflow-hidden rounded-xl border border-gray-200 bg-white" aria-busy={loading}>
       <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900">4399近期收录</h2>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <h2 className="truncate text-sm font-semibold text-gray-900">4399近期收录</h2>
+            <ExternalSourceLink
+              href="https://a.4399.cn/game-new.html"
+              label="打开 4399 近期收录来源页面"
+            />
+          </div>
           <p className="mt-1 text-xs text-gray-500">按 4399 页面近期出现时间整理，仅代表近期收录，不代表游戏刚发布。</p>
         </div>
         <select
@@ -678,11 +718,11 @@ function Recent4399Tab() {
 
 type RankingTab = 'search' | 'taptap' | 'haoyou' | '4399'
 
-const RANKING_TABS: Array<{ id: RankingTab; label: string; sourceUrl?: string; randomTapTapSearch?: boolean }> = [
+const RANKING_TABS: Array<{ id: RankingTab; label: string }> = [
   { id: 'search', label: '搜索趋势' },
-  { id: 'taptap', label: 'TapTap', sourceUrl: 'https://www.taptap.cn/search/1', randomTapTapSearch: true },
-  { id: 'haoyou', label: '好游快爆', sourceUrl: 'https://www.3839.com/timeline.html' },
-  { id: '4399', label: '4399', sourceUrl: 'https://a.4399.cn/game-new.html' },
+  { id: 'taptap', label: 'TapTap' },
+  { id: 'haoyou', label: '好游快爆' },
+  { id: '4399', label: '4399' },
 ]
 
 export default function ChartsPage() {
@@ -734,17 +774,10 @@ export default function ChartsPage() {
               tabIndex={activeTab === tab.id ? 0 : -1}
               onClick={() => selectTab(tab.id)}
               onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
-              className={`py-2.5 pl-4 text-sm font-medium transition-colors hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500 ${tab.sourceUrl ? 'pr-1' : 'pr-4'}`}
+              className="px-4 py-2.5 text-sm font-medium transition-colors hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500"
             >
               {tab.label}
             </button>
-            {tab.sourceUrl && (
-              <ExternalSourceLink
-                href={tab.sourceUrl}
-                label={`打开 ${tab.label} 来源页面`}
-                randomTapTapSearch={tab.randomTapTapSearch}
-              />
-            )}
           </div>
         ))}
       </div>
