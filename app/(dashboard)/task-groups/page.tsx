@@ -102,6 +102,7 @@ function normalizeUrl(raw: string): string {
 
 function parseBulkTaskRows(value: string): BulkTaskRow[] {
   const seen = new Set<string>()
+  let urlTemplate: { prefix: string; suffix: string } | null = null
   return value
     .split(/\r?\n/)
     .map(line => line.trim())
@@ -126,7 +127,13 @@ function parseBulkTaskRows(value: string): BulkTaskRow[] {
         }
       }
 
-      const url = normalizeUrl(rawUrl)
+      let url = normalizeUrl(rawUrl)
+      if (/^\d+$/.test(rawUrl) && urlTemplate) {
+        url = `${urlTemplate.prefix}${rawUrl}${urlTemplate.suffix}`
+      } else if (url.includes('.')) {
+        const templateMatch = url.match(/^(.*\/)(\d+)([^/]*)$/)
+        if (templateMatch) urlTemplate = { prefix: templateMatch[1], suffix: templateMatch[3] }
+      }
       let error: string | null = null
       if (!keyword) error = '缺少关键词'
       else if (keyword.length > 200) error = '关键词超过 200 字'
@@ -1707,7 +1714,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       setBulkAddMessage('')
       setShowBulkAdd(false)
     } else {
-      setBulkAddText(failed.map(item => item.row.line).join('\n'))
+      setBulkAddText(failed.map(item => `${item.row.keyword}\t${item.row.url}`).join('\n'))
       setBulkAddMessage(`已添加 ${added.length} 条；${failed.length} 条未添加。第一条原因：${failed[0].message}`)
     }
     setAddingBulk(false)
@@ -3659,7 +3666,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
               <div>
                 <h3 id="bulk-add-title" className="font-semibold text-gray-900">批量添加今日任务</h3>
-                <p className="mt-1 text-xs text-gray-500">从 Excel 复制“关键词、URL”两列，一行会生成一条待提交任务。</p>
+                <p className="mt-1 text-xs text-gray-500">从 Excel 复制“关键词、URL”两列；完整 URL 后续可只填页面数字 ID。</p>
               </div>
               <button type="button" aria-label="关闭批量添加" disabled={addingBulk} onClick={() => setShowBulkAdd(false)} className="inline-flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-40">×</button>
             </div>
@@ -3681,7 +3688,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 rows={10}
                 autoFocus
                 spellCheck={false}
-                placeholder={'关键词\thttps://example.com/page\n第二个关键词\thttps://example.com/page-2'}
+                placeholder={'刀剑乱舞拼图\thttps://www.f71.com/game/453744.html\n师父手游\t453743\n丛林战役手游\t453742'}
                 className="w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm leading-6 text-gray-700 outline-none focus:border-green-400 focus:bg-white focus:ring-2 focus:ring-green-100"
               />
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
