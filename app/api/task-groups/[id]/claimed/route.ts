@@ -219,6 +219,11 @@ export async function POST(
     return NextResponse.json({ error: '任务日期无效，不能选择未来日期' }, { status: 400 })
   }
 
+  // “批量添加” is an entry method, not a separate recommendation source. Older
+  // production schemas validate `source` against the established source values, so
+  // persist these rows as manual additions while keeping the batch workflow in the UI.
+  const storedSource = source === '批量添加' ? '手动添加' : source
+
   // Check if ANY member of the group already claimed this keyword today (not
   // just the caller) — 2026-07-29: previously only checked the caller's own
   // claims, so two different members could unknowingly both claim and work on
@@ -256,7 +261,7 @@ export async function POST(
   // 分发词批次每日名额上限（2026-08-20）——整组当天从同一批分发词里总共只能
   // 认领 daily_limit 个，先到先得，跟上面"同词当天已被认领"是同一种"先查后插"
   // 模式，不额外加锁。只对 source='分发词' 生效，其它认领来源不受影响。
-  if (source === '分发词') {
+  if (storedSource === '分发词') {
     const { data: dw } = await service
       .from('distributed_keywords')
       .select('batch_id, daily_limit')
@@ -284,7 +289,7 @@ export async function POST(
       user_id: targetUserId,
       keyword,
       keyword_type: null,
-      source,
+      source: storedSource,
       search_volume: search_volume || 0,
       claimed_date: claimedDate,
       status: 'pending',
@@ -299,7 +304,18 @@ export async function POST(
   if (error?.code === '23505') {
     return NextResponse.json({ error: '这个词今天已经被组内其他成员认领了' }, { status: 409 })
   }
-  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  if (error) {
+    console.error('[claimed POST] insert failed', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      groupId,
+      targetUserId,
+      source: storedSource,
+    })
+    return NextResponse.json({ error: '添加任务失败，请稍后重试' }, { status: 500 })
+  }
   return NextResponse.json({ keyword: data })
 }
 

@@ -2299,7 +2299,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   {canManage && <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">组员</th>}
                   {!isRankdown && <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">提交日期</th>}
                   <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '原排名' : '竞品排名'}</th>
-                  <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '现排名' : '涨幅'}</th>
+                  <th className="w-24 px-2 py-2 text-center font-medium whitespace-nowrap">{isRankdown ? '现排名' : '涨排日期'}</th>
                   <th className="w-16 px-2 py-2 text-center font-medium whitespace-nowrap">搜索量</th>
                   {isRankdown && <th className="w-20 px-2 py-2 text-center font-medium whitespace-nowrap">同页词</th>}
                   <th className="w-28 px-2 py-2 text-center font-medium whitespace-nowrap">操作</th>
@@ -2334,8 +2334,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         <td className={`px-2 py-2 text-center text-xs font-medium ${isRankdown ? 'text-red-500' : 'text-green-600'}`}>
                           {isRankdown
                             ? row.rank_position ?? <span className="font-medium text-red-500">脱排</span>
-                            : row.rank_position != null && row.prev_rank != null
-                              ? `▲${Math.abs(row.rank_position - row.prev_rank)}`
+                            : row.stat_date
+                              ? row.stat_date.replaceAll('-', '/')
                               : '—'}
                         </td>
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{row.volume > 0 ? fmtVol(row.volume) : '—'}</td>
@@ -3571,8 +3571,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         </button>
                         <button onClick={() => { setBulkAddMessage(''); setShowBulkAdd(true) }} disabled={!canOperateViewedMember}
                           title={taskActionUnavailableMessage || '批量粘贴关键词和 URL'}
-                          className="w-full py-1.5 text-xs font-medium text-green-600 border border-dashed border-green-200 bg-green-50/50 rounded-lg hover:border-green-400 hover:bg-green-50 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50">
-                          <span className="text-sm leading-none">＋</span> 批量添加
+                          className="w-full py-1.5 text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg hover:border-green-300 hover:text-green-500 transition-colors flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:text-gray-400">
+                          <span className="text-base leading-none">+</span> 批量添加
                         </button>
                       </div>
                     )}

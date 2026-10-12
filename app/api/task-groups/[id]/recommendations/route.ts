@@ -284,25 +284,34 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .filter(Boolean)))
     const signals = dedupeSignals(await loadSignalsForKeywords(service, competitorSiteIds, 'rankup', candidateKeywords))
     const signalKeywords = signals.map(signal => signal.keyword)
-    const ownRanked = new Set<string>()
+    const ownLatestRankDate = new Map<string, string>()
     for (const keywordChunk of chunks(signalKeywords, 100)) {
-      const rows = await fetchAllRows<{ id: string; keyword: string }>((from, to) => service
+      const rows = await fetchAllRows<{ id: string; keyword: string; stat_date: string }>((from, to) => service
         .from('site_keyword_ranks')
-        .select('id, keyword')
+        .select('id, keyword, stat_date')
         .in('site_id', ownSiteIds)
         .in('keyword', keywordChunk)
         .eq('platform', 'mobile')
         .not('rank_position', 'is', null)
         .order('id', { ascending: true })
         .range(from, to))
-      for (const row of rows) ownRanked.add(row.keyword.toLowerCase())
+      for (const row of rows) {
+        const keyword = row.keyword.toLowerCase()
+        const existing = ownLatestRankDate.get(keyword)
+        if (!existing || row.stat_date > existing) ownLatestRankDate.set(keyword, row.stat_date)
+      }
     }
 
     for (const signal of signals) {
       const keyword = signal.keyword.toLowerCase()
-      if (ownRanked.has(keyword)) continue
       const claim = latestClaim.get(keyword)
       if (!claim || !targetUsers.includes(claim.user_id)) continue
+      const submittedDate = (claim.submitted_at || claim.claimed_date || claim.created_at).slice(0, 10)
+      // Recommend only when the competitor rose after this page was submitted and
+      // our own site still has not obtained a mobile ranking since that submission.
+      if (signal.stat_date < submittedDate) continue
+      const ownRankDate = ownLatestRankDate.get(keyword)
+      if (ownRankDate && ownRankDate >= submittedDate) continue
       if (dismissed.has(`${claim.user_id}\n${keyword}`)) continue
       const history = historyByUser.get(claim.user_id)
       if (!history) continue
@@ -314,7 +323,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         memberId: claim.user_id,
         memberName: memberMap.get(claim.user_id) || '',
         ownUrl: claim.page_url,
-        ownCreatedAt: claim.created_at,
+        ownCreatedAt: claim.submitted_at || claim.claimed_date || claim.created_at,
         sameUrlCount: 0,
         sameUrlKeywords: [],
         priority: priority.daysSinceEligible,
