@@ -738,7 +738,7 @@ function Recent4399Tab() {
 
 type DiscoverySection = 'monthly' | 'game' | 'app' | 'content'
 type GameView = 'search' | 'rankings'
-type RankingSource = 'taptap' | 'haoyou' | '4399'
+type RankingSource = 'taptap' | 'haoyou' | '4399' | 'ccplay'
 
 const SECTIONS: Array<{ id: DiscoverySection; label: string }> = [
   { id: 'monthly', label: '月度趋势' },
@@ -748,12 +748,13 @@ const SECTIONS: Array<{ id: DiscoverySection; label: string }> = [
 ]
 const GAME_VIEWS: Array<{ id: GameView; label: string }> = [
   { id: 'search', label: '搜索趋势' },
-  { id: 'rankings', label: '平台榜单' },
+  { id: 'rankings', label: '平台资讯' },
 ]
 const RANKING_SOURCES: Array<{ id: RankingSource; label: string }> = [
   { id: 'taptap', label: 'TapTap' },
   { id: 'haoyou', label: '好游快爆' },
   { id: '4399', label: '4399' },
+  { id: 'ccplay', label: '虫虫助手' },
 ]
 
 function oneOf<T extends string>(value: string | null, values: readonly T[], fallback: T): T {
@@ -804,7 +805,11 @@ export default function ChartsClient() {
               <div className="mb-4 flex flex-wrap gap-2" aria-label="榜单来源">
                 {RANKING_SOURCES.map(item => <button key={item.id} type="button" aria-pressed={rankingSource === item.id} onClick={() => navigate({ source: item.id })} className={`h-9 rounded-lg border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${rankingSource === item.id ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{item.label}</button>)}
               </div>
-              {rankingSource === '4399' ? <Recent4399Tab /> : <SourceRankingTab source={rankingSource} />}
+              {rankingSource === '4399'
+                ? <Recent4399Tab />
+                : rankingSource === 'ccplay'
+                  ? <ContentFeedTab key="ccplay-feed" kind="game" />
+                  : <SourceRankingTab source={rankingSource} />}
             </>
           )}
         </>

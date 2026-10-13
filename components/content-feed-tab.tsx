@@ -28,23 +28,14 @@ type ContentFeedResponse = {
 const PAGE_SIZE = 20
 
 const ALL_SOURCE_OPTIONS = [
-  { value: '52pojie,xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili,ccplay', label: '全部' },
-  { value: '52pojie', label: '吾爱破解' },
+  { value: 'xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili', label: '全部' },
   { value: 'xiaohongshu', label: '小红书' },
   { value: 'xiaoheihe_guide', label: '小黑盒攻略' },
   { value: 'xiaoheihe_ns', label: '小黑盒 NS' },
   { value: 'bilibili', label: 'B站' },
-  { value: 'ccplay', label: '虫虫助手' },
 ]
 
-const GAME_SOURCE_OPTIONS = [
-  { value: 'xiaohongshu,xiaoheihe_guide,xiaoheihe_ns,bilibili,ccplay', label: '全部' },
-  { value: 'xiaohongshu', label: '小红书' },
-  { value: 'xiaoheihe_guide', label: '小黑盒攻略' },
-  { value: 'xiaoheihe_ns', label: '小黑盒 NS' },
-  { value: 'bilibili', label: 'B站' },
-  { value: 'ccplay', label: '虫虫助手' },
-]
+const GAME_SOURCE_OPTIONS = [{ value: 'ccplay', label: '虫虫助手' }]
 
 const APP_SOURCE_OPTIONS = [{ value: '52pojie', label: '吾爱破解' }]
 
@@ -121,6 +112,8 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
+  const showCategory = kind === 'all'
+  const tableColumnCount = showCategory ? 6 : 5
 
   useEffect(() => {
     setSources(defaultSources)
@@ -181,7 +174,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
           <h2 className="text-sm font-semibold text-slate-900">{kind === 'game' ? '游戏资讯动态' : kind === 'app' ? '应用内容动态' : '内容动态'}</h2>
           <p className="mt-1 text-xs text-slate-400">每次只读取当前筛选的 20 条缓存资料，翻页时再读取下一页。</p>
         </div>
-        {kind !== 'app' && <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {kind === 'all' && <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="内容来源">
             {sourceOptions.map(option => (
               <button
@@ -213,13 +206,13 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] table-fixed">
+        <table className={`w-full table-fixed ${showCategory ? 'min-w-[900px]' : 'min-w-[820px]'}`}>
           <caption className="sr-only">公开内容动态列表</caption>
           <thead className="bg-slate-50/80">
             <tr className="text-left text-xs font-medium text-slate-500">
               <th className="w-32 px-4 py-2.5 sm:px-5">来源</th>
               <th className="px-3 py-2.5">标题</th>
-              <th className="w-24 px-3 py-2.5">类型</th>
+              {showCategory && <th className="w-24 px-3 py-2.5">类型</th>}
               <th className="w-32 px-3 py-2.5">作者</th>
               <th className="w-48 px-3 py-2.5">发布时间</th>
               <th className="w-24 px-4 py-2.5 text-right sm:px-5">操作</th>
@@ -229,7 +222,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
             {loading ? (
               Array.from({ length: 7 }).map((_, index) => (
                 <tr key={index} className="animate-pulse motion-reduce:animate-none">
-                  <td colSpan={6} className="px-5 py-3">
+                  <td colSpan={tableColumnCount} className="px-5 py-3">
                     {index === 0 && <span className="sr-only" role="status">正在读取内容动态</span>}
                     <div className="h-4 rounded bg-slate-100" />
                   </td>
@@ -237,7 +230,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
               ))
             ) : error ? (
               <tr>
-                <td colSpan={6} className="px-5 py-16 text-center">
+                <td colSpan={tableColumnCount} className="px-5 py-16 text-center">
                   <p role="alert" className="text-sm font-medium text-red-600">{error}</p>
                   <button
                     type="button"
@@ -250,7 +243,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-5 py-20 text-center">
+                <td colSpan={tableColumnCount} className="px-5 py-20 text-center">
                   <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8l6 6v8a2 2 0 0 1-2 2ZM13 4v6h6M7 14h8M7 17h5" /></svg>
                   </div>
@@ -278,9 +271,9 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
                       {item.title}
                     </a>
                   </td>
-                  <td className="px-3 py-2.5">
+                  {showCategory && <td className="px-3 py-2.5">
                     <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ${itemCategory.className}`}>{itemCategory.label}</span>
-                  </td>
+                  </td>}
                   <td className="truncate px-3 py-2.5 text-xs text-slate-600" title={item.author || undefined}>{item.author || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-slate-600" title={dateIsPublished ? '原文发布时间' : '系统首次发现时间'}>
                     {!dateIsPublished && <span className="mr-1 text-slate-400">发现</span>}{formatDate(item.publishedAt || item.firstSeenAt)}
