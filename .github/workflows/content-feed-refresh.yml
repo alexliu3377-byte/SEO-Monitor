@@ -1,10 +1,8 @@
 name: Content Feed Refresh
 
 on:
-  schedule:
-    # Public metadata changes throughout the day. Four bounded refreshes keep
-    # the dashboard current without contacting sources when a user opens it.
-    - cron: '17 */6 * * *'
+  # Scheduled public collection now runs directly in trend-collector-worker.
+  # Retain this entry point for manual recovery only, avoiding duplicate crawls.
   workflow_dispatch:
 
 concurrency:
