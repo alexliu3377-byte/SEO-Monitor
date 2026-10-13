@@ -416,6 +416,21 @@ CREATE TABLE IF NOT EXISTS hot_radar_cache (
   computed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Per-task-group ready-to-render radar result. Raw crawl data remains shared;
+-- the payload is filtered by task_groups.rank_domains/new_domains.
+CREATE TABLE IF NOT EXISTS group_hot_radar_cache (
+  group_id           UUID PRIMARY KEY REFERENCES task_groups(id) ON DELETE CASCADE,
+  payload            JSONB NOT NULL,
+  filter_hash        TEXT NOT NULL,
+  source_computed_at TIMESTAMPTZ NOT NULL,
+  computed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_group_hot_radar_cache_computed_at
+  ON group_hot_radar_cache(computed_at DESC);
+ALTER TABLE group_hot_radar_cache ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE group_hot_radar_cache FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE group_hot_radar_cache TO service_role;
+
 -- Public metadata cache used by the content dynamics feed. External sources
 -- are refreshed by GitHub Actions; dashboard requests only paginate this table.
 CREATE TABLE IF NOT EXISTS content_feed_items (

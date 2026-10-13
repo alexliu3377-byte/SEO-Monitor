@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase-server'
 import type { UserRole } from '@/lib/user-context'
 import { normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
 import { canAccessTaskGroup, canAdminUseGroupSites } from '@/lib/task-group-access'
+import { refreshGroupHotRadarCache } from '@/lib/group-hot-radar-cache'
 
 async function getCaller() {
   const supabase = await createClient()
@@ -88,6 +89,13 @@ export async function PUT(
     await service.from('task_groups').update(previousGroup).eq('id', id)
     if (restoreError) console.error('Task group member rollback failed', { groupId: id, code: restoreError.code })
     return NextResponse.json({ error: 'Unable to save group members; previous data was restored' }, { status: 500 })
+  }
+  try {
+    await refreshGroupHotRadarCache(service, id)
+  } catch (error) {
+    // Group settings are already saved. Keep the prior cache available and let
+    // /api/hot-radar rebuild this group on its next read.
+    console.error('Unable to refresh edited group hot radar cache', { groupId: id, error })
   }
   return NextResponse.json({ success: true })
 }

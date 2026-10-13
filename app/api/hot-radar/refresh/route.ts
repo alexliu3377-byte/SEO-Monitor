@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeHotRadarPayload } from '@/lib/hot-radar'
+import { refreshAllGroupHotRadarCaches } from '@/lib/group-hot-radar-cache'
 
 export const maxDuration = 90
 
@@ -45,10 +46,24 @@ export async function GET(req: Request) {
   const { error } = await supabase.from('hot_radar_cache').upsert({ id: 'latest', payload: finalPayload, computed_at: computedAt })
   if (error) return NextResponse.json({ success: false, error: 'Unable to refresh hot radar' }, { status: 500 })
 
+  let refreshedGroups = 0
+  let groupCacheWarning: string | null = null
+  try {
+    refreshedGroups = await refreshAllGroupHotRadarCaches(supabase, finalPayload, computedAt)
+  } catch (groupError) {
+    // Keep the previous per-group rows on failure. The read endpoint can
+    // rebuild a missing/stale group on demand, and a global refresh should not
+    // be marked failed after its data was already saved successfully.
+    console.error('Group hot radar cache refresh failed', groupError)
+    groupCacheWarning = 'Unable to refresh one or more group radar caches'
+  }
+
   return NextResponse.json({
     success: true,
     computed_at: computedAt,
     failedSections,
+    refreshedGroups,
+    groupCacheWarning,
     counts: {
       newWords: finalPayload.newWords.length,
       rankWords: finalPayload.rankWords.length,

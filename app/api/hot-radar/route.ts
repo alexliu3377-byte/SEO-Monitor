@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { computeHotRadarPayload } from '@/lib/hot-radar'
+import { groupHotRadarFilterHash, refreshGroupHotRadarCache } from '@/lib/group-hot-radar-cache'
+import { canAccessTaskGroup } from '@/lib/task-group-access'
+import type { UserRole } from '@/lib/user-context'
 
 export const maxDuration = 60
 
@@ -14,13 +17,60 @@ export const maxDuration = 60
 // （之前这里还留了 export const revalidate = 300，但 handler 里调用了
 // auth.getUser() 读 cookie，Next.js 因此把这条路由判定成动态路由，路由级
 // revalidate 对动态路由不生效，是个死配置，删掉——真正的缓存靠上面这张表。）
-export async function GET() {
+export async function GET(req: Request) {
   const authCheck = await createClient()
   const { data: { user } } = await authCheck.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = createServiceClient() as any
+
+  const groupId = new URL(req.url).searchParams.get('groupId')?.trim()
+  if (groupId) {
+    const [{ data: profile }, { data: group, error: groupError }, { data: globalCache, error: globalError }] = await Promise.all([
+      supabase.from('user_profiles').select('role').eq('id', user.id).single(),
+      supabase.from('task_groups').select('id, rank_domains, new_domains').eq('id', groupId).maybeSingle(),
+      supabase.from('hot_radar_cache').select('payload, computed_at').eq('id', 'latest').maybeSingle(),
+    ])
+    if (groupError || !group) return NextResponse.json({ error: 'Task group not found' }, { status: 404 })
+    const role = (profile?.role ?? 'normal') as UserRole
+    if (!await canAccessTaskGroup(supabase, user.id, role, groupId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (globalError || !globalCache?.payload) {
+      return NextResponse.json({ error: 'Hot radar cache is not ready' }, { status: 503 })
+    }
+
+    const expectedHash = groupHotRadarFilterHash({
+      rankDomains: group.rank_domains ?? [],
+      newDomains: group.new_domains ?? [],
+    })
+    const { data: groupCache, error: groupCacheError } = await supabase.from('group_hot_radar_cache')
+      .select('payload, filter_hash, source_computed_at')
+      .eq('group_id', groupId)
+      .maybeSingle()
+
+    if (
+      !groupCacheError
+      && groupCache?.payload
+      && groupCache.filter_hash === expectedHash
+      && groupCache.source_computed_at === globalCache.computed_at
+    ) {
+      return NextResponse.json(groupCache.payload)
+    }
+
+    // A just-created/edited group may not have a row yet. Build only this
+    // group's compact cache immediately instead of making the member wait for
+    // the next nightly refresh. If the migration is still rolling out, fall
+    // back to the global payload so the workspace remains usable.
+    try {
+      const refreshed = await refreshGroupHotRadarCache(supabase, groupId)
+      if (refreshed?.payload) return NextResponse.json(refreshed.payload)
+    } catch (error) {
+      console.error('Group hot radar cache refresh failed', { groupId, error })
+    }
+    return NextResponse.json(globalCache.payload)
+  }
 
   const { data: cached } = await supabase.from('hot_radar_cache').select('payload').eq('id', 'latest').maybeSingle()
   if (cached?.payload) return NextResponse.json(cached.payload)

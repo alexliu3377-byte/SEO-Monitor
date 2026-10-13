@@ -738,8 +738,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeClearing, setDistributeClearing] = useState(false)
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
-  const [radarLoaded, setRadarLoaded] = useState(false)
-  const [radarLoading, setRadarLoading] = useState(false)
+  const [radarLoadedGroupId, setRadarLoadedGroupId] = useState<string | null>(null)
+  const [radarLoadingGroupId, setRadarLoadingGroupId] = useState<string | null>(null)
+  const radarAbortRef = useRef<AbortController | null>(null)
+  const radarLoaded = radarLoadedGroupId === activeGroupId
+  const radarLoading = radarLoadingGroupId === activeGroupId
 
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -1348,18 +1351,28 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     } finally { setClaimedLoading(false) }
   }
 
-  async function loadRadar() {
-    if (radarLoaded || radarLoading) return
-    setRadarLoading(true)
+  async function loadRadar(groupId = activeGroupId) {
+    if (!groupId || radarLoadedGroupId === groupId || radarLoadingGroupId === groupId) return
+    radarAbortRef.current?.abort()
+    const controller = new AbortController()
+    radarAbortRef.current = controller
+    setRadarLoadingGroupId(groupId)
     try {
-      const res = await fetch('/api/hot-radar')
+      const res = await fetch(`/api/hot-radar?groupId=${encodeURIComponent(groupId)}`, { signal: controller.signal })
       if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
-      setRadarData(rd); setRadarLoaded(true)
+      if (controller.signal.aborted) return
+      setRadarData(rd); setRadarLoadedGroupId(groupId)
       setLoadError(current => current?.scope === 'radar' ? null : current)
     } catch (error) {
+      if (controller.signal.aborted) return
       setLoadError({ scope: 'radar', message: error instanceof Error ? error.message : '推荐数据加载失败' })
-    } finally { setRadarLoading(false) }
+    } finally {
+      if (radarAbortRef.current === controller) {
+        radarAbortRef.current = null
+        setRadarLoadingGroupId(null)
+      }
+    }
   }
 
   async function loadDistributed() {
@@ -1973,8 +1986,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     })
   }, [currentUserId, activeGroup])
   useEffect(() => {
-    if (isWorkspaceRoute && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) loadRadar()
+    if (isWorkspaceRoute && activeGroupId && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) loadRadar(activeGroupId)
   }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!activeGroupId || radarLoadedGroupId === activeGroupId) return
+    setRadarData(null)
+    if (isWorkspaceRoute && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) {
+      loadRadar(activeGroupId)
+    }
+  }, [activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown')) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadRecommendationPage() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId, currentUserId, tabPage.recommend, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -2113,7 +2133,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName.trim() || members.map(m => m.username).join(' · '), members, rank_domains: Array.from(editSelectedRankDomains), new_domains: Array.from(editSelectedNewDomains), associated_domains: [], site_domains: Array.from(editSelectedSiteDomains) }),
       })
-      if (res.ok) { setShowEdit(false); await loadGroups() }
+      if (res.ok) {
+        setShowEdit(false)
+        setRadarData(null)
+        setRadarLoadedGroupId(null)
+        await loadGroups()
+      }
     } finally { setSaving(false) }
   }
 

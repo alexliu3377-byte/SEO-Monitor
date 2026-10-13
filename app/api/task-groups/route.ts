@@ -5,6 +5,7 @@ import { normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-da
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { canAdminUseGroupSites, filterTaskGroupsForCaller, getAssignedSiteDomains } from '@/lib/task-group-access'
+import { refreshGroupHotRadarCache } from '@/lib/group-hot-radar-cache'
 
 async function getCaller() {
   const supabase = await createClient()
@@ -100,6 +101,11 @@ export async function POST(req: Request) {
   if (memberError) {
     await service.from('task_groups').delete().eq('id', group.id)
     return NextResponse.json({ error: 'Unable to save group members' }, { status: 500 })
+  }
+  try {
+    await refreshGroupHotRadarCache(service, group.id)
+  } catch (cacheError) {
+    console.error('Unable to create group hot radar cache', { groupId: group.id, error: cacheError })
   }
   return NextResponse.json({ group: { ...group, members: normalized.members } })
 }
