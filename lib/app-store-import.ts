@@ -18,6 +18,21 @@ function chunks<T>(rows: T[], size = 100): T[][] {
   return result
 }
 
+function truncateCodePoints(value: string, maximum: number) {
+  return Array.from(value).slice(0, maximum).join('')
+}
+
+export function normalizeAppStoreImportName(trackName: string, bundleId: string) {
+  const name = truncateCodePoints(trackName.replace(/\s+/g, ' ').trim(), 120)
+  if (Array.from(name).length >= 2) return name
+
+  // Apple permits one-character titles, while app_update_apps intentionally
+  // requires a useful 2-120 character display name. Keep the real title and
+  // add a platform qualifier instead of letting one row roll back the batch.
+  const fallback = name || truncateCodePoints(bundleId.replace(/\s+/g, ' ').trim(), 110) || 'App'
+  return truncateCodePoints(`${fallback} (iOS)`, 120)
+}
+
 export async function importAppStoreResults(
   service: SupabaseClient,
   results: AppStoreLookupResult[],
@@ -47,7 +62,7 @@ export async function importAppStoreResults(
   const missingResults = uniqueResults.filter(result => !appIdByBundle.has(result.bundleId))
   for (const batch of chunks(missingResults)) {
     const { data: createdApps, error } = await service.from('app_update_apps').insert(batch.map(result => ({
-      name: result.trackName.trim().slice(0, 120),
+      name: normalizeAppStoreImportName(result.trackName, result.bundleId),
       platform: 'ios',
       package_identifier: result.bundleId.trim().slice(0, 255),
       created_by: actor,

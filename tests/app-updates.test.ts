@@ -15,8 +15,17 @@ import {
   parseAppStoreVersionHistoryHtml,
 } from '../lib/app-store'
 import { appStoreDailyDiscoveryPlan } from '../lib/app-store-discovery'
+import { normalizeAppStoreImportName } from '../lib/app-store-import'
 import { googlePlayAppToUpdate, googlePlayPackageFromUrl } from '../lib/google-play'
 import { parseTapTapAppHtml, tapTapAppIdFromUrl } from '../lib/taptap'
+
+test('App Store import names satisfy the database display-name constraint', () => {
+  assert.equal(normalizeAppStoreImportName('Example App', 'com.example.app'), 'Example App')
+  assert.equal(normalizeAppStoreImportName(' X ', 'com.example.x'), 'X (iOS)')
+  assert.equal(normalizeAppStoreImportName('🎮', 'com.example.game'), '🎮 (iOS)')
+  assert.equal(normalizeAppStoreImportName('   ', 'com.example.unnamed'), 'com.example.unnamed (iOS)')
+  assert.equal(Array.from(normalizeAppStoreImportName('游'.repeat(121), 'com.example.long')).length, 120)
+})
 
 test('app version normalization removes labels and keeps comparable characters', () => {
   assert.equal(normalizeAppVersion(' Version v2.03.1-beta '), '2.03.1-beta')
