@@ -33,7 +33,11 @@ export function crawlSourceStatus(rows: CrawlSourceCompletion[] | null, metadata
       continue
     }
     const row = rows?.find(row => row.step === step)
-    if (!row?.processing_complete) {
+    if (!row) {
+      // Old batches predate completion markers. Absence of a marker is not
+      // evidence that a source is still running or failed to collect data.
+      sourceWarnings.push({ step, reason: 'unknown', unresolvedCount: null })
+    } else if (!row.processing_complete) {
       sourceWarnings.push({ step, reason: 'unfinished', unresolvedCount: null })
     } else if (!row.complete) {
       const unresolvedCount = Array.isArray(row.unresolved)

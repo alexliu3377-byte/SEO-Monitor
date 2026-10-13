@@ -20,3 +20,16 @@ test('source warning counts deduplicate failed domains and never expose their na
   assert.equal(JSON.stringify(result).includes('hidden.test'), false)
   assert.equal(JSON.stringify(result).includes('another.test'), false)
 })
+
+test('missing legacy completion markers remain unknown, not unfinished', () => {
+  const result = crawlSourceStatus([])
+  assert.equal(result.sourceComplete, false)
+  assert.equal(result.sourceWarnings.length, DAILY_CRAWL_DEPENDENCIES.length)
+  assert.equal(result.sourceWarnings.every(warning => warning.reason === 'unknown'), true)
+})
+
+test('an explicit unfinished marker is distinct from missing markers', () => {
+  const result = crawlSourceStatus([{ step: 'keywords', processing_complete: false, complete: false, unresolved: [] }])
+  assert.deepEqual(result.sourceWarnings.find(warning => warning.step === 'keywords'), { step: 'keywords', reason: 'unfinished', unresolvedCount: null })
+  assert.equal(result.sourceWarnings.filter(warning => warning.reason === 'unknown').length, 4)
+})

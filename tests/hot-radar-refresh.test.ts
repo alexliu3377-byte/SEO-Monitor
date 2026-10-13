@@ -81,7 +81,7 @@ test('partial source markers publish useful results with warnings instead of fai
   assert.equal(JSON.stringify(result.sourceWarnings).includes('another-hidden.test'), false)
 })
 
-test('manual refresh without markers records an unfinished source rather than fake completeness', async () => {
+test('manual refresh without markers records unknown status rather than fake completeness or unfinished collection', async () => {
   const { service, writes } = cacheDb({ payload: fresh }, null, [])
   const result = await refreshHotRadarCaches(service, {
     compute: async () => ({ payload: fresh, failedSections: [] }), refreshGroups: async () => 1,
@@ -91,7 +91,7 @@ test('manual refresh without markers records an unfinished source rather than fa
   assert.equal(result.sourceComplete, false)
   assert.equal(result.sourceDataDate, '2026-10-13')
   assert.equal(result.sourceWarnings.length, 5)
-  assert.equal(result.sourceWarnings.every(warning => warning.reason === 'unfinished' && warning.unresolvedCount == null), true)
+  assert.equal(result.sourceWarnings.every(warning => warning.reason === 'unknown' && warning.unresolvedCount == null), true)
   assert.equal(Object.hasOwn(writes, 'hot_radar_cache'), true)
 })
 

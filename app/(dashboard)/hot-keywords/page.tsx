@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
+import { radarCacheNotice } from '@/lib/radar-cache-notice'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -252,7 +253,8 @@ export default function HotRadarPage() {
   const [data, setData]           = useState<RadarData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
-  const [radarNotice, setRadarNotice] = useState<string | null>(null)
+  const [radarNotice, setRadarNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
+  const [weightNotice, setWeightNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
   const [activeTab, setActiveTab] = useState<Tab>('volumeRising')
   const [minSites, setMinSites]   = useState(1)
   const [minStreak, setMinStreak] = useState(2)
@@ -459,12 +461,11 @@ export default function HotRadarPage() {
       })
       .then(d => {
         setData(d)
-        if (d.cache?.failedSections?.length) setRadarNotice('部分资料暂未完成刷新，当前保留上次成功保存的结果。')
-        else if (d.cache?.sourceComplete === false) setRadarNotice('本批采集尚未全部确认完成，当前显示已取得的资料。')
+        setRadarNotice(radarCacheNotice(d.cache))
       })
       .catch(e => setError(e.message || '加载失败'))
       .finally(() => setLoading(false))
-    void fetchWeights().catch(e => setRadarNotice(e.message || '站点权重读取失败，已取得的词仍可查看'))
+    void fetchWeights().catch(e => setWeightNotice({ tone: 'warning', message: e instanceof Error ? e.message : '站点权重读取失败，已取得的词仍可查看' }))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -733,7 +734,11 @@ export default function HotRadarPage() {
         ))}
       </div>
 
-      {radarNotice && activeTab !== 'wordLib' && <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">{radarNotice}</div>}
+      {(weightNotice || radarNotice) && activeTab !== 'wordLib' && (
+        <div role="status" className={`mb-3 rounded-lg border px-4 py-2 text-xs ${weightNotice || radarNotice?.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
+          {weightNotice ? [radarNotice?.tone === 'warning' ? radarNotice.message : null, weightNotice.message].filter(Boolean).join(' ') : radarNotice?.message}
+        </div>
+      )}
       <div className="card">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-400 gap-3">

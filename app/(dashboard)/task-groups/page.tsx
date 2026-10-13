@@ -7,6 +7,7 @@ import { useUser } from '@/lib/user-context'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
 import { fetchAllRows } from '@/lib/supabase-paginate'
+import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
@@ -738,7 +739,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeClearing, setDistributeClearing] = useState(false)
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
-  const [radarNotice, setRadarNotice] = useState<string | null>(null)
+  const [radarNotice, setRadarNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
   const [radarLoadedGroupId, setRadarLoadedGroupId] = useState<string | null>(null)
   const [radarLoadingGroupId, setRadarLoadingGroupId] = useState<string | null>(null)
   const radarAbortRef = useRef<AbortController | null>(null)
@@ -1373,9 +1374,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
       if (controller.signal.aborted) return
-      setRadarNotice(rd.cache?.stale || rd.cache?.failedSections?.some((section: string) => sections.includes(section))
-        ? '部分资料暂未完成刷新，当前保留上次成功保存的结果。'
-        : rd.cache?.sourceComplete === false ? '本批采集尚未全部确认完成，当前显示已取得的资料。' : null)
+      setRadarNotice(radarCacheNotice(rd.cache, sections))
       for (const key of keys) radarSectionsRef.current.add(key)
       setRadarData(previous => ({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
         ...(radarLoadedGroupId === groupId ? previous : {}), ...rd }))
@@ -3401,7 +3400,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         </div>
       )}
       {isWorkspaceRoute && radarLoadedGroupId === activeGroupId && radarNotice && ['cross','rank','streak','newWords','volumeRising'].includes(rightTab) && (
-        <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">{radarNotice}</div>
+        <div role="status" className={`mb-3 rounded-lg border px-4 py-2 text-xs ${radarNotice.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>{radarNotice.message}</div>
       )}
 
       {loading ? <Spinner /> : groups.length === 0 ? (
