@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useUser } from '@/lib/user-context'
 import SiteAZPicker, { type AZPickerSite } from '@/components/site-az-picker'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
@@ -14,6 +14,25 @@ function Spinner() {
       <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
     </div>
   )
+}
+
+async function researchRequest(url: string, options?: RequestInit) {
+  const response = await fetch(url, options)
+  const data = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(data?.error || `请求失败（${response.status}），请重试`)
+  if (!data) throw new Error('返回资料格式异常，请重试')
+  return data
+}
+
+function requestError(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
+}
+
+function LoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return <div role="status" className="flex items-center gap-3 px-4 py-3 text-xs text-red-600">
+    <span>{message}</span>
+    {onRetry && <button type="button" onClick={onRetry} className="btn-secondary whitespace-nowrap">重试</button>}
+  </div>
 }
 
 type ResearchSection = 'effectiveness' | 'commercial' | 'reports'
@@ -133,59 +152,66 @@ function CompetitorsTab() {
 
   const [rows, setRows] = useState<TrackingRow[]>([])
   const [loadingRows, setLoadingRows] = useState(false)
+  const [sitesError, setSitesError] = useState('')
+  const [rowsError, setRowsError] = useState('')
+  const [rowsRetry, setRowsRetry] = useState(0)
+  const sitesRequest = useRef<AbortController | null>(null)
   const [kwFilter, setKwFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState<'' | 'app' | 'game'>('')
   const [sortCol, setSortCol] = useState<SortableCol | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
-
-  function loadSites() {
-    setLoadingSites(true)
-    fetch('/api/research/competitor-sites').then(r => r.json()).then(d => setSites(d.sites ?? [])).finally(() => setLoadingSites(false))
-  }
-  useEffect(loadSites, [])
+  const [total, setTotal] = useState(0)
+  const [debouncedKeyword, setDebouncedKeyword] = useState('')
 
   useEffect(() => {
-    if (!selectedId) { setRows([]); return }
+    const timer = window.setTimeout(() => { setDebouncedKeyword(kwFilter.trim()); setPage(0) }, 300)
+    return () => window.clearTimeout(timer)
+  }, [kwFilter])
+
+  function loadSites() {
+    sitesRequest.current?.abort()
+    const controller = new AbortController()
+    sitesRequest.current = controller
+    setLoadingSites(true)
+    setSitesError('')
+    researchRequest('/api/research/competitor-sites', { signal: controller.signal })
+      .then(d => { if (!controller.signal.aborted) setSites(d.sites ?? []) })
+      .catch(error => { if (!controller.signal.aborted) setSitesError(requestError(error, '站点读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingSites(false) })
+  }
+  useEffect(() => { loadSites(); return () => sitesRequest.current?.abort() }, [])
+
+  useEffect(() => {
+    setRowsError('')
+    if (!selectedId) { setLoadingRows(false); return }
+    const controller = new AbortController()
     setLoadingRows(true)
-    fetch(`/api/research/competitor-sites/${selectedId}/tracking`).then(r => r.json()).then(d => setRows(d.rows ?? [])).finally(() => setLoadingRows(false))
-  }, [selectedId])
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), sort: sortCol ?? 'discovery_date', direction: sortDir })
+    if (debouncedKeyword) params.set('keyword', debouncedKeyword)
+    if (typeFilter) params.set('contentType', typeFilter)
+    researchRequest(`/api/research/competitor-sites/${selectedId}/tracking?${params}`, { signal: controller.signal })
+      .then(d => { if (!controller.signal.aborted) {
+        setRows(d.rows ?? []); setTotal(d.total ?? 0)
+        const lastPage = Math.max(0, Math.ceil((d.total ?? 0) / PAGE_SIZE) - 1)
+        if (page > lastPage) setPage(lastPage)
+      } })
+      .catch(error => { if (!controller.signal.aborted) setRowsError(requestError(error, '成效资料读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingRows(false) })
+    return () => controller.abort()
+  }, [selectedId, rowsRetry, page, debouncedKeyword, typeFilter, sortCol, sortDir])
 
-  const filteredRows = rows.filter(r => {
-    if (kwFilter && !r.keyword.toLowerCase().includes(kwFilter.toLowerCase())) return false
-    if (typeFilter && r.content_type !== typeFilter) return false
-    return true
-  })
-
-  // 升降序排序——参考分组报告"成效追踪"的三角图标交互，但这边数据本来就是
-  // 一次性全量拉到客户端的（不像分组报告那边分页从服务端拉），直接客户端排序。
-  // null 值（没有排名/搜索量等）不管升序降序都排在最后，不然升序时会跑到最前面。
-  const sortedRows = sortCol === null ? filteredRows : [...filteredRows].sort((a, b) => {
-    const av = a[sortCol]; const bv = b[sortCol]
-    if (av == null && bv == null) return 0
-    if (av == null) return 1
-    if (bv == null) return -1
-    if (typeof av === 'string' || typeof bv === 'string') {
-      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
-    }
-    return sortDir === 'asc' ? av - bv : bv - av
-  })
-
-  // 页码钳到当前结果的合法范围内（切换站点/筛选/排序都会让结果变短，不然
-  // 会重现网站管理那边"页码指向结果范围外，表格空白"的同一个坑，见
-  // components/site-table.tsx 的同款修法）。
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const clampedPage = Math.min(page, totalPages - 1)
-  const pagedRows = sortedRows.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE)
 
   function sortIcons(col: SortableCol) {
     const isAsc = sortCol === col && sortDir === 'asc'
     const isDesc = sortCol === col && sortDir === 'desc'
     return (
       <span className="inline-flex flex-col items-center gap-px select-none ml-0.5">
-        <svg onClick={() => { setSortCol(col); setSortDir('asc') }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
+        <svg onClick={() => { setSortCol(col); setSortDir('asc'); setPage(0) }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
           className={`cursor-pointer ${isAsc ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'}`}><path d="M4 0L8 5H0Z" /></svg>
-        <svg onClick={() => { setSortCol(col); setSortDir('desc') }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
+        <svg onClick={() => { setSortCol(col); setSortDir('desc'); setPage(0) }} viewBox="0 0 8 5" width="8" height="5" fill="currentColor"
           className={`cursor-pointer ${isDesc ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'}`}><path d="M4 5L0 0H8Z" /></svg>
       </span>
     )
@@ -202,10 +228,11 @@ function CompetitorsTab() {
         </button>
       </div>
 
-      {loadingSites ? <Spinner /> : sites.length === 0 ? (
+      {sitesError && <LoadError message={sitesError} onRetry={loadSites} />}
+      {loadingSites ? <Spinner /> : sites.length === 0 && !sitesError ? (
         <p className="text-sm text-gray-300 text-center py-8">还没有竞品站点，点右上角"管理竞品站点"开启追踪</p>
       ) : (
-        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={setSelectedId} />
+        <SiteAZPicker sites={sites} selectedId={selectedId} onSelect={id => { setSelectedId(id); setRows([]); setTotal(0); setPage(0) }} />
       )}
 
       {selectedId && (
@@ -213,15 +240,15 @@ function CompetitorsTab() {
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex flex-wrap items-center gap-2">
             <input aria-label="输入内容" type="text" value={kwFilter} onChange={e => setKwFilter(e.target.value)} placeholder="搜索关键词…"
               className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700" />
-            <select aria-label="选择选项" value={typeFilter} onChange={e => setTypeFilter(e.target.value as '' | 'app' | 'game')}
+            <select aria-label="选择选项" value={typeFilter} onChange={e => { setTypeFilter(e.target.value as '' | 'app' | 'game'); setPage(0) }}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700">
               <option value="">全部类型</option>
               <option value="app">应用</option>
               <option value="game">游戏</option>
             </select>
-            <span className="text-xs text-gray-400 ml-auto">{filteredRows.length} 条</span>
+            <span className="text-xs text-gray-400 ml-auto">{total} 条</span>
           </div>
-          {loadingRows ? <Spinner /> : sortedRows.length === 0 ? (
+          {loadingRows ? <Spinner /> : rowsError ? <LoadError message={rowsError} onRetry={() => setRowsRetry(value => value + 1)} /> : rows.length === 0 ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的记录</p>
           ) : (
             <>
@@ -242,7 +269,7 @@ function CompetitorsTab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {pagedRows.map((r, i) => (
+                  {rows.map((r, i) => (
                     <tr key={i} className="text-gray-700">
                       <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{r.operation_type ?? '—'}</td>
                       <td className="px-4 py-2 max-w-[200px]"><span className="block truncate" title={r.keyword}>{r.keyword}</span></td>
@@ -261,7 +288,7 @@ function CompetitorsTab() {
                 </tbody>
               </table>
             </div>
-            <SimplePagination page={clampedPage} total={sortedRows.length} onChange={setPage} />
+            <SimplePagination page={clampedPage} total={total} onChange={setPage} />
             </>
           )}
         </div>
@@ -299,16 +326,22 @@ function SiteDiagnosticTab() {
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historyPage, setHistoryPage] = useState(0)
   const [loadingHistory, setLoadingHistory] = useState(true)
+  const [historyError, setHistoryError] = useState('')
+  const historyRequest = useRef<AbortController | null>(null)
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
 
   function loadHistory() {
+    historyRequest.current?.abort()
+    const controller = new AbortController()
+    historyRequest.current = controller
     setLoadingHistory(true)
-    fetch(`/api/research/site-diagnostics?page=${historyPage}&pageSize=${PAGE_SIZE}`)
-      .then(r => r.json())
-      .then(d => { setHistory(d.diagnostics ?? []); setHistoryTotal(d.total ?? 0) })
-      .finally(() => setLoadingHistory(false))
+    setHistoryError('')
+    researchRequest(`/api/research/site-diagnostics?page=${historyPage}&pageSize=${PAGE_SIZE}`, { signal: controller.signal })
+      .then(d => { if (!controller.signal.aborted) { setHistory(d.diagnostics ?? []); setHistoryTotal(d.total ?? 0) } })
+      .catch(error => { if (!controller.signal.aborted) setHistoryError(requestError(error, '诊断记录读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingHistory(false) })
   }
-  useEffect(loadHistory, [historyPage])
+  useEffect(() => { loadHistory(); return () => historyRequest.current?.abort() }, [historyPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runDiagnostic() {
     if (!question.trim() || running) return
@@ -374,7 +407,8 @@ function SiteDiagnosticTab() {
         <div className="px-5 pt-4 pb-1">
           <p className="text-sm font-semibold text-gray-700">历史诊断记录</p>
         </div>
-        {loadingHistory ? <Spinner /> : history.length === 0 ? (
+        {historyError && <LoadError message={historyError} onRetry={loadHistory} />}
+        {loadingHistory ? <Spinner /> : history.length === 0 && !historyError ? (
           <p className="text-sm text-gray-300 text-center py-8">还没有诊断记录，去上面问点什么吧</p>
         ) : (
           <>
@@ -462,6 +496,10 @@ function CommercialKeywordsTab() {
 
   const [keywords, setKeywords] = useState<CommercialKeyword[]>([])
   const [loadingList, setLoadingList] = useState(true)
+  const [listError, setListError] = useState('')
+  const [summaryError, setSummaryError] = useState('')
+  const listRequest = useRef<AbortController | null>(null)
+  const summaryRequest = useRef<AbortController | null>(null)
   const [showNewGroupModal, setShowNewGroupModal] = useState(false)
   const [showBulkModal, setShowBulkModal] = useState(false)
 
@@ -472,15 +510,29 @@ function CommercialKeywordsTab() {
   const [pendingByGroup, setPendingByGroup] = useState<Map<string, number>>(new Map())
 
   function loadList() {
+    listRequest.current?.abort()
+    const controller = new AbortController()
+    listRequest.current = controller
     setLoadingList(true)
-    fetch('/api/research/commercial-keywords').then(r => r.json()).then(d => setKeywords(d.keywords ?? [])).finally(() => setLoadingList(false))
+    setListError('')
+    researchRequest('/api/research/commercial-keywords', { signal: controller.signal })
+      .then(d => { if (!controller.signal.aborted) setKeywords(d.keywords ?? []) })
+      .catch(error => { if (!controller.signal.aborted) setListError(requestError(error, '词组读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingList(false) })
   }
   function loadPendingSummary() {
-    fetch('/api/research/commercial-keywords/discoveries?status=pending&summary=groups').then(r => r.json()).then(d => {
-      setPendingByGroup(new Map(Object.entries(d.groups ?? {}).map(([group, count]) => [group, Number(count) || 0])))
-    })
+    summaryRequest.current?.abort()
+    const controller = new AbortController()
+    summaryRequest.current = controller
+    setSummaryError('')
+    researchRequest('/api/research/commercial-keywords/discoveries?status=pending&summary=groups', { signal: controller.signal }).then(d => {
+      if (!controller.signal.aborted) setPendingByGroup(new Map(Object.entries(d.groups ?? {}).map(([group, count]) => [group, Number(count) || 0])))
+    }).catch(error => { if (!controller.signal.aborted) setSummaryError(requestError(error, '待审核数量读取失败')) })
   }
-  useEffect(() => { loadList(); loadPendingSummary() }, [])
+  useEffect(() => {
+    loadList(); loadPendingSummary()
+    return () => { listRequest.current?.abort(); summaryRequest.current?.abort() }
+  }, [])
 
   const groupedList = groupKeywords(keywords)
   const totalPending = Array.from(pendingByGroup.values()).reduce((a, b) => a + b, 0)
@@ -506,11 +558,13 @@ function CommercialKeywordsTab() {
 
   async function removeGroup(groupName: string) {
     if (!window.confirm(`确定要删除词组「${groupName}」吗？组内全部别名都会一起删掉，此操作不可撤销。`)) return
-    await fetch('/api/research/commercial-keywords', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
-    })
-    setKeywords(prev => prev.filter(k => (k.group_name || k.keyword) !== groupName))
-    if (selectedGroup === groupName) { setSubView('list'); setSelectedGroup(null) }
+    try {
+      await researchRequest('/api/research/commercial-keywords', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
+      })
+      setKeywords(prev => prev.filter(k => (k.group_name || k.keyword) !== groupName))
+      if (selectedGroup === groupName) { setSubView('list'); setSelectedGroup(null) }
+    } catch (error) { setListError(requestError(error, '删除失败，请重试')) }
   }
 
   function openGroupDetail(groupName: string) {
@@ -528,7 +582,7 @@ function CommercialKeywordsTab() {
           <span className="text-gray-500">别名 <span className="font-semibold text-gray-800">{keywords.length}</span> 个</span>
           <span className="text-gray-300">·</span>
           <button onClick={() => setSubView('discoveries')} className="text-gray-500 hover:text-gray-800">
-            待审核 <span className={`font-semibold ${totalPending > 0 ? 'text-orange-500' : 'text-gray-800'}`}>{totalPending}</span> 个
+            待审核 <span className={`font-semibold ${totalPending > 0 ? 'text-orange-500' : 'text-gray-800'}`}>{summaryError ? '—' : totalPending}</span> 个
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -538,6 +592,9 @@ function CommercialKeywordsTab() {
             className="px-3 py-1.5 text-xs font-medium bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">+ 新增词组</button>
         </div>
       </div>
+
+      {listError && <LoadError message={listError} onRetry={loadList} />}
+      {summaryError && <LoadError message={summaryError} onRetry={loadPendingSummary} />}
 
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1" aria-label="商业词研究视图">
         {([['list', '词组库'], ['discoveries', '新词发现']] as const).map(([key, label]) => (
@@ -563,7 +620,7 @@ function CommercialKeywordsTab() {
             </select>
           </div>
 
-          {loadingList ? <Spinner /> : filteredGroups.length === 0 ? (
+          {loadingList ? <Spinner /> : filteredGroups.length === 0 && !listError ? (
             <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
               <p className="text-sm text-gray-400">
                 {keywords.length === 0 ? '还没有商业词组，点右上角「+ 新增词组」开始' : '没有匹配的词组'}
@@ -607,6 +664,7 @@ function CommercialKeywordsTab() {
 
       {subView === 'detail' && selectedGroup && (
         <GroupDetailView
+          key={selectedGroup}
           groupName={selectedGroup}
           members={(groupedList.find(([g]) => g === selectedGroup)?.[1] ?? [])}
           onBack={() => { setSubView('list'); setSelectedGroup(null) }}
@@ -853,27 +911,34 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
   const [reviewingDiscoveryId, setReviewingDiscoveryId] = useState<string | null>(null)
   const [reviewAlias, setReviewAlias] = useState('')
   const [reviewGroup, setReviewGroup] = useState(groupName)
+  const coverageRequest = useRef<AbortController | null>(null)
+  const [discoveriesError, setDiscoveriesError] = useState('')
 
   function runCoverage() {
+    coverageRequest.current?.abort()
+    const controller = new AbortController()
+    coverageRequest.current = controller
     setLoading(true); setError(''); setResult(null)
-    fetch('/api/research/commercial-keywords/coverage', {
+    researchRequest('/api/research/commercial-keywords/coverage', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
-    }).then(async r => {
-      const data = await r.json()
-      if (!r.ok) { setError(data.error || '查询失败'); return }
-      setResult(data)
-    }).catch(() => setError('查询失败（网络异常），请重试'))
-      .finally(() => setLoading(false))
+      signal: controller.signal,
+    }).then(data => { if (!controller.signal.aborted) setResult(data) })
+      .catch(error => { if (!controller.signal.aborted) setError(requestError(error, '排名覆盖查询失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
   }
   useEffect(() => {
     setShowSuggestions(false)
     setSuggestionsLoaded(false)
     runCoverage()
     setRenameValue(groupName)
+    return () => coverageRequest.current?.abort()
   }, [groupName]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    fetch(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}&pageSize=5`)
-      .then(r => r.json()).then(d => setGroupDiscoveries(d.discoveries ?? []))
+    const controller = new AbortController()
+    researchRequest(`/api/research/commercial-keywords/discoveries?status=pending&groupName=${encodeURIComponent(groupName)}&pageSize=5`, { signal: controller.signal })
+      .then(d => { if (!controller.signal.aborted) setGroupDiscoveries(d.discoveries ?? []) })
+      .catch(error => { if (!controller.signal.aborted) setDiscoveriesError(requestError(error, '新词读取失败，请重试')) })
+    return () => controller.abort()
   }, [groupName])
 
   async function toggleSuggestions() {
@@ -899,22 +964,24 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
 
   async function confirmRename() {
     if (!renameValue.trim() || renameValue.trim() === groupName) { setRenaming(false); return }
-    const res = await fetch('/api/research/commercial-keywords', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groupName, newGroupName: renameValue.trim() }),
-    })
-    if (res.ok) {
+    try {
+      await researchRequest('/api/research/commercial-keywords', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupName, newGroupName: renameValue.trim() }),
+      })
       onGroupRenamed(renameValue.trim())
       onKeywordsChanged()
-    }
-    setRenaming(false)
+      setRenaming(false)
+    } catch (error) { setAddAliasError(requestError(error, '改名失败，请重试')) }
   }
 
   async function removeAlias(id: string) {
-    await fetch('/api/research/commercial-keywords', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
-    })
-    onKeywordsChanged()
+    try {
+      await researchRequest('/api/research/commercial-keywords', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+      })
+      onKeywordsChanged()
+    } catch (error) { setAddAliasError(requestError(error, '删除别名失败，请重试')) }
   }
 
   async function addAlias() {
@@ -944,10 +1011,12 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
 
   async function deleteGroup() {
     if (!window.confirm(`确定要删除词组「${groupName}」吗？组内全部别名都会一起删掉，此操作不可撤销。`)) return
-    await fetch('/api/research/commercial-keywords', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
-    })
-    onGroupDeleted()
+    try {
+      await researchRequest('/api/research/commercial-keywords', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupName }),
+      })
+      onGroupDeleted()
+    } catch (error) { setAddAliasError(requestError(error, '删除词组失败，请重试')) }
   }
 
   function openDiscoveryReview(discovery: Discovery) {
@@ -1154,6 +1223,7 @@ function GroupDetailView({ groupName, members, onBack, onKeywordsChanged, onGrou
         </>
       )}
 
+      {discoveriesError && <LoadError message={discoveriesError} />}
       {groupDiscoveries.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -1240,24 +1310,28 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
   const [countCache, setCountCache] = useState<Partial<Record<DiscoveryStatus, number>>>({})
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
+  const discoveriesRequest = useRef<AbortController | null>(null)
 
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const [acceptAlias, setAcceptAlias] = useState('')
   const [acceptGroup, setAcceptGroup] = useState('')
 
   function load(s: DiscoveryStatus, targetPage: number) {
+    discoveriesRequest.current?.abort()
+    const controller = new AbortController()
+    discoveriesRequest.current = controller
     setLoading(true); setError('')
-    fetch(`/api/research/commercial-keywords/discoveries?status=${s}&page=${targetPage + 1}&pageSize=${PAGE_SIZE}`)
-      .then(r => r.json())
+    researchRequest(`/api/research/commercial-keywords/discoveries?status=${s}&page=${targetPage + 1}&pageSize=${PAGE_SIZE}`, { signal: controller.signal })
       .then(d => {
+        if (controller.signal.aborted) return
         setDiscoveries(d.discoveries ?? [])
         setTotal(d.total ?? 0)
         setCountCache(prev => ({ ...prev, [s]: d.total ?? 0 }))
       })
-      .catch(() => setError('加载失败（网络异常）'))
-      .finally(() => setLoading(false))
+      .catch(error => { if (!controller.signal.aborted) setError(requestError(error, '新词读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
   }
-  useEffect(() => { load(status, page) }, [status, page])
+  useEffect(() => { load(status, page); return () => discoveriesRequest.current?.abort() }, [status, page])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const clampedPage = Math.min(page, totalPages - 1)
@@ -1320,9 +1394,9 @@ function DiscoveriesView({ onAccepted, onIgnored }: { onAccepted: () => void; on
           </button>
         ))}
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <LoadError message={error} onRetry={() => load(status, page)} />}
 
-      {loading ? <Spinner /> : discoveries.length === 0 ? (
+      {loading ? <Spinner /> : discoveries.length === 0 && !error ? (
         <p className="text-sm text-gray-300 text-center py-8">
           {status === 'pending' ? '暂无待审核的新词，等下一轮抓取再来看看' : '还没有已加入的新词'}
         </p>
@@ -1388,13 +1462,18 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/research/competitor-sites?all=true').then(r => r.json()).then(d => {
+    const controller = new AbortController()
+    researchRequest('/api/research/competitor-sites?all=true', { signal: controller.signal }).then(d => {
+      if (controller.signal.aborted) return
       const list = (d.sites ?? []) as ManageSite[]
       setSites(list)
       setChecked(new Set(list.filter(s => s.has_rank_title).map(s => s.id)))
-    }).finally(() => setLoading(false))
+    }).catch(error => { if (!controller.signal.aborted) setError(requestError(error, '站点读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
   }, [])
 
   function toggle(id: string) {
@@ -1407,13 +1486,16 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
 
   async function save() {
     setSaving(true)
+    setError('')
     try {
       const changed = sites.filter(s => s.has_rank_title !== checked.has(s.id))
-      await Promise.all(changed.map(s =>
-        fetch('/api/sites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, has_rank_title: checked.has(s.id) }) })
-      ))
+      // Avoid a burst of simultaneous writes when many sites are selected.
+      for (const site of changed) await researchRequest('/api/sites', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: site.id, has_rank_title: checked.has(site.id) }),
+      })
       onSaved()
-    } finally { setSaving(false) }
+    } catch (error) { setError(requestError(error, '部分设置未保存，请重试')) }
+    finally { setSaving(false) }
   }
 
   const filtered = query.trim()
@@ -1430,7 +1512,7 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
       footer={(
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-secondary">取消</button>
-          <button type="button" onClick={save} disabled={saving} className="btn-primary disabled:opacity-50">
+          <button type="button" onClick={save} disabled={saving || loading || sites.length === 0} className="btn-primary disabled:opacity-50">
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
@@ -1441,7 +1523,8 @@ function ManageCompetitorSitesModal({ onClose, onSaved }: { onClose: () => void;
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-3 sm:px-6">
-          {loading ? <Spinner /> : filtered.length === 0 ? (
+          {error && <LoadError message={error} />}
+          {loading ? <Spinner /> : filtered.length === 0 && !error ? (
             <p className="text-sm text-gray-300 text-center py-8">没有匹配的站点</p>
           ) : (
             <div className="space-y-0.5">
@@ -1586,13 +1669,18 @@ const CONFIDENCE_LABELS: Record<string, string> = { high: '高置信度', medium
 function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 'year' }) {
   const [reports, setReports] = useState<ReportListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filterYear, setFilterYear] = useState('')
   const [filterMonth, setFilterMonth] = useState('') // 只有 week tab 用——月报的pill本身就是"月"，不用再筛一层
 
   useEffect(() => {
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/research/reports?type=${periodType}`).then(r => r.json()).then(d => {
+    setError('')
+    researchRequest(`/api/research/reports?type=${periodType}`, { signal: controller.signal }).then(d => {
+      if (controller.signal.aborted) return
       const list = (d.reports ?? []) as ReportListItem[]
       setReports(list)
       setSelectedId(list.length > 0 ? list[0].id : null)
@@ -1601,10 +1689,13 @@ function ReportTab({ periodType }: { periodType: 'week' | 'month' | 'quarter' | 
         : ''
       setFilterYear(latestBucketDate.slice(0, 4))
       setFilterMonth(latestBucketDate.slice(5, 7))
-    }).finally(() => setLoading(false))
-  }, [periodType])
+    }).catch(error => { if (!controller.signal.aborted) setError(requestError(error, '报告列表读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [periodType, retry])
 
   if (loading) return <Spinner />
+  if (error) return <LoadError message={error} onRetry={() => setRetry(value => value + 1)} />
   if (reports.length === 0) return <p className="text-sm text-gray-300 text-center py-12">还没有报告</p>
 
   // 周报/月报会越积越多，参照近期榜单"月度趋势"的做法先选年份（周报再多选一层
@@ -1685,18 +1776,28 @@ function ReportDetailView({ reportId }: { reportId: string }) {
   const [report, setReport] = useState<ReportDetail | null>(null)
   const [siteWeights, setSiteWeights] = useState<Record<string, { pc: number; mobile: number }>>({})
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
   const [expandedSiteId, setExpandedSiteId] = useState<string | null>(null)
 
   useEffect(() => {
+    const controller = new AbortController()
     setLoading(true)
+    setError('')
+    setReport(null)
     setExpandedSiteId(null)
-    fetch(`/api/research/reports/${reportId}`).then(r => r.json()).then(d => {
-      setReport(d.report)
+    researchRequest(`/api/research/reports/${reportId}`, { signal: controller.signal }).then(d => {
+      if (controller.signal.aborted) return
+      setReport(d.report ?? null)
       setSiteWeights(d.siteWeights ?? {})
-    }).finally(() => setLoading(false))
-  }, [reportId])
+    }).catch(error => { if (!controller.signal.aborted) setError(requestError(error, '报告读取失败，请重试')) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [reportId, retry])
 
-  if (loading || !report) return <Spinner />
+  if (loading) return <Spinner />
+  if (error) return <LoadError message={error} onRetry={() => setRetry(value => value + 1)} />
+  if (!report) return <p className="py-8 text-center text-sm text-gray-400">这份报告不存在或已移除</p>
 
   const analyzedSites = report.site_analyses.filter(s => !s.skipped && s.analysis)
   const skippedSites = report.site_analyses.filter(s => s.skipped)

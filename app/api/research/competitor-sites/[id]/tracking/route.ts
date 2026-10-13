@@ -1,18 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { computeOutcomeScore } from '@/lib/outcome-score'
-import { fetchAllRows } from '@/lib/supabase-paginate'
 
-interface TrackingRow {
-  keyword: string
-  content_date: string | null
-  discovery_date: string
-  content_type: string | null
-  operation_type: string | null
-  search_volume: number
-  rank_position: number | null
-  rank_volume: number
-  effectiveness: string
+const SORT_COLUMNS = new Set(['search_volume', 'rank_position', 'rank_volume', 'score', 'content_date', 'discovery_date'])
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function isValidDate(value: string) {
+  if (!DATE_RE.test(value)) return false
+  const parsed = new Date(value)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -21,65 +16,47 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  if (!['super', 'admin'].includes(profile?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { id: siteId } = await params
-  const { searchParams } = new URL(req.url)
-  const keyword = (searchParams.get('keyword') || '').toLowerCase()
-  const contentType = searchParams.get('contentType') || ''
-  const dateStart = searchParams.get('dateStart') || ''
-  const dateEnd = searchParams.get('dateEnd') || ''
+  try {
+    const { data: profile, error: profileError } = await service.from('user_profiles').select('role, is_active').eq('id', user.id).single()
+    if (profileError) throw profileError
+    if (profile?.is_active === false || !['super', 'admin'].includes(profile?.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-  // competitor_tracking_records 按 site_id+keyword+discovery_date 唯一，每天
-  // 追踪窗口内都会 upsert 一行——这张表的结构跟 site_tracking_records 一样是
-  // "一天一行"，永久保留、只增不删，长期会一直累积（2026-08-10 用户主动
-  // 提醒，担心跟这个项目之前已经踩过的几次"表越长越大最后拖垮查询"是同一类
-  // 问题——rank_changes缺索引、raw_keywords超3000行硬顶静默截断都是真实
-  // 教训）。用户明确要求：'追踪中'（还没确认有没有效果）和'无效'（追踪满
-  // 60天仍未见效）这两种状态对这个页面完全没有参考价值，直接在数据库查询
-  // 这一步就用 effectiveness='有效' 过滤掉，不只是前端默认隐藏——这样才能
-  // 真正减少要拉取和去重的行数，而不是拉全量再筛。
-  //
-  // 这个过滤放在去重前不会踩 project_dedup_before_filter_bug 那个坑：那次
-  // 教训是"先筛会导致去重挑到过时的旧状态、误当成当前状态"；这里语义已经
-  // 变成"只看这个词有没有拿到过有效"，挑出的是"最近一次真正有效的记录"，
-  // 是有意为之的查询目标，不是误把陈旧数据当成当前状态。
-  const rows = await fetchAllRows<TrackingRow>((from, to) => {
-    let q = service.from('competitor_tracking_records')
-      .select('keyword, content_date, discovery_date, content_type, operation_type, search_volume, rank_position, rank_volume, effectiveness')
-      .eq('site_id', siteId)
-      .eq('effectiveness', '有效')
-      .order('discovery_date', { ascending: false }).order('id', { ascending: true })
-      .range(from, to)
-    if (dateStart) q = q.gte('discovery_date', dateStart)
-    if (dateEnd) q = q.lte('discovery_date', dateEnd)
-    return q
-  })
+    const { id: siteId } = await params
+    const { searchParams } = new URL(req.url)
+    const page = Math.min(100000, Math.max(0, Number.parseInt(searchParams.get('page') || '0', 10) || 0))
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('pageSize') || '20', 10) || 20))
+    const sort = searchParams.get('sort') || 'discovery_date'
+    const dateStart = searchParams.get('dateStart') || ''
+    const dateEnd = searchParams.get('dateEnd') || ''
+    if ((dateStart && !isValidDate(dateStart))
+      || (dateEnd && !isValidDate(dateEnd))
+      || (dateStart && dateEnd && dateStart > dateEnd)) {
+      return NextResponse.json({ error: '日期范围无效' }, { status: 400 })
+    }
 
-  // rows 已经按 discovery_date 降序排好，每个词第一次出现的就是最近一次有效的记录。
-  const seen = new Set<string>()
-  const dedupedRows = rows.filter(r => {
-    if (seen.has(r.keyword)) return false
-    seen.add(r.keyword)
-    return true
-  })
-
-  let filtered = dedupedRows
-  if (contentType) filtered = filtered.filter(r => r.content_type === contentType)
-  if (keyword) filtered = filtered.filter(r => r.keyword.toLowerCase().includes(keyword))
-
-  const result = filtered.map(r => ({
-    operation_type: r.operation_type,
-    keyword: r.keyword,
-    search_volume: r.search_volume,
-    content_type: r.content_type,
-    rank_position: r.rank_position,
-    rank_volume: r.rank_volume,
-    score: r.rank_position != null ? computeOutcomeScore(r.rank_position, true, null, r.rank_volume) : null,
-    content_date: r.content_date,
-    discovery_date: r.discovery_date,
-  }))
-
-  return NextResponse.json({ rows: result })
+    // Deduplicate the latest valid record per keyword before applying the
+    // content-type filter, preserving the original research semantics.
+    const { data, error } = await service.rpc('get_competitor_tracking_page', {
+      p_site_id: siteId,
+      p_page: page,
+      p_page_size: pageSize,
+      p_keyword: (searchParams.get('keyword') || '').trim().slice(0, 200).toLowerCase(),
+      p_content_type: searchParams.get('contentType') || '',
+      p_date_start: dateStart || null,
+      p_date_end: dateEnd || null,
+      p_sort: SORT_COLUMNS.has(sort) ? sort : 'discovery_date',
+      p_direction: searchParams.get('direction') === 'asc' ? 'asc' : 'desc',
+    })
+    if (error) throw error
+    if (!data || !Array.isArray(data.rows) || typeof data.total !== 'number') {
+      throw new Error('Invalid competitor tracking page response')
+    }
+    return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } })
+  } catch (error) {
+    console.error('Competitor tracking page failed:', error)
+    return NextResponse.json({ error: '成效资料读取失败，请重试' }, { status: 500 })
+  }
 }

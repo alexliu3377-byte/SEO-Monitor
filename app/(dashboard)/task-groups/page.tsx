@@ -659,7 +659,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   const [groups, setGroups] = useState<TaskGroup[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<{ scope: 'groups' | 'claimed' | 'radar' | 'distributed' | 'recommendations'; message: string } | null>(null)
+  const [loadError, setLoadError] = useState<{ scope: 'groups' | 'claimed' | 'radar' | 'distributed' | 'recommendations' | 'wordlib' | 'details'; message: string } | null>(null)
   const [activeGroupId, setActiveGroupId] = useState<string | null>(groupId ?? null)
   const [workspaceOpen, setWorkspaceOpen] = useState(isWorkspaceRoute)
 
@@ -738,9 +738,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeClearing, setDistributeClearing] = useState(false)
 
   const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
+  const [radarNotice, setRadarNotice] = useState<string | null>(null)
   const [radarLoadedGroupId, setRadarLoadedGroupId] = useState<string | null>(null)
   const [radarLoadingGroupId, setRadarLoadingGroupId] = useState<string | null>(null)
   const radarAbortRef = useRef<AbortController | null>(null)
+  const radarSectionsRef = useRef(new Set<string>())
   const radarLoaded = radarLoadedGroupId === activeGroupId
   const radarLoading = radarLoadingGroupId === activeGroupId
 
@@ -763,12 +765,26 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibData, setWordLibData] = useState<WordLibEntry[]>([])
   const [wordLibLoading, setWordLibLoading] = useState(false)
-  const [wordLibLoaded, setWordLibLoaded] = useState(false)
+  const [wordLibTotal, setWordLibTotal] = useState(0)
+  const wordLibGroupRef = useRef<string | null>(null)
+  const [wordLibDataGroupId, setWordLibDataGroupId] = useState<string | null>(null)
+  const wordLibAbortRef = useRef<AbortController | null>(null)
+  const domainInfoLoadedRef = useRef(false)
+  const domainInfoPromiseRef = useRef<Promise<void> | null>(null)
   const [wordLibSearch, setWordLibSearch] = useState('')
+  const [wordLibQuery, setWordLibQuery] = useState('')
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [radarDate, setRadarDate]       = useState('')
   const [badgeFilter, setBadgeFilter] = useState<BadgeFilter>('all')
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWordLibQuery(wordLibSearch.trim())
+      setTabPage(current => ({ ...current, wordLib: 0 }))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [wordLibSearch])
 
   // Group management
   const [showCreate, setShowCreate] = useState(false)
@@ -912,17 +928,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     return sorted.filter(w => w.sites.some(s => groupNewDomains.has(s)))
   }, [radarData, yesterday, groupNewDomains])
 
-  const wordLibWords = useMemo((): WordLibEntry[] => {
-    if (!wordLibData.length) return []
-    if (!groupNewDomains.size) return wordLibData
-    // Filter entries to only those with at least one site in the group's new_domains
-    return wordLibData
-      .filter(w => w.sites.some(s => groupNewDomains.has(s)))
-      .map(w => {
-        const filtered = w.sites.filter(s => groupNewDomains.has(s))
-        return { ...w, sites: filtered, siteCount: filtered.length }
-      })
-  }, [wordLibData, groupNewDomains])
+  // The API scopes the whole cache to this group's sites before paging.
+  const wordLibWords = useMemo(() => wordLibDataGroupId === activeGroupId ? wordLibData : [], [wordLibDataGroupId, activeGroupId, wordLibData])
 
   const radarAvailableDates = useMemo(() => {
     const rows: { last_date: string }[] =
@@ -1351,18 +1358,28 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     } finally { setClaimedLoading(false) }
   }
 
-  async function loadRadar(groupId = activeGroupId) {
-    if (!groupId || radarLoadedGroupId === groupId || radarLoadingGroupId === groupId) return
+  async function loadRadar(groupId = activeGroupId, force = false) {
+    const sections = rightTab === 'cross' ? ['newWords','rankWords'] :
+      rightTab === 'rank' ? ['rankWords'] : rightTab === 'streak' ? ['streakWords'] :
+      rightTab === 'newWords' ? ['newWords'] : ['volumeRisingWords']
+    const keys = sections.map(section => `${groupId}:${section}`)
+    if (!groupId || (!force && keys.every(key => radarSectionsRef.current.has(key)))) return
     radarAbortRef.current?.abort()
     const controller = new AbortController()
     radarAbortRef.current = controller
     setRadarLoadingGroupId(groupId)
     try {
-      const res = await fetch(`/api/hot-radar?groupId=${encodeURIComponent(groupId)}`, { signal: controller.signal })
+      const res = await fetch(`/api/hot-radar?groupId=${encodeURIComponent(groupId)}&sections=${sections.join(',')}`, { signal: controller.signal })
       if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
       if (controller.signal.aborted) return
-      setRadarData(rd); setRadarLoadedGroupId(groupId)
+      setRadarNotice(rd.cache?.stale || rd.cache?.failedSections?.some((section: string) => sections.includes(section))
+        ? '部分资料暂未完成刷新，当前保留上次成功保存的结果。'
+        : rd.cache?.sourceComplete === false ? '本批采集尚未全部确认完成，当前显示已取得的资料。' : null)
+      for (const key of keys) radarSectionsRef.current.add(key)
+      setRadarData(previous => ({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
+        ...(radarLoadedGroupId === groupId ? previous : {}), ...rd }))
+      setRadarLoadedGroupId(groupId)
       setLoadError(current => current?.scope === 'radar' ? null : current)
     } catch (error) {
       if (controller.signal.aborted) return
@@ -1371,6 +1388,47 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       if (radarAbortRef.current === controller) {
         radarAbortRef.current = null
         setRadarLoadingGroupId(null)
+      }
+    }
+  }
+
+  async function loadWordLib(force = false) {
+    const groupId = activeGroupId
+    if (!groupId) return
+    const params = new URLSearchParams({
+      groupId, page: String(tabPage.wordLib), pageSize: String(PAGE_SIZE), q: wordLibQuery,
+      sort: ['date', 'count', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
+      direction: sortDir || 'desc', minLongTail: '2',
+    })
+    if (radarDate) params.set('date', radarDate)
+    const queryKey = params.toString()
+    if (!force && wordLibGroupRef.current === queryKey) return
+    wordLibAbortRef.current?.abort()
+    const controller = new AbortController()
+    wordLibAbortRef.current = controller
+    setWordLibLoading(true)
+    try {
+      const response = await fetch(`/api/wordlib?${queryKey}`, { signal: controller.signal })
+      if (!response.ok) throw new Error(await apiError(response,'词库资料读取失败'))
+      const body = await response.json()
+      if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('词库返回资料格式无效')
+      if (controller.signal.aborted) return
+      setWordLibDataGroupId(groupId)
+      setWordLibData(body.data.map((row: { keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string }) => ({
+        keyword: row.keyword,longTailCount: row.long_tail_count,count: row.long_tail_count,
+        siteCount: row.site_count,sites: row.sites ?? [],last_date: String(row.last_date ?? '').slice(0,10),first_date: '',
+      })))
+      setWordLibTotal(body.total)
+      const lastPage = Math.max(0, Math.ceil(body.total / PAGE_SIZE) - 1)
+      if (tabPage.wordLib > lastPage) setTabPage(current => ({ ...current, wordLib: lastPage }))
+      wordLibGroupRef.current = queryKey
+      setLoadError(current => current?.scope === 'wordlib' ? null : current)
+    } catch (error) {
+      if (!controller.signal.aborted) setLoadError({ scope: 'wordlib',message: error instanceof Error ? error.message : '词库读取失败' })
+    } finally {
+      if (wordLibAbortRef.current === controller) {
+        wordLibAbortRef.current = null
+        setWordLibLoading(false)
       }
     }
   }
@@ -1970,7 +2028,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
   }, [loading, isWorkspaceRoute, canManage, groups, router])
   useEffect(() => {
-    if (isWorkspaceRoute && detailKw) void loadDomainInfo()
+    if (isWorkspaceRoute && detailKw) void loadDomainInfo().catch(error => setLoadError({ scope: 'details', message: error instanceof Error ? error.message : '站点资料读取失败' }))
   }, [isWorkspaceRoute, detailKw]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!claimErrorMsg) return
@@ -1986,17 +2044,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     })
   }, [currentUserId, activeGroup])
   useEffect(() => {
-    if (isWorkspaceRoute && activeGroupId && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) loadRadar(activeGroupId)
-  }, [isWorkspaceRoute, rightTab]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!activeGroupId || radarLoadedGroupId === activeGroupId) return
-    setRadarData(null)
-    if (isWorkspaceRoute && (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)) {
-      loadRadar(activeGroupId)
+    if (!isWorkspaceRoute || !activeGroupId) return
+    if (radarLoadedGroupId !== activeGroupId) {
+      radarSectionsRef.current.clear()
+      setRadarData(null)
     }
-  }, [activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+    if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId)
+  }, [isWorkspaceRoute,rightTab,activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isWorkspaceRoute && (rightTab === 'wordLib' || rightTab === 'rankdown')) loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'rankdown') loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadRecommendationPage() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId, currentUserId, tabPage.recommend, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
@@ -2004,28 +2060,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }, [displayedClaims.length])
 
   useEffect(() => {
-    if (!isWorkspaceRoute || rightTab !== 'wordLib' || wordLibLoaded || wordLibLoading) return
-    setWordLibLoading(true)
-    fetch('/api/wordlib')
-      .then(r => r.json())
-      .then(({ data }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null }) => {
-        setWordLibData((data || []).map(r => {
-          const last_date = normalizeWordLibDate(r.last_date, today, yesterday)
-          return {
-            keyword: r.keyword,
-            longTailCount: r.long_tail_count,
-            count: r.long_tail_count,
-            siteCount: r.site_count,
-            sites: r.sites || [],
-            last_date,
-            first_date: '',
-          }
-        }))
-        setWordLibLoaded(true)
-      })
-      .catch(() => { setWordLibData([]) })
-      .finally(() => { setWordLibLoading(false) })
-  }, [isWorkspaceRoute, rightTab, wordLibLoaded, wordLibLoading, today, yesterday])
+    if (isWorkspaceRoute && rightTab === 'wordLib') void loadWordLib()
+    return () => wordLibAbortRef.current?.abort()
+  }, [isWorkspaceRoute,rightTab,activeGroupId,tabPage.wordLib,wordLibQuery,sortCol,sortDir,radarDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { radarAbortRef.current?.abort(); wordLibAbortRef.current?.abort() }, [])
 
   useEffect(() => {
     if (!isWorkspaceRoute || !activeGroupId || selectedDate !== today) return
@@ -2062,19 +2100,24 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }
 
   async function loadDomainInfo() {
+    if (domainInfoLoadedRef.current) return
+    if (domainInfoPromiseRef.current) return domainInfoPromiseRef.current
+    domainInfoPromiseRef.current = fetchDomainInfo()
+    try { await domainInfoPromiseRef.current; domainInfoLoadedRef.current = true }
+    finally { domainInfoPromiseRef.current = null }
+  }
+
+  async function fetchDomainInfo() {
     const supabase = getBrowserClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [sitesRes, weightRows] = await Promise.all([
       (supabase.from('sites') as any).select('id, domain, friend_links'),
-      fetchAllRows<{ id: string; site_id: string; pc_weight: number; mobile_weight: number }>((from, to) =>
-        (supabase.from('weight_history') as any)
-          .select('id, site_id, pc_weight, mobile_weight')
-          .gte('record_date', getMYDate(-30))
-          .order('record_date', { ascending: true })
-          .order('id', { ascending: true })
-          .range(from, to)
-      ),
+      (supabase as any).rpc('get_latest_visible_site_weights').then((result: { data: { site_id: string; pc_weight: number; mobile_weight: number }[] | null; error: { message: string } | null }) => {
+        if (result.error) throw new Error(result.error.message)
+        return result.data ?? []
+      }),
     ])
+    if (sitesRes.error) throw new Error(sitesRes.error.message)
     const sites: { id: string; domain: string; friend_links?: string[] | null }[] = sitesRes.data || []
     const idToDomain = new Map<string, string>(sites.map((s: { id: string; domain: string }) => [s.id, s.domain]))
     // weight: iterate asc so last write = latest
@@ -2137,7 +2180,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         setShowEdit(false)
         setRadarData(null)
         setRadarLoadedGroupId(null)
+        radarSectionsRef.current.clear()
+        wordLibGroupRef.current = null
         await loadGroups()
+        if (rightTab === 'wordLib') void loadWordLib(true)
+        else if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId,true)
       }
     } finally { setSaving(false) }
   }
@@ -2973,17 +3020,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'wordLib') {
       if (wordLibLoading) return <Spinner />
-      const sorted_wl = sortCol && sortDir ? [...wordLibWords].sort((a: any, b: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.longTailCount??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.longTailCount??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0 // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
-          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
-          || (b.longTailCount ?? 0) - (a.longTailCount ?? 0)
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : wordLibWords
-      const filtered_wl = wordLibSearch ? sorted_wl.filter(w => w.keyword.includes(wordLibSearch)) : sorted_wl
-      if (wordLibWords.length === 0) return <div className="text-center py-10 text-gray-400 text-sm">暂无词库数据</div>
-      const slice = filtered_wl.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      const slice = wordLibWords
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2997,7 +3034,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <th className="w-32"><span className="sr-only">操作</span></th>
             </tr></thead>
             <tbody>
-              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">当前日期和类型下没有匹配的词库数据</td></tr>}
+              {slice.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-gray-400">{loadError?.scope === 'wordlib' ? '词库读取失败，请点击上方重试' : '没有匹配的词库资料'}</td></tr>}
               {slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge="updated"
@@ -3011,7 +3048,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={filtered_wl.length} onPage={p => setPage('wordLib', p)} />
+          <Pager page={pg} total={wordLibDataGroupId === activeGroupId ? wordLibTotal : 0} onPage={p => setPage('wordLib', p)} />
         </>
       )
     }
@@ -3308,7 +3345,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (loadError.scope === 'groups') void loadGroups()
     else if (loadError.scope === 'claimed' && activeGroupId && effectiveViewingId) {
       void loadClaimed(activeGroupId, effectiveViewingId, selectedDate)
-    } else if (loadError.scope === 'radar') void loadRadar()
+    } else if (loadError.scope === 'radar') void loadRadar(activeGroupId,true)
+    else if (loadError.scope === 'wordlib') void loadWordLib(true)
+    else if (loadError.scope === 'details') void loadDomainInfo().catch(error => setLoadError({ scope: 'details', message: error instanceof Error ? error.message : '站点资料读取失败' }))
     else if (loadError.scope === 'distributed') void loadDistributed()
     else if (loadError.scope === 'recommendations') {
       setLoadError(null)
@@ -3360,6 +3399,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             重试
           </button>
         </div>
+      )}
+      {isWorkspaceRoute && radarLoadedGroupId === activeGroupId && radarNotice && ['cross','rank','streak','newWords','volumeRising'].includes(rightTab) && (
+        <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">{radarNotice}</div>
       )}
 
       {loading ? <Spinner /> : groups.length === 0 ? (
@@ -3653,13 +3695,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                           <input aria-label="搜索更新词库关键词"
                             type="text"
                             value={wordLibSearch}
-                            onChange={event => { setWordLibSearch(event.target.value); setTabPage(current => ({ ...current, wordLib: 0 })) }}
+                            onChange={event => setWordLibSearch(event.target.value)}
                             placeholder="搜索关键词"
                             className="w-40 rounded border border-gray-200 bg-white py-1 pl-2 pr-7 text-sm text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-1 focus:ring-green-400"
                           />
                           {wordLibSearch && (
                             <button type="button" aria-label="清空关键词搜索"
-                              onClick={() => { setWordLibSearch(''); setTabPage(current => ({ ...current, wordLib: 0 })) }}
+                              onClick={() => { setWordLibSearch(''); setWordLibQuery(''); setTabPage(current => ({ ...current, wordLib: 0 })) }}
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">✕</button>
                           )}
                         </span>

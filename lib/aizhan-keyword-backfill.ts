@@ -55,8 +55,11 @@ export function parseAizhanKeywordPage(html: string, currentUrl: string): {
   $('tr').each((_, tr) => {
     const rowText = $(tr).text()
     if (!/第\s*\d+\s*页/.test(rowText) || !/第\s*\d+\s*位/.test(rowText)) return
-    const linkedKeyword = $(tr).find('a[href*="baidu.com/s"]').first()
-    const linkedVolume = $(tr).find('a[href*="ci.aizhan.com"]').first()
+    // The backfill/export table also uses same-host /keyword/ and /volume/
+    // links. Still require a real rank cell above so headers and unrelated
+    // navigation links cannot be mistaken for keyword rows.
+    const linkedKeyword = $(tr).find('a[href*="baidu.com/s"], a[href^="/keyword/"]').first()
+    const linkedVolume = $(tr).find('a[href*="ci.aizhan.com"], a[href^="/volume/"]').first()
     const keyword = linkedKeyword.text().trim()
     const volumeText = linkedVolume.text().replace(/[,\s]/g, '').trim()
     if (!keyword || !/^\d+$/.test(volumeText)) return

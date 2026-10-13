@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server'
 import { authorizeTrendCollector } from '@/lib/trend-discovery-server'
-import {
-  isBrowserContentFeedSource,
-  parseBrowserContentFeedItem,
-} from '@/lib/content-feed-browser'
+import { isCollectorContentSource, parseCollectorContentItem } from '@/lib/content-feed-ingest'
 import { contentFeedDatabaseRows } from '@/lib/content-feed'
 import { createServiceClient } from '@/lib/supabase-server'
 
@@ -23,10 +20,10 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   const source = body?.source
   const rawItems = Array.isArray(body?.items) ? body.items : []
-  if (!isBrowserContentFeedSource(source) || rawItems.length > 100) {
+  if (!isCollectorContentSource(source) || rawItems.length > 100) {
     return NextResponse.json({ error: '内容来源或资料数量无效' }, { status: 400 })
   }
-  const items = rawItems.map(item => parseBrowserContentFeedItem(source, item))
+  const items = rawItems.map(item => parseCollectorContentItem(source, item))
   if (items.some(item => !item)) {
     return NextResponse.json({ error: '资料包含无效内容或非官方来源链接' }, { status: 400 })
   }

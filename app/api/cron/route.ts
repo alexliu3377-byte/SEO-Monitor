@@ -2,6 +2,7 @@ export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { pruneCompetitorDailyHistory } from '@/lib/competitor-daily-retention'
+import { replaceCollectedRankRows, checkDatabaseResult } from '@/lib/crawl-reliability'
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -361,11 +362,7 @@ export async function GET(request: Request) {
             ...rankdownEntries.map((e) => ({ site_id: site.id, stat_date: rankDate, type: 'rankdown', keyword: e.keyword, volume: e.volume })),
           ]
           if (rankRows.length > 0) {
-            await supabase.from('rank_changes').delete().eq('site_id', site.id).eq('stat_date', rankDate)
-            for (const chunk of chunkArray(rankRows, 500)) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              await (supabase.from('rank_changes') as any).insert(chunk)
-            }
+            await replaceCollectedRankRows(supabase, site.id, rankDate, 'rank_changes', rankRows)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('sites') as any).update({ has_rank_data: true }).eq('id', site.id)
           }
@@ -409,7 +406,7 @@ export async function GET(request: Request) {
       // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 scripts/crawl.ts
       // runRank() 同名调用的注释。
       try {
-        await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today })
+        checkDatabaseResult(await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today }), 'keyword signal rollup')
       } catch (e) {
         console.error(`refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
       }
@@ -552,20 +549,15 @@ export async function GET(request: Request) {
       const site = sites[0]
       if (site) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (supabase.from('site_keyword_ranks') as any).delete().eq('site_id', site.id).eq('stat_date', today)
           const [upEntries, downEntries] = await Promise.all([
             fetchRankupWithTitle(site.domain, today),
             fetchRankdownWithTitle(site.domain, today),
           ])
           const rows = [
-            ...upEntries.map(e => ({ site_id: site.id, keyword: e.keyword, stat_date: today, type: 'rankup', platform: 'mobile', rank_position: e.rank_position, volume: e.volume, title: e.title || null, url: e.url || null })),
-            ...downEntries.map(e => ({ site_id: site.id, keyword: e.keyword, stat_date: today, type: 'rankdown', platform: 'mobile', rank_position: e.rank_position, volume: e.volume, title: e.title || null, url: e.url || null })),
+            ...upEntries.map(e => ({ site_id: site.id, keyword: e.keyword, stat_date: today, type: 'rankup', platform: 'mobile', rank_position: e.rank_position, prev_rank: e.prev_rank, volume: e.volume, title: e.title || null, url: e.url || null })),
+            ...downEntries.map(e => ({ site_id: site.id, keyword: e.keyword, stat_date: today, type: 'rankdown', platform: 'mobile', rank_position: e.rank_position, prev_rank: e.prev_rank, volume: e.volume, title: e.title || null, url: e.url || null })),
           ]
-          for (const chunk of chunkArray(rows, 500)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabase.from('site_keyword_ranks') as any).upsert(chunk, { onConflict: 'site_id,keyword,stat_date,type,platform' })
-          }
+          await replaceCollectedRankRows(supabase, site.id, today, 'site_keyword_ranks', rows)
           const rtKwMap = new Map<string, { volume: number; latest_trend: string }>()
           for (const e of downEntries) rtKwMap.set(e.keyword, { volume: e.volume, latest_trend: 'rankdown' })
           for (const e of upEntries) rtKwMap.set(e.keyword, { volume: e.volume, latest_trend: 'rankup' })
@@ -600,7 +592,7 @@ export async function GET(request: Request) {
       // 批量的 site_keyword_ranks 写入主要走 scripts/crawl-rank.ts（已经加过
       // 同样的调用），这里加上是为了手动重抓单站也能让汇总表跟上。
       try {
-        await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today })
+        checkDatabaseResult(await (supabase as any).rpc('refresh_keyword_signal_rollup', { p_date: today }), 'keyword signal rollup')
       } catch (e) {
         console.error(`refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
       }

@@ -27,6 +27,33 @@ export type PageStudioProject = {
   pages: PageStudioPage[]
 }
 
+export type PageStudioProjectSummary = Omit<PageStudioProject, 'pages'> & {
+  pages: Array<Pick<PageStudioPage, 'id' | 'name' | 'path' | 'targetDevice'>>
+}
+
+let projectMemory: PageStudioProject[] | null = null
+let favoriteMemory: PageStudioFavoriteModule[] | null = null
+const projectCache = new Map<string, PageStudioProject>()
+
+function readDeletedProjectIds(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const value = JSON.parse(window.localStorage.getItem('page-studio-deleted-projects') || '[]')
+    return Array.isArray(value) ? value.filter(id => typeof id === 'string') : []
+  } catch { return [] }
+}
+
+function cacheProject(project: PageStudioProject) {
+  projectCache.set(project.id, project)
+  if (typeof window === 'undefined') return
+  try {
+    // Only back up this project; loading one project must not rewrite every
+    // project's HTML/CSS synchronously on the browser's main thread.
+    const value = JSON.stringify(project)
+    if (value.length <= 1_000_000) window.localStorage.setItem(`page-studio-project:${project.id}`, value)
+  } catch { /* Cloud persistence remains available if browser storage is full. */ }
+}
+
 export type PageStudioFavoriteModule = {
   id: string
   name: string
@@ -118,11 +145,14 @@ export function createPageStudioProject(name: string, html = STARTER_HTML, css =
 
 export function readPageStudioProjects(): PageStudioProject[] {
   if (typeof window === 'undefined') return []
+  if (projectMemory) return projectMemory
   try {
     const value = window.localStorage.getItem(STORAGE_KEY)
     if (!value) return []
     const projects = JSON.parse(value) as PageStudioProject[]
-    return Array.isArray(projects) ? projects : []
+    const deleted = new Set(readDeletedProjectIds())
+    projectMemory = Array.isArray(projects) ? projects.filter(project => !deleted.has(project.id)) : []
+    return projectMemory
   } catch {
     return []
   }
@@ -159,18 +189,32 @@ export async function loadPageStudioProjects(): Promise<PageStudioProject[]> {
   return cloud
 }
 
+export async function loadPageStudioProjectSummaries(): Promise<PageStudioProjectSummary[]> {
+  const client = getBrowserClient() as any
+  const { data, error } = await client.rpc('get_page_studio_project_summaries')
+  if (error) throw cloudStorageError(error)
+  const summaries = (data ?? []) as PageStudioProjectSummary[]
+  if (summaries.length > 0) return summaries
+  const local = readPageStudioProjects()
+  if (local.length > 0) await upsertCloudRows('page_studio_projects', local)
+  return local.map(({ pages, ...project }) => ({ ...project, pages: pages.map(({ id, name, path, targetDevice }) => ({ id, name, path, targetDevice })) }))
+}
+
 export function writePageStudioProjects(projects: PageStudioProject[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects))
+  projectMemory = projects
+  for (const project of projects) cacheProject(project)
   window.dispatchEvent(new CustomEvent('page-studio-projects-changed'))
 }
 
 export function readPageStudioFavoriteModules(): PageStudioFavoriteModule[] {
   if (typeof window === 'undefined') return []
+  if (favoriteMemory) return favoriteMemory
   try {
     const value = window.localStorage.getItem(FAVORITE_MODULES_STORAGE_KEY)
     if (!value) return []
     const modules = JSON.parse(value) as PageStudioFavoriteModule[]
-    return Array.isArray(modules) ? modules : []
+    favoriteMemory = Array.isArray(modules) ? modules : []
+    return favoriteMemory
   } catch {
     return []
   }
@@ -191,7 +235,9 @@ export async function loadPageStudioFavoriteModules(): Promise<PageStudioFavorit
 }
 
 function writePageStudioFavoriteModules(modules: PageStudioFavoriteModule[]) {
-  window.localStorage.setItem(FAVORITE_MODULES_STORAGE_KEY, JSON.stringify(modules))
+  favoriteMemory = modules
+  try { window.localStorage.setItem(FAVORITE_MODULES_STORAGE_KEY, JSON.stringify(modules)) }
+  catch { /* Favorites are also persisted to Supabase. */ }
   window.dispatchEvent(new CustomEvent('page-studio-favorite-modules-changed'))
 }
 
@@ -246,12 +292,9 @@ export async function deletePageStudioFavoriteModule(moduleId: string) {
 }
 
 export async function savePageStudioProject(project: PageStudioProject, options: { createVersion?: boolean; label?: string } = {}) {
-  const projects = readPageStudioProjects()
   const next = { ...project, updatedAt: new Date().toISOString() }
-  const index = projects.findIndex(item => item.id === project.id)
-  if (index >= 0) projects[index] = next
-  else projects.unshift(next)
-  writePageStudioProjects(projects)
+  cacheProject(next)
+  if (projectMemory) projectMemory = [next, ...projectMemory.filter(item => item.id !== next.id)]
   await upsertCloudRows('page_studio_projects', [next])
   if (options.createVersion) {
     const client = getBrowserClient() as any
@@ -294,14 +337,35 @@ export async function loadPageStudioProjectVersions(projectId: string): Promise<
 }
 
 export async function deletePageStudioProject(projectId: string) {
-  writePageStudioProjects(readPageStudioProjects().filter(project => project.id !== projectId))
   const client = getBrowserClient() as any
   const { error } = await client.from('page_studio_projects').delete().eq('id', projectId)
   if (error) throw cloudStorageError(error)
+  projectCache.delete(projectId)
+  // Prune the legacy backup on this infrequent explicit action so deleting the
+  // last cloud project cannot cause an old local draft to be imported again.
+  projectMemory = readPageStudioProjects().filter(project => project.id !== projectId)
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectMemory))
+    window.localStorage.removeItem(`page-studio-project:${projectId}`)
+    window.localStorage.setItem('page-studio-deleted-projects', JSON.stringify([...new Set([...readDeletedProjectIds(), projectId])]))
+  } catch { /* Local backup is best effort. */ }
 }
 
 export async function getPageStudioProject(projectId: string) {
-  return (await loadPageStudioProjects()).find(project => project.id === projectId) ?? null
+  const client = getBrowserClient() as any
+  const { data, error } = await client.from('page_studio_projects').select('payload').eq('id', projectId).maybeSingle()
+  if (error) throw cloudStorageError(error)
+  if (data?.payload) {
+    projectCache.set(projectId, data.payload)
+    return data.payload as PageStudioProject
+  }
+  if (readDeletedProjectIds().includes(projectId)) return null
+  const local = projectCache.get(projectId) ?? readPageStudioProjects().find(project => project.id === projectId)
+  if (local) {
+    await upsertCloudRows('page_studio_projects', [local])
+    return local
+  }
+  return null
 }
 
 export function addPageStudioPage(project: PageStudioProject, name: string, targetDevice: 'desktop' | 'mobile' = 'desktop'): PageStudioProject {

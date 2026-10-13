@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps, groupSortedRows } from '@/lib/company-groups'
 import { useUser } from '@/lib/user-context'
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts'
 import { SimplePagination, PAGE_SIZE } from '@/components/simple-pagination'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 interface SiteRow { id: string; domain: string; name: string; focus_level: number; category: string; friend_links?: string[] | null; is_enabled?: boolean }
 interface HistoryRow {
@@ -128,6 +129,7 @@ export default function WeightMonitorPage() {
   const [rows, setRows] = useState<WeightRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const dataRequest = useRef<AbortController | null>(null)
   const [selected, setSelected] = useState<WeightRow | null>(null)
   const [detailMonth, setDetailMonth] = useState(currentMYMonth())
   const [detailHistory, setDetailHistory] = useState<HistoryRow[]>([])
@@ -147,54 +149,66 @@ export default function WeightMonitorPage() {
     setPage(0)
   }
 
-  useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); return () => dataRequest.current?.abort() }, [accessibleSiteIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selected) return
-    let active = true
+    const controller = new AbortController()
     const { start, next } = monthBounds(detailMonth)
     setDetailLoading(true)
     setDetailError('')
-    getBrowserClient().from('weight_history')
+    Promise.resolve(getBrowserClient().from('weight_history')
       .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
       .eq('site_id', selected.site_id)
       .gte('record_date', start)
       .lt('record_date', next)
       .order('record_date', { ascending: true })
+      .abortSignal(controller.signal))
       .then(({ data, error: queryError }) => {
-        if (!active) return
+        if (controller.signal.aborted) return
         if (queryError) {
           setDetailHistory([])
           setDetailError('读取该月历史失败，请重试')
         } else {
           setDetailHistory((data || []) as HistoryRow[])
         }
-        setDetailLoading(false)
       })
-    return () => { active = false }
+      .catch(() => { if (!controller.signal.aborted) setDetailError('读取该月历史失败，请重试') })
+      .finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
+    return () => controller.abort()
   }, [detailMonth, selected])
 
   async function loadData() {
+    dataRequest.current?.abort()
+    const controller = new AbortController()
+    dataRequest.current = controller
     setLoading(true)
     setError(null)
     try {
       const supabase = getBrowserClient()
       const d30ago = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-      const [sitesApiRes, { data: historyRaw }, summariesApiRes] = await Promise.all([
-        fetch('/api/sites').then(r => r.json() as Promise<{ sites: SiteRow[] }>),
-        supabase.from('weight_history')
-          .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
-          .gte('record_date', d30ago)
-          .order('record_date', { ascending: true }),
-        fetch('/api/sites/history-summary').then(r => r.ok ? r.json() as Promise<{ summaries: AizhanHistorySummary[] }> : { summaries: [] as AizhanHistorySummary[] }),
+      const readApi = async <T,>(url: string): Promise<T> => {
+        const response = await fetch(url, { signal: controller.signal })
+        const body = await response.json()
+        if (!response.ok) throw new Error(body.error || '权重资料读取失败，请重试')
+        return body as T
+      }
+      const [sitesApiRes, summariesApiRes] = await Promise.all([
+        readApi<{ sites: SiteRow[] }>('/api/sites'),
+        readApi<{ summaries: AizhanHistorySummary[] }>('/api/sites/history-summary'),
       ])
 
       const allSites = (sitesApiRes.sites || []) as SiteRow[]
       const sites = accessibleSiteIds
         ? allSites.filter(s => accessibleSiteIds.includes(s.id))
         : allSites
-      const history = (historyRaw || []) as HistoryRow[]
+      const siteIds = sites.map(site => site.id)
+      const history = siteIds.length ? await fetchAllRows<HistoryRow>((from, to) => supabase.from('weight_history')
+        .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+        .in('site_id', siteIds).gte('record_date', d30ago).lte('record_date', new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10))
+        .order('record_date').order('site_id').range(from, to).abortSignal(controller.signal)) : []
+      if (controller.signal.aborted) return
       const summaryMap = new Map((summariesApiRes.summaries || []).map(summary => [summary.site_id, summary]))
 
       const result: WeightRow[] = sites.map((site) => {
@@ -248,9 +262,9 @@ export default function WeightMonitorPage() {
       setRows(groupSortedRows(sorted, idMap, r => [r.focus_level, catOrder[r.category] ?? 3]))
       setGroupColorMap(colorMap)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '加载失败')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 

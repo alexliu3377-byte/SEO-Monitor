@@ -13,6 +13,7 @@ function Spinner() {
 // 跨站点月度趋势，可嵌入趋势发现等工作区。
 
 interface MonthlyTrendPoint { month: string; app: number; game: number }
+interface UnavailableMonth { month: string; reason: string; detailAvailable?: boolean }
 interface MonthlyDrillItem { keyword: string; contentType: string; volume: number; domains: string[] }
 interface MonthlyRankChangeItem { keyword: string; type: string; volume: number; domains: string[] }
 interface StreakSite { domain: string; streak: number; volume: number; dates: string[] }
@@ -84,6 +85,7 @@ function StreakSitesModal({ title, siteCount, sites, onClose }: { title: string;
 
 export default function MonthlyTrendTab() {
   const [months, setMonths] = useState<MonthlyTrendPoint[]>([])
+  const [unavailableMonths, setUnavailableMonths] = useState<UnavailableMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
@@ -108,6 +110,7 @@ export default function MonthlyTrendTab() {
         if (!response.ok) throw new Error(data.error || '月度趋势读取失败')
         defaultMonthRef.current = typeof data.defaultMonth === 'string' ? data.defaultMonth : null
         setMonths(data.months ?? [])
+        setUnavailableMonths(data.unavailableMonths ?? [])
       })
       .catch(loadError => {
         if ((loadError as Error).name !== 'AbortError') setError((loadError as Error).message)
@@ -178,6 +181,20 @@ export default function MonthlyTrendTab() {
   return (
     <div>
       <p className="text-sm text-gray-500 mb-4">全部监控站点按月汇总新增关键词数量（应用/游戏），用来发现"哪个月哪个类目在涨"这种跨站点规律。</p>
+      {unavailableMonths.length > 0 && (
+        <div role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="font-medium">部分月份概览尚未归档，未计入图表</p>
+          <div className="mt-1 space-y-1">
+            {unavailableMonths.map(month => (
+              <div key={month.month} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{month.month}：{month.reason}</span>
+                {month.detailAvailable && <button type="button" onClick={() => openDrill(month.month)}
+                  className="rounded border border-amber-200 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500">查看已归档明细</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {months.length === 0 ? (
         <p className="text-sm text-gray-300 text-center py-10">暂无数据</p>
       ) : (

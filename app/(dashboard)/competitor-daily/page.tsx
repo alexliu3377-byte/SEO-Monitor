@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { buildGroupMaps, groupSortedRows } from '@/lib/company-groups'
@@ -140,6 +140,8 @@ export default function CompetitorDailyPage() {
   const [selectedSite, setSelectedSite] = useState<CompetitorRow | null>(null)
   const [siteKeywords, setSiteKeywords] = useState<Keyword[]>([])
   const [kwLoading, setKwLoading] = useState(false)
+  const [kwError, setKwError] = useState('')
+  const kwRequestId = useRef(0)
   const [kwDate, setKwDate] = useState('')
   const [kwTab, setKwTab] = useState<'app' | 'game'>('app')
   const [kwCounts, setKwCounts] = useState<{ app: number; game: number }>({ app: 0, game: 0 })
@@ -149,6 +151,7 @@ export default function CompetitorDailyPage() {
   const [cleanSite, setCleanSite] = useState<CompetitorRow | null>(null)
   const [cleanedEntries, setCleanedEntries] = useState<CleanedEntry[]>([])
   const [cleanLoading, setCleanLoading] = useState(false)
+  const [cleanError, setCleanError] = useState('')
   const [expandedBases, setExpandedBases] = useState<Set<string>>(new Set())
   const [cleanPage, setCleanPage] = useState(0)
 
@@ -159,6 +162,8 @@ export default function CompetitorDailyPage() {
   const [rankPageData, setRankPageData] = useState<RankEntry[]>([])
   const [rankCounts, setRankCounts] = useState<{ rankup: number; rankdown: number }>({ rankup: 0, rankdown: 0 })
   const [rankLoading, setRankLoading] = useState(false)
+  const [rankError, setRankError] = useState('')
+  const rankRequestId = useRef(0)
   const [rankPage, setRankPage] = useState(0)
   const [rankUnstableSet, setRankUnstableSet] = useState<Set<string>>(new Set())
 
@@ -166,6 +171,7 @@ export default function CompetitorDailyPage() {
   const [unstableSite, setUnstableSite] = useState<CompetitorRow | null>(null)
   const [unstableData, setUnstableData] = useState<UnstableEntry[]>([])
   const [unstableLoading, setUnstableLoading] = useState(false)
+  const [unstableError, setUnstableError] = useState('')
   const [unstablePage, setUnstablePage] = useState(0)
 
   // 趋势 modal
@@ -193,20 +199,23 @@ export default function CompetitorDailyPage() {
 
       interface KwStatRow { site_id: string; stat_date: string; app_count: number; game_count: number }
 
-      const [sitesApiRes, { data: statsRaw }, { data: groupsRaw }] = await Promise.all([
+      const [sitesApiRes, groupsResult] = await Promise.all([
         fetch('/api/competitor-daily/sites').then(async r => {
           const body = await r.json() as { sites?: SiteRow[]; error?: string }
           if (!r.ok) throw new Error(body.error || '站点读取失败')
           return { sites: body.sites ?? [] }
         }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (supabase.from('competitor_kw_stats') as any)
-          .select('site_id, stat_date, app_count, game_count')
-          .gte('stat_date', d30ago)
-          .lte('stat_date', yesterday),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (supabase.from('task_groups') as any).select('associated_domains'),
       ])
+      if (groupsResult.error) throw new Error(groupsResult.error.message)
+      const groupsRaw = groupsResult.data
+      const sites = sitesApiRes.sites || []
+      const siteIds = sites.map(site => site.id)
+      const stats = siteIds.length ? await fetchAllRows<KwStatRow>((from, to) => supabase.from('competitor_kw_stats')
+        .select('site_id, stat_date, app_count, game_count').in('site_id', siteIds)
+        .gte('stat_date', d30ago).lte('stat_date', yesterday)
+        .order('stat_date').order('site_id').range(from, to)) : []
 
       const associatedDomains = new Set<string>()
       for (const g of (groupsRaw || []) as { associated_domains: string[] | null }[]) {
@@ -214,10 +223,6 @@ export default function CompetitorDailyPage() {
           if (d) associatedDomains.add(d)
         }
       }
-      const allSites = (sitesApiRes.sites || []) as SiteRow[]
-      // 接口已按竞品日收的专属规则完成过滤，前端不要再用通用站点权限重复过滤。
-      const sites = allSites
-      const stats = (statsRaw || []) as KwStatRow[]
 
       const result: CompetitorRow[] = sites.map((site) => {
         const siteStats = stats.filter(s => s.site_id === site.id)
@@ -283,6 +288,8 @@ export default function CompetitorDailyPage() {
   }
 
   async function fetchKeywordsForDate(site: CompetitorRow, date: string, tab: 'app' | 'game', ps: PageSize = pageSize) {
+    const requestId = ++kwRequestId.current
+    setKwError('')
     setKwPage(0)
     setKwLoading(true)
     setSiteKeywords([])
@@ -290,24 +297,27 @@ export default function CompetitorDailyPage() {
       const supabase = getBrowserClient()
       const [appRes, gameRes, kwRes] = await Promise.all([
         supabase.from('raw_keywords').select('id', { count: 'exact', head: true })
-          .eq('site_id', site.site_id).eq('content_type', 'app')
+          .eq('site_id', site.site_id).or('content_type.eq.app,content_type.is.null')
           .eq('content_date', date).not('keyword', 'like', '%电脑版%'),
         supabase.from('raw_keywords').select('id', { count: 'exact', head: true })
           .eq('site_id', site.site_id).eq('content_type', 'game')
           .eq('content_date', date).not('keyword', 'like', '%电脑版%'),
         buildKwBaseQuery(supabase, site, date, tab, 0, ps - 1),
       ])
+      if (requestId !== kwRequestId.current) return
+      for (const result of [appRes, gameRes, kwRes]) if (result.error) throw new Error(result.error.message)
       setKwCounts({ app: appRes.count ?? 0, game: gameRes.count ?? 0 })
-      if (kwRes.error) throw kwRes.error
       setSiteKeywords((kwRes.data || []) as Keyword[])
     } catch {
-      setSiteKeywords([])
+      if (requestId === kwRequestId.current) setKwError('关键词读取失败，请重试')
     } finally {
-      setKwLoading(false)
+      if (requestId === kwRequestId.current) setKwLoading(false)
     }
   }
 
   async function fetchKeywordsPage(site: CompetitorRow, date: string, tab: 'app' | 'game', page: number, ps: PageSize = pageSize) {
+    const requestId = ++kwRequestId.current
+    setKwError('')
     setKwLoading(true)
     setSiteKeywords([])
     try {
@@ -316,11 +326,12 @@ export default function CompetitorDailyPage() {
       const to = (page + 1) * ps - 1
       const { data, error: err } = await buildKwBaseQuery(supabase, site, date, tab, from, to)
       if (err) throw err
+      if (requestId !== kwRequestId.current) return
       setSiteKeywords((data || []) as Keyword[])
     } catch {
-      setSiteKeywords([])
+      if (requestId === kwRequestId.current) setKwError('关键词读取失败，请重试')
     } finally {
-      setKwLoading(false)
+      if (requestId === kwRequestId.current) setKwLoading(false)
     }
   }
 
@@ -388,6 +399,7 @@ export default function CompetitorDailyPage() {
   // ── 更新词库 ─────────────────────────────────────────────────────────────────
 
   async function viewCleanedKeywords(site: CompetitorRow) {
+    setCleanError('')
     setCleanSite(site)
     setCleanPage(0)
     setCleanLoading(true)
@@ -432,7 +444,7 @@ export default function CompetitorDailyPage() {
 
       setCleanedEntries(entries)
     } catch {
-      setCleanedEntries([])
+      setCleanError('更新词库读取失败，请重试')
     } finally {
       setCleanLoading(false)
     }
@@ -441,6 +453,8 @@ export default function CompetitorDailyPage() {
   // ── 排名变动 ─────────────────────────────────────────────────────────────────
 
   async function fetchRankPage(site: CompetitorRow, date: string, type: 'rankup' | 'rankdown', page: number, ps: PageSize = pageSize, fetchCounts = false) {
+    const requestId = ++rankRequestId.current
+    setRankError('')
     setRankLoading(true)
     setRankPageData([])
     try {
@@ -457,22 +471,26 @@ export default function CompetitorDailyPage() {
           ? supabase.from('site_keyword_ranks').select('id', { count: 'exact', head: true }).eq('site_id', site.site_id).eq('stat_date', date).eq('type', 'rankdown').eq('platform', 'mobile').gt('volume', 0)
           : supabase.from('rank_changes').select('id', { count: 'exact', head: true }).eq('site_id', site.site_id).eq('stat_date', date).eq('type', 'rankdown')
         const basePage = useNewTable
-          ? supabase.from('site_keyword_ranks').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).eq('platform', 'mobile').gt('volume', 0).order('volume', { ascending: false }).range(from, to)
-          : supabase.from('rank_changes').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).order('volume', { ascending: false }).range(from, to)
+          ? supabase.from('site_keyword_ranks').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).eq('platform', 'mobile').gt('volume', 0).order('volume', { ascending: false }).order('id').range(from, to)
+          : supabase.from('rank_changes').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).order('volume', { ascending: false }).order('id').range(from, to)
         const [upCount, downCount, pageRes] = await Promise.all([baseUp, baseDown, basePage])
+        for (const result of [upCount, downCount, pageRes]) if (result.error) throw new Error(result.error.message)
+        if (requestId !== rankRequestId.current) return
         setRankCounts({ rankup: upCount.count ?? 0, rankdown: downCount.count ?? 0 })
         setRankPageData((pageRes.data || []) as RankEntry[])
       } else {
         const q = useNewTable
-          ? supabase.from('site_keyword_ranks').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).eq('platform', 'mobile').gt('volume', 0).order('volume', { ascending: false }).range(from, to)
-          : supabase.from('rank_changes').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).order('volume', { ascending: false }).range(from, to)
-        const { data } = await q
+          ? supabase.from('site_keyword_ranks').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).eq('platform', 'mobile').gt('volume', 0).order('volume', { ascending: false }).order('id').range(from, to)
+          : supabase.from('rank_changes').select('keyword, volume').eq('site_id', site.site_id).eq('stat_date', date).eq('type', type).order('volume', { ascending: false }).order('id').range(from, to)
+        const { data, error } = await q
+        if (error) throw new Error(error.message)
+        if (requestId !== rankRequestId.current) return
         setRankPageData((data || []) as RankEntry[])
       }
     } catch {
-      setRankPageData([])
+      if (requestId === rankRequestId.current) setRankError('排名资料读取失败，请重试')
     } finally {
-      setRankLoading(false)
+      if (requestId === rankRequestId.current) setRankLoading(false)
     }
   }
 
@@ -577,6 +595,7 @@ export default function CompetitorDailyPage() {
   // ── 不稳定词 ─────────────────────────────────────────────────────────────────
 
   async function openUnstableModal(site: CompetitorRow) {
+    setUnstableError('')
     setUnstableSite(site)
     setUnstablePage(0)
     setUnstableLoading(true)
@@ -611,7 +630,7 @@ export default function CompetitorDailyPage() {
 
       setUnstableData(results.sort((a, b) => b.volume - a.volume || b.totalDays - a.totalDays))
     } catch {
-      setUnstableData([])
+      setUnstableError('不稳定词读取失败，请重试')
     } finally {
       setUnstableLoading(false)
     }
@@ -817,6 +836,7 @@ export default function CompetitorDailyPage() {
             </div>
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-5 py-4">
+              {kwError && <p role="status" className="flex items-center gap-3 py-3 text-xs text-red-600">{kwError}<button type="button" className="btn-secondary" onClick={() => fetchKeywordsForDate(selectedSite, kwDate, kwTab)}>重试</button></p>}
               {kwLoading ? (
                 <div className="flex items-center justify-center py-10 text-gray-400 gap-2">
                   <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -825,7 +845,7 @@ export default function CompetitorDailyPage() {
                   </svg>
                   加载中...
                 </div>
-              ) : siteKeywords.length === 0 ? (
+              ) : siteKeywords.length === 0 && !kwError ? (
                 <p className="text-center text-gray-400 py-10 text-sm">该日期暂无新词</p>
               ) : (
                 <ul className="space-y-2">
@@ -865,6 +885,7 @@ export default function CompetitorDailyPage() {
             bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
           >
               <div className="flex-1 overflow-y-auto px-5 py-4">
+                {cleanError && <p role="status" className="flex items-center gap-3 py-3 text-xs text-red-600">{cleanError}<button type="button" className="btn-secondary" onClick={() => viewCleanedKeywords(cleanSite)}>重试</button></p>}
                 {cleanLoading ? (
                   <div className="flex items-center justify-center py-10 text-gray-400 gap-2">
                     <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -873,7 +894,7 @@ export default function CompetitorDailyPage() {
                     </svg>
                     加载中...
                   </div>
-                ) : pageClean.length === 0 ? (
+                ) : pageClean.length === 0 && !cleanError ? (
                   <p className="text-center text-gray-400 py-10 text-sm">暂无数据</p>
                 ) : (
                   <div className="divide-y divide-gray-100">
@@ -972,6 +993,7 @@ export default function CompetitorDailyPage() {
             </div>
             {/* Content */}
             <div className="flex-1 overflow-y-auto">
+              {rankError && <p role="status" className="flex items-center gap-3 py-3 text-xs text-red-600">{rankError}<button type="button" className="btn-secondary" onClick={() => fetchRankPage(rankSite, rankDate, rankType, rankPage, pageSize, true)}>重试</button></p>}
               {rankLoading ? (
                 <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
                   <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -980,7 +1002,7 @@ export default function CompetitorDailyPage() {
                   </svg>
                   <span className="text-sm">加载中...</span>
                 </div>
-              ) : rankPageData.length === 0 ? (
+              ) : rankPageData.length === 0 && !rankError ? (
                 <p className="text-center text-gray-400 py-16 text-sm">无数据</p>
               ) : (
                 <table aria-label="数据表格" className="w-full text-sm">
@@ -1063,6 +1085,7 @@ export default function CompetitorDailyPage() {
             bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden p-0"
           >
               <div className="flex-1 overflow-y-auto">
+                {unstableError && <p role="status" className="flex items-center gap-3 py-3 text-xs text-red-600">{unstableError}<button type="button" className="btn-secondary" onClick={() => openUnstableModal(unstableSite)}>重试</button></p>}
                 {unstableLoading ? (
                   <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
                     <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -1071,7 +1094,7 @@ export default function CompetitorDailyPage() {
                     </svg>
                     <span className="text-sm">加载中...</span>
                   </div>
-                ) : pageUnstable.length === 0 ? (
+                ) : pageUnstable.length === 0 && !unstableError ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无不稳定词（需积累多天数据）</p>
                 ) : (
                   <table aria-label="数据表格" className="w-full text-sm">

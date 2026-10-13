@@ -11,12 +11,16 @@ on:
   # Daily retries now run inside daily-crawl.yml immediately after each main
   # matrix. This workflow remains as a manual recovery entry point.
 
+env:
+  DEFER_CRAWL_ROLLUP: 'true'
+
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
       total: ${{ steps.gen.outputs.total }}
+      date: ${{ steps.gen.outputs.date }}
     steps:
       - name: Compute retry matrix (based on actual failed sites)
         id: gen
@@ -56,12 +60,13 @@ jobs:
           end_utc = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=myt).astimezone(timezone.utc)
           print(today, start_utc.strftime('%Y-%m-%dT%H:%M:%SZ'), end_utc.strftime('%Y-%m-%dT%H:%M:%SZ'))
           ")
+          echo "date=$TODAY" >> "$GITHUB_OUTPUT"
 
           # Step 1: Get today's activity IDs for this step
           ACTS=$(curl -sf \
             -H "apikey: ${SB_KEY}" \
             -H "Authorization: Bearer ${SB_KEY}" \
-            "${SB_URL}/rest/v1/activity_log?select=id&step=eq.${STEP}&type=eq.cron_task&logged_at=gte.${TODAY_START}&logged_at=lte.${TODAY_END}")
+            "${SB_URL}/rest/v1/activity_log?select=id&step=eq.${STEP}&type=eq.cron_task&data_date=eq.${TODAY}")
           IDS=$(echo "$ACTS" | python3 -c "
           import json, sys
           data = json.load(sys.stdin)
@@ -156,129 +161,43 @@ jobs:
       - name: Run retry crawl
         run: |
           if [ "${{ steps.vars.outputs.step }}" = "rank-title" ]; then
-            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} --retry-failed
+            npx tsx scripts/crawl-rank.ts --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} --date=${{ needs.setup.outputs.date }} --retry-failed
           else
-            npx tsx scripts/crawl.ts --step=${{ steps.vars.outputs.step }} --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} --retry-failed
+            npx tsx scripts/crawl.ts --step=${{ steps.vars.outputs.step }} --group=${{ matrix.group }} --total-groups=${{ needs.setup.outputs.total }} --date=${{ needs.setup.outputs.date }} --retry-failed
           fi
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-  # The final index-pages retry is followed immediately by tracking. This
-  # replaces tracking's old independent 06:45 cron and removes the idle gap.
-  tracking:
+  finalize:
     needs: [setup, retry]
-    if: >-
-      always() &&
-      needs.setup.result == 'success' &&
-      needs.retry.result != 'cancelled' &&
-      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
-       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
-    uses: ./.github/workflows/daily-crawl.yml
-    with:
-      step: tracking
-    secrets: inherit
-
-  # Environment and hot-radar data only depend on the completed crawl/retry
-  # batches. Do not make them wait for tracking: a single slow tracking group
-  # would otherwise keep both user-facing pages on yesterday's cache.
-  post-index-refresh:
-    needs: [setup, retry]
-    if: >-
-      always() &&
-      needs.setup.result == 'success' &&
-      needs.retry.result != 'cancelled' &&
-      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
-       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Refresh environment daily snapshot
-        id: environment
-        continue-on-error: true
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
-        run: |
-          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/environment/daily-snapshot")
-          echo "$RESPONSE"
-          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
-
-      - name: Refresh hot radar cache
-        id: hot_radar
-        continue-on-error: true
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
-        run: |
-          RESPONSE=$(curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/hot-radar/refresh")
-          echo "$RESPONSE"
-          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
-
-      - name: Verify independent refreshes
-        if: always()
-        env:
-          ENVIRONMENT_RESULT: ${{ steps.environment.outcome }}
-          HOT_RADAR_RESULT: ${{ steps.hot_radar.outcome }}
-        run: |
-          echo "Environment: $ENVIRONMENT_RESULT"
-          echo "Hot radar: $HOT_RADAR_RESULT"
-          if [ "$ENVIRONMENT_RESULT" != "success" ] || [ "$HOT_RADAR_RESULT" != "success" ]; then
-            echo "One or more independent refreshes failed"
-            exit 1
-          fi
-
-  # Build one cache-refresh job per task group. A single request that computed
-  # every group sequentially exceeded Vercel's function timeout and returned
-  # 504 even when most of the work had already completed.
-  tracking_cache_setup:
-    needs: tracking
-    if: >-
-      always() &&
-      needs.tracking.result != 'cancelled' &&
-      needs.tracking.result != 'skipped' &&
-      ((github.event_name == 'schedule' && github.event.schedule == '30 22 * * *') ||
-       (github.event_name == 'workflow_dispatch' && github.event.inputs.step == 'index-pages'))
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.groups.outputs.matrix }}
-    steps:
-      - name: Load task groups
-        id: groups
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          TASK_GROUPS_JSON=$(curl --fail-with-body --show-error --silent --max-time 60 \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
-          MATRIX=$(TASK_GROUPS_JSON="$TASK_GROUPS_JSON" python3 -c "import json,os; rows=json.loads(os.environ['TASK_GROUPS_JSON']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-
-  # Group tracking cache does depend on the tracking crawl. Each group now has
-  # its own Vercel invocation and runs in parallel with the other groups.
-  post-tracking-refresh:
-    needs: tracking_cache_setup
-    if: ${{ needs.tracking_cache_setup.result == 'success' }}
+    if: ${{ needs.retry.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.tracking_cache_setup.outputs.matrix) }}
+    outputs:
+      ready: ${{ steps.ready.outputs.ready }}
     steps:
-      - name: Refresh group tracking cache - ${{ matrix.group_name }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Finalize retry and verify dependencies
+        id: ready
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
-          GROUP_ID: ${{ matrix.group_id }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STEP: ${{ github.event.inputs.step }}
+          DATA_DATE: ${{ needs.setup.outputs.date }}
         run: |
-          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
-          echo "$RESPONSE"
-          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+          npx tsx scripts/crawl.ts --finalize --retry-only --step="$STEP" --date="$DATA_DATE" --total-groups=${{ needs.setup.outputs.total }}
+          npx tsx scripts/crawl.ts --claim-derivation --date="$DATA_DATE"
+
+  derived_data:
+    needs: [setup, finalize]
+    if: ${{ always() && needs.finalize.result == 'success' && needs.finalize.outputs.ready == 'true' }}
+    uses: ./.github/workflows/derived-crawl-data.yml
+    with:
+      date: ${{ needs.setup.outputs.date }}
+    secrets: inherit

@@ -41,7 +41,7 @@ function safeSourceUrl(source: BrowserContentFeedSource, value: unknown): string
     }
     url.hash = ''
     for (const key of [...url.searchParams.keys()]) {
-      if (/^(?:spm|from|source|share|share_source|share_medium|share_plat|share_session_id|timestamp|unique_k)$/i.test(key)) {
+      if (/^(?:spm(?:_.*)?|from|source|share|share_source|share_medium|share_plat|share_session_id|timestamp|unique_k)$/i.test(key)) {
         url.searchParams.delete(key)
       }
     }

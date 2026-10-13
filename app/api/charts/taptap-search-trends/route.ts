@@ -23,12 +23,12 @@ const readDailyTapTapSearch = unstable_cache(async () => {
       },
       signal: AbortSignal.timeout(15_000),
     })
-    if (!response.ok) return { items: [], unavailable: true }
+    if (!response.ok) return { items: [], unavailable: true,updatedAt: null,failed: true }
     const items = parseTapTapSearchTrends(await response.text())
-    return { items, unavailable: items.length === 0 }
+    return { items, unavailable: items.length === 0,updatedAt: items.length ? new Date().toISOString() : null,failed: items.length === 0 }
   } catch {
     // Empty failures are cached too, preventing repeated retries during an outage.
-    return { items: [], unavailable: true }
+    return { items: [], unavailable: true,updatedAt: null,failed: true }
   }
 }, ['taptap-search-trends-daily-v1'], { revalidate: ONE_DAY })
 

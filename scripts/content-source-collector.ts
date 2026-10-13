@@ -133,6 +133,7 @@ async function collectTarget(page: Page, target: Target) {
 }
 
 async function send(source: Source, items: Record<string, unknown>[]) {
+  if (items.length === 0) throw new Error(`${source}: 解析0条，请检查登录、页面布局或访问限制`)
   const base = process.env.TREND_INGEST_URL?.trim()
   const secret = process.env.TREND_INGEST_SECRET?.trim()
   if (!base || !secret) throw new Error('TREND_INGEST_URL / TREND_INGEST_SECRET 未配置')
@@ -145,7 +146,8 @@ async function send(source: Source, items: Record<string, unknown>[]) {
   })
   const result = await response.json().catch(() => null) as { accepted?: number; error?: string } | null
   if (!response.ok) throw new Error(`入库失败 HTTP ${response.status}：${result?.error || '未知错误'}`)
-  return result?.accepted ?? 0
+  if (!Number.isInteger(result?.accepted) || (result?.accepted ?? 0) <= 0) throw new Error(`${source}: 入库未接受资料，未标记采集完成`)
+  return result!.accepted!
 }
 
 async function main() {
@@ -156,20 +158,34 @@ async function main() {
   const targets = selected === 'all' ? TARGETS : TARGETS.filter(target => target.source === selected)
   if (targets.length === 0) throw new Error(`内容来源无效：${selected}`)
 
+  const failures: string[] = []
   for (const source of [...new Set(targets.map(target => target.source))]) {
-    const context = await launch(source)
+    let context: Awaited<ReturnType<typeof launch>> | undefined
     try {
+      context = await launch(source)
       const page = context.pages()[0] ?? await context.newPage()
       for (const target of targets.filter(item => item.source === source)) {
-        const items = await collectTarget(page, target)
-        const accepted = await send(source, items)
-        console.log(`[${source}] ${target.url}：取得 ${items.length} 条，入库 ${accepted} 条`)
+        try {
+          const items = await collectTarget(page, target)
+          const accepted = await send(source, items)
+          console.log(`[${source}] ${target.url}：取得 ${items.length} 条，入库 ${accepted} 条`)
+        } catch (error) {
+          const detail = `[${source}] ${target.url}: ${error instanceof Error ? error.message : error}`
+          failures.push(detail)
+          console.warn(detail)
+        }
         await page.waitForTimeout(randomInt(5_000, 10_001))
       }
+    } catch (error) {
+      const detail = `[${source}] ${error instanceof Error ? error.message : error}`
+      failures.push(detail)
+      console.warn(detail)
     } finally {
-      await context.close().catch(() => undefined)
+      await context?.close().catch(() => undefined)
     }
   }
+  console.log(JSON.stringify({ complete: failures.length === 0, failures }))
+  if (failures.length) process.exitCode = 1
 }
 
 main().catch(error => {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomInt } from 'node:crypto'
 import { load } from 'cheerio'
 import iconv from 'iconv-lite'
 
@@ -64,13 +64,20 @@ const SOURCE_URLS: Record<ContentFeedRefreshSource, string> = {
   ccplay: 'https://m2.ccplay.cn/news',
 }
 
-const USER_AGENT = 'Mozilla/5.0 (compatible; QixinContentFeed/1.0; public metadata only)'
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+]
 const MAX_RESPONSE_BYTES = 2_000_000
 const MAX_SUMMARY_LENGTH = 280
 const MAX_PAGES = 3
 const REQUEST_TIMEOUT_MS = 12_000
 const MAX_SAME_ORIGIN_REDIRECTS = 3
 const MAX_URL_LENGTH = 2_048
+
+class SourceRateLimitError extends Error {}
+const waitBetweenPages = () => new Promise(resolve => setTimeout(resolve, randomInt(8_000, 15_001)))
 
 function cleanText(value: unknown, maximum = 300): string {
   return String(value ?? '')
@@ -253,7 +260,7 @@ async function fetchFromSameOrigin(url: string, signal: AbortSignal): Promise<Re
     const response = await fetch(current, {
       headers: {
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'User-Agent': USER_AGENT,
+        'User-Agent': USER_AGENTS[randomInt(USER_AGENTS.length)],
       },
       redirect: 'manual',
       signal,
@@ -310,12 +317,17 @@ async function fetchPage(url: string, charset: 'utf8' | 'gb18030'): Promise<stri
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       const response = await fetchFromSameOrigin(url, AbortSignal.timeout(REQUEST_TIMEOUT_MS))
+      if (response.status === 403 || response.status === 429) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new SourceRateLimitError(`HTTP ${response.status}: source blocked/rate-limited; stop until the next scheduled run`)
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const bytes = await readLimitedResponseBytes(response)
       return decodeContentFeedBytes(bytes, charset)
     } catch (error) {
       lastError = error
-      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 700))
+      if (error instanceof SourceRateLimitError) throw error
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, randomInt(5_000, 10_001)))
     }
   }
   throw lastError instanceof Error ? lastError : new Error('request failed')
@@ -331,6 +343,7 @@ async function fetch52Pojie(): Promise<ContentFeedItemInput[]> {
 async function fetch4399(): Promise<ContentFeedItemInput[]> {
   const items: ContentFeedItemInput[] = []
   for (let page = 1; page <= MAX_PAGES; page += 1) {
+    if (page > 1) await waitBetweenPages()
     const url = page === 1 ? SOURCE_URLS['4399'] : `https://a.4399.cn/game-new-p-${page}.html`
     const pageItems = parse4399NewGames(await fetchPage(url, 'utf8'))
     if (pageItems.length === 0) break
@@ -354,28 +367,31 @@ async function fetchCcplay(): Promise<ContentFeedFetchResult> {
     { path: '/gamestrategy', category: 'game_guide' },
     { path: '/news', category: 'game_news' },
   ]
-  const settled = await Promise.allSettled(sections.map(async section => {
+  const items: ContentFeedItemInput[] = []
+  const warnings: string[] = []
+  for (const [index, section] of sections.entries()) {
+    if (index > 0) await waitBetweenPages()
+    try {
     const sectionItems: ContentFeedItemInput[] = []
     const baseUrl = `https://m2.ccplay.cn${section.path}`
     for (let page = 1; page <= MAX_PAGES; page += 1) {
+      if (page > 1) await waitBetweenPages()
       const url = page === 1 ? baseUrl : `${baseUrl}?page=${page}`
       const pageItems = parseCcplayNews(await fetchPage(url, 'utf8'), section.category)
       if (pageItems.length === 0) break
       sectionItems.push(...pageItems)
     }
-    return sectionItems
-  }))
-  const items: ContentFeedItemInput[] = []
-  const warnings: string[] = []
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') items.push(...result.value)
-    else {
-      const detail = result.reason instanceof Error ? result.reason.message : 'request failed'
-      const warning = `${sections[index].category}: ${detail}`.slice(0, 240)
+    if (sectionItems.length === 0) warnings.push(`${section.category}: no parseable items`)
+    items.push(...sectionItems)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'request failed'
+      const warning = `${section.category}: ${detail}`.slice(0, 240)
       warnings.push(warning)
-      console.error(`[content-feed] ccplay ${warning}`)
+      console.warn(`[content-feed] ccplay ${warning}`)
+      // All sections share one host. Never keep requesting it after 403/429.
+      if (error instanceof SourceRateLimitError) break
     }
-  })
+  }
   const unique = dedupeItems(items)
   if (unique.length === 0) throw new Error('news list returned no parseable items')
   return { items: unique, warnings }

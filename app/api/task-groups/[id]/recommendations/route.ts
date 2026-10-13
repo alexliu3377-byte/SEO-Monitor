@@ -1,153 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { fetchAllRows } from '@/lib/supabase-paginate'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
-import { normalizeDomains } from '@/lib/task-group-data'
 import type { UserRole } from '@/lib/user-context'
 
-export const maxDuration = 180
+export const maxDuration = 60
 
 const PAGE_SIZE = 20
-const COOLDOWN_UNIT_DAYS = 7
-
-interface SignalRow {
-  keyword: string
-  stat_date: string
-  rank_position: number | null
-  prev_rank: number | null
-  volume: number | null
-  url: string | null
-  title: string | null
-}
-
-interface ClaimRow {
-  id: string
-  user_id: string
-  keyword: string
-  final_keyword: string | null
-  page_url: string | null
-  operation_type: string | null
-  submitted_at: string | null
-  claimed_date: string
-  created_at: string
-}
-
-interface RecommendationRow extends SignalRow {
-  volume: number
-  memberId: string
-  memberName: string
-  ownUrl: string | null
-  ownCreatedAt: string | null
-  sameUrlCount: number
-  sameUrlKeywords: Array<{ keyword: string; rank_position: number | null; volume: number }>
-}
-
-function malaysiaDate(offsetDays = 0) {
-  return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
-}
-
-function normalizeUrl(raw: string | null) {
-  return (raw ?? '').trim().replace(/^https?:\/\/(www\.|m\.)?/i, '').toLowerCase()
-}
-
-function addDays(date: string, days: number) {
-  return new Date(new Date(`${date.slice(0, 10)}T00:00:00Z`).getTime() + days * 86400000)
-    .toISOString().slice(0, 10)
-}
-
-function daysBetween(a: string, b: string) {
-  return Math.round((new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86400000)
-}
-
-function chunks<T>(rows: T[], size: number) {
-  const result: T[][] = []
-  for (let i = 0; i < rows.length; i += size) result.push(rows.slice(i, i + size))
-  return result
-}
-
-function dedupeSignals(rows: SignalRow[]) {
-  const seen = new Set<string>()
-  return rows.filter(row => {
-    const key = row.keyword.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-function buildHistory(rows: ClaimRow[]) {
-  const byUser = new Map<string, {
-    keywordMap: Map<string, { lastSubmittedAt: string; updateCount: number }>
-    urlSet: Set<string>
-  }>()
-  for (const row of rows) {
-    if (!byUser.has(row.user_id)) byUser.set(row.user_id, { keywordMap: new Map(), urlSet: new Set() })
-    const history = byUser.get(row.user_id)!
-    const keyword = (row.final_keyword || row.keyword).trim().toLowerCase()
-    const submittedAt = row.submitted_at || row.claimed_date
-    const existing = history.keywordMap.get(keyword)
-    history.keywordMap.set(keyword, {
-      lastSubmittedAt: !existing || submittedAt > existing.lastSubmittedAt ? submittedAt : existing.lastSubmittedAt,
-      updateCount: (existing?.updateCount ?? 0) + (row.operation_type === '更新' ? 1 : 0),
-    })
-    const url = normalizeUrl(row.page_url)
-    if (url) history.urlSet.add(url)
-  }
-  return byUser
-}
-
-function cooldownPriority(keyword: string, volume: number, history: ReturnType<typeof buildHistory> extends Map<string, infer T> ? T : never) {
-  const info = history.keywordMap.get(keyword.toLowerCase())
-  if (!info) return { eligible: true, daysSinceEligible: 0, volume }
-  const end = addDays(info.lastSubmittedAt, COOLDOWN_UNIT_DAYS * (info.updateCount + 1))
-  const today = malaysiaDate()
-  return { eligible: end <= today, daysSinceEligible: end <= today ? daysBetween(end, today) : -1, volume }
-}
-
-async function loadSignals(service: any, siteIds: string[], type: 'rankdown' | 'rankup') {
-  if (siteIds.length === 0) return []
-  return fetchAllRows<SignalRow>((from, to) => service
-    .from('keyword_signal_rollup')
-    .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
-    .in('site_id', siteIds)
-    .eq('type', type)
-    .gte('last_seen', malaysiaDate(-30))
-    .order('last_seen', { ascending: false })
-    .order('max_volume', { ascending: false })
-    .order('site_id', { ascending: true })
-    .order('keyword', { ascending: true })
-    .range(from, to))
-}
-
-async function loadSignalsForKeywords(
-  service: any,
-  siteIds: string[],
-  type: 'rankdown' | 'rankup',
-  keywords: string[],
-) {
-  if (siteIds.length === 0 || keywords.length === 0) return []
-  const keywordChunks = chunks(keywords, 60)
-  const rows: SignalRow[] = []
-  // Keep concurrency bounded: this avoids one huge encoded `.in()` request while
-  // still making the rank-up tab responsive for members with a long history.
-  for (let index = 0; index < keywordChunks.length; index += 4) {
-    const batch = keywordChunks.slice(index, index + 4)
-    const batchRows = await Promise.all(batch.map(keywordChunk => fetchAllRows<SignalRow>((from, to) => service
-      .from('keyword_signal_rollup')
-      .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
-      .in('site_id', siteIds)
-      .in('keyword', keywordChunk)
-      .eq('type', type)
-      .gte('last_seen', malaysiaDate(-30))
-      .order('last_seen', { ascending: false })
-      .order('max_volume', { ascending: false })
-      .order('site_id', { ascending: true })
-      .order('keyword', { ascending: true })
-      .range(from, to))))
-    for (const result of batchRows) rows.push(...result)
-  }
-  return rows
-}
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = await createClient()
@@ -157,186 +15,56 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id: groupId } = await params
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type') === 'rankup' ? 'rankup' : 'rankdown'
-  const page = Math.max(0, Number.parseInt(searchParams.get('page') || '0', 10) || 0)
+  const page = Math.min(100000, Math.max(0, Number.parseInt(searchParams.get('page') || '0', 10) || 0))
   const requestedUserId = searchParams.get('userId') || user.id
 
+  // Only the server may call this RPC. User IDs come from the authorized
+  // membership list, never directly from request parameters.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
-  const { data: profile } = await service.from('user_profiles').select('role').eq('id', user.id).single()
-  const role = (profile?.role ?? 'normal') as UserRole
-  const canManage = role === 'super' || role === 'admin'
-  if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const [{ data: group }, { data: memberRows }, { data: sites }, { data: allGroups }] = await Promise.all([
-    service.from('task_groups').select('site_domains').eq('id', groupId).maybeSingle(),
-    service.from('task_group_members').select('user_id, username').eq('group_id', groupId),
-    service.from('sites').select('id, domain'),
-    type === 'rankup' ? service.from('task_groups').select('site_domains') : Promise.resolve({ data: [] }),
-  ])
-  if (!group) return NextResponse.json({ error: 'Task group not found' }, { status: 404 })
-
-  const members = ((memberRows ?? []) as { user_id: string; username: string | null }[])
-  const memberMap = new Map(members.map(member => [member.user_id, member.username || '']))
-  if (!canManage && !memberMap.has(user.id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  if (!canManage && requestedUserId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  if (canManage && requestedUserId !== user.id && !memberMap.has(requestedUserId)) {
-    return NextResponse.json({ error: 'Group member not found' }, { status: 404 })
-  }
-
-  // Managers keep the existing merged-team view. Members only receive their own recommendations.
-  const targetUsers = canManage ? members.map(member => member.user_id) : [requestedUserId]
-  if (targetUsers.length === 0) return NextResponse.json({ rows: [], total: 0, page, pageSize: PAGE_SIZE })
-
-  const groupDomains = new Set(normalizeDomains(group.site_domains))
-  const allSiteRows = (sites ?? []) as { id: string; domain: string }[]
-  const ownSiteIds = allSiteRows.filter(site => groupDomains.has(normalizeDomains([site.domain])[0] ?? '')).map(site => site.id)
-  if (ownSiteIds.length === 0) return NextResponse.json({ rows: [], total: 0, page, pageSize: PAGE_SIZE })
-
-  const claims = await fetchAllRows<ClaimRow>((from, to) => service
-    .from('member_claimed_keywords')
-    .select('id, user_id, keyword, final_keyword, page_url, operation_type, submitted_at, claimed_date, created_at')
-    .eq('group_id', groupId)
-    .in('user_id', targetUsers)
-    .eq('status', 'submitted')
-    .order('id', { ascending: true })
-    .range(from, to))
-  const historyByUser = buildHistory(claims)
-
-  const { data: dismissalRows } = await service.from('member_rec_dismissals')
-    .select('user_id, keyword')
-    .eq('group_id', groupId)
-    .in('user_id', targetUsers)
-    .gte('dismissed_at', new Date(Date.now() - 7 * 86400000).toISOString())
-  const dismissed = new Set(((dismissalRows ?? []) as { user_id: string; keyword: string }[])
-    .map(row => `${row.user_id}\n${row.keyword.toLowerCase()}`))
-
-  let recommendations: (RecommendationRow & { priority: number })[] = []
-
-  if (type === 'rankdown') {
-    const signals = dedupeSignals(await loadSignals(service, ownSiteIds, 'rankdown'))
-    const signalsByUrl = new Map<string, SignalRow[]>()
-    for (const signal of signals) {
-      const url = normalizeUrl(signal.url)
-      if (!url) continue
-      const sameUrlSignals = signalsByUrl.get(url) ?? []
-      sameUrlSignals.push(signal)
-      signalsByUrl.set(url, sameUrlSignals)
-    }
-    for (const memberId of targetUsers) {
-      const history = historyByUser.get(memberId)
-      if (!history) continue
-      for (const signal of signals) {
-        const keyword = signal.keyword.toLowerCase()
-        if (!history.keywordMap.has(keyword) && !history.urlSet.has(normalizeUrl(signal.url))) continue
-        if (dismissed.has(`${memberId}\n${keyword}`)) continue
-        const priority = cooldownPriority(signal.keyword, Number(signal.volume) || 0, history)
-        if (!priority.eligible) continue
-        const sameUrlSignals = signalsByUrl.get(normalizeUrl(signal.url)) ?? [signal]
-        recommendations.push({
-          ...signal,
-          volume: Number(signal.volume) || 0,
-          memberId,
-          memberName: memberMap.get(memberId) || '',
-          ownUrl: signal.url,
-          ownCreatedAt: null,
-          sameUrlCount: sameUrlSignals.length,
-          sameUrlKeywords: sameUrlSignals
-            .map(row => ({ keyword: row.keyword, rank_position: row.rank_position, volume: Number(row.volume) || 0 }))
-            .sort((a, b) => b.volume - a.volume),
-          priority: priority.daysSinceEligible,
-        })
-      }
+  try {
+    const { data: profile, error: profileError } = await service.from('user_profiles').select('role, is_active').eq('id', user.id).single()
+    if (profileError) throw profileError
+    if (profile?.is_active === false) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const role = (profile?.role ?? 'normal') as UserRole
+    const canManage = role === 'super' || role === 'admin'
+    if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    recommendations.sort((a, b) => a.priority - b.priority || b.volume - a.volume || b.stat_date.localeCompare(a.stat_date))
-    const seenUrls = new Set<string>()
-    recommendations = recommendations.filter(row => {
-      const normalized = normalizeUrl(row.url)
-      if (!normalized) return true
-      const key = `${row.memberId}\n${normalized}`
-      if (seenUrls.has(key)) return false
-      seenUrls.add(key)
-      return true
+    const [{ data: group, error: groupError }, { data: members, error: membersError }] = await Promise.all([
+      service.from('task_groups').select('id').eq('id', groupId).maybeSingle(),
+      service.from('task_group_members').select('user_id').eq('group_id', groupId),
+    ])
+    if (groupError || membersError) throw groupError || membersError
+    if (!group) return NextResponse.json({ error: 'Task group not found' }, { status: 404 })
+    const memberIds = ((members ?? []) as { user_id: string }[]).map(member => member.user_id)
+    if (!canManage && (!memberIds.includes(user.id) || requestedUserId !== user.id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (canManage && requestedUserId !== user.id && !memberIds.includes(requestedUserId)) {
+      return NextResponse.json({ error: 'Group member not found' }, { status: 404 })
+    }
+
+    // Managers retain the merged-team view; members can only see themselves.
+    const targetUsers = canManage ? memberIds : [user.id]
+    if (targetUsers.length === 0) return NextResponse.json({ rows: [], total: 0, page, pageSize: PAGE_SIZE })
+
+    const { data, error } = await service.rpc('get_task_group_recommendations_page', {
+      p_group_id: groupId,
+      p_user_ids: targetUsers,
+      p_type: type,
+      p_page: page,
+      p_page_size: PAGE_SIZE,
     })
-  } else {
-    const globalOwnDomains = new Set<string>()
-    for (const item of (allGroups ?? []) as { site_domains: string[] | null }[]) {
-      for (const domain of normalizeDomains(item.site_domains)) globalOwnDomains.add(domain)
+    if (error) throw error
+    if (!data || !Array.isArray(data.rows) || typeof data.total !== 'number') {
+      throw new Error('Invalid recommendation page response')
     }
-    const competitorSiteIds = allSiteRows
-      .filter(site => !globalOwnDomains.has(normalizeDomains([site.domain])[0] ?? ''))
-      .map(site => site.id)
-
-    // Preserve the existing ownership rule: the latest submitted page for a keyword owns the recommendation.
-    // Build this small candidate set first; querying every competitor rank-up signal before matching it
-    // made the tab time out as the signal table grew.
-    const latestClaim = new Map<string, ClaimRow>()
-    for (const claim of claims) {
-      if (!claim.page_url) continue
-      const keyword = (claim.final_keyword || claim.keyword).trim().toLowerCase()
-      const existing = latestClaim.get(keyword)
-      if (!existing || claim.created_at > existing.created_at) latestClaim.set(keyword, claim)
-    }
-    const candidateKeywords = Array.from(new Set(Array.from(latestClaim.values())
-      .map(claim => (claim.final_keyword || claim.keyword).trim())
-      .filter(Boolean)))
-    const signals = dedupeSignals(await loadSignalsForKeywords(service, competitorSiteIds, 'rankup', candidateKeywords))
-    const signalKeywords = signals.map(signal => signal.keyword)
-    const ownLatestRankDate = new Map<string, string>()
-    for (const keywordChunk of chunks(signalKeywords, 100)) {
-      const rows = await fetchAllRows<{ id: string; keyword: string; stat_date: string }>((from, to) => service
-        .from('site_keyword_ranks')
-        .select('id, keyword, stat_date')
-        .in('site_id', ownSiteIds)
-        .in('keyword', keywordChunk)
-        .eq('platform', 'mobile')
-        .not('rank_position', 'is', null)
-        .order('id', { ascending: true })
-        .range(from, to))
-      for (const row of rows) {
-        const keyword = row.keyword.toLowerCase()
-        const existing = ownLatestRankDate.get(keyword)
-        if (!existing || row.stat_date > existing) ownLatestRankDate.set(keyword, row.stat_date)
-      }
-    }
-
-    for (const signal of signals) {
-      const keyword = signal.keyword.toLowerCase()
-      const claim = latestClaim.get(keyword)
-      if (!claim || !targetUsers.includes(claim.user_id)) continue
-      const submittedDate = (claim.submitted_at || claim.claimed_date || claim.created_at).slice(0, 10)
-      // Recommend only when the competitor rose after this page was submitted and
-      // our own site still has not obtained a mobile ranking since that submission.
-      if (signal.stat_date < submittedDate) continue
-      const ownRankDate = ownLatestRankDate.get(keyword)
-      if (ownRankDate && ownRankDate >= submittedDate) continue
-      if (dismissed.has(`${claim.user_id}\n${keyword}`)) continue
-      const history = historyByUser.get(claim.user_id)
-      if (!history) continue
-      const priority = cooldownPriority(signal.keyword, Number(signal.volume) || 0, history)
-      if (!priority.eligible) continue
-      recommendations.push({
-        ...signal,
-        volume: Number(signal.volume) || 0,
-        memberId: claim.user_id,
-        memberName: memberMap.get(claim.user_id) || '',
-        ownUrl: claim.page_url,
-        ownCreatedAt: claim.submitted_at || claim.claimed_date || claim.created_at,
-        sameUrlCount: 0,
-        sameUrlKeywords: [],
-        priority: priority.daysSinceEligible,
-      })
-    }
-    recommendations.sort((a, b) => a.priority - b.priority || b.volume - a.volume || b.stat_date.localeCompare(a.stat_date))
+    // Re-evaluate cooldowns and dismissals after a submission changes.
+    return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } })
+  } catch (error) {
+    console.error('Task group recommendations failed:', error)
+    return NextResponse.json({ error: '今日推荐读取失败，请重试' }, { status: 500 })
   }
-
-  const total = recommendations.length
-  const start = page * PAGE_SIZE
-  const rows = recommendations.slice(start, start + PAGE_SIZE).map(({ priority: _priority, ...row }) => row)
-  return NextResponse.json(
-    { rows, total, page, pageSize: PAGE_SIZE },
-    { headers: { 'Cache-Control': 'private, max-age=30' } },
-  )
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { monthlyTrendArchiveState } from '@/lib/monthly-trend-archive'
+import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export const maxDuration = 300
 
@@ -76,7 +78,7 @@ interface DrillPayload {
 // 一两百行结果传回来，不搬整月原始数据；2) 已经过去的月份（不是当月）数据
 // 不会再变，算完一次写进 monthly_trend_cache 表，下次直接读缓存。当月也由
 // 每日抓取后的 GitHub Actions 预先刷新，组员打开页面时只读取缓存。
-export async function GET(req: Request) {
+async function getMonthlyTrend(req: Request) {
   const ctx = await requireLogin(req)
   if (ctx.error) return ctx.error
   const { service, isCron } = ctx
@@ -87,11 +89,15 @@ export async function GET(req: Request) {
   if (forceRefresh && !isCron) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   if (drillMonth) {
-    if (!/^\d{4}-\d{2}$/.test(drillMonth)) return NextResponse.json({ error: 'month 格式应为 YYYY-MM' }, { status: 400 })
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(drillMonth)) return NextResponse.json({ error: 'month 格式应为 YYYY-MM' }, { status: 400 })
     const [y, m] = drillMonth.split('-').map(Number)
     const start = `${drillMonth}-01`
     const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
     const isClosedMonth = drillMonth < currentMonthCN()
+    const malaysiaToday = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
+    if (monthlyTrendArchiveState(drillMonth, malaysiaToday) === 'future') {
+      return NextResponse.json({ error: '未来月份尚无趋势资料' }, { status: 400 })
+    }
 
     // Closed months are immutable after their first post-month refresh. The current
     // month changes during the daily crawls, so cache it briefly instead of running
@@ -103,12 +109,21 @@ export async function GET(req: Request) {
     if (cacheReadError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
     const cachedPayload = cached?.payload as DrillPayload | undefined
-    const canUseCachedPayload = Boolean(cachedPayload) && !forceRefresh && (
-      isClosedMonth ? cached?.is_final === true : true
+    // A final archive is immutable even for a forced cron refresh. Recomputing
+    // it after the detail cleanup would overwrite the only complete snapshot.
+    const canUseCachedPayload = Boolean(cachedPayload) && (
+      isClosedMonth ? cached?.is_final === true : !forceRefresh
     )
     if (canUseCachedPayload) {
       const cacheState = isClosedMonth || isFresh(cached?.computed_at) ? 'fresh' : 'stale'
       return NextResponse.json(cachedPayload, { headers: { 'X-Monthly-Trend-Cache': cacheState } })
+    }
+
+    if (monthlyTrendArchiveState(drillMonth, malaysiaToday) === 'expired') {
+      return NextResponse.json({
+        error: '该月份尚未完成归档，原始资料已超出 40 天保留范围，无法完整重建',
+        code: 'MONTH_NOT_ARCHIVED', month: drillMonth,
+      }, { status: 410 })
     }
 
     // 站点PC/M权重——给"查看"弹窗里的域名标注权重用，跟分组任务详情弹窗同一个
@@ -116,11 +131,17 @@ export async function GET(req: Request) {
     // weight_history 记录，按 record_date 升序遍历、后面的覆盖前面的，最后
     // 留下的就是最新值。
     const since30 = new Date(Date.now() + 8 * 3600000 - 30 * 86400000).toISOString().slice(0, 10)
-    const [{ data: sitesForWeight }, { data: weightRows }] = await Promise.all([
+    const [{ data: sitesForWeight, error: sitesWeightError }, weightRows] = await Promise.all([
       service.from('sites').select('id, domain'),
-      service.from('weight_history').select('site_id, pc_weight, mobile_weight, record_date')
-        .gte('record_date', since30).order('record_date', { ascending: true }),
+      fetchAllRows<{ site_id: string; pc_weight: number; mobile_weight: number }>((from, to) => service
+        .from('weight_history').select('site_id, pc_weight, mobile_weight, record_date')
+        .gte('record_date', since30).lte('record_date', malaysiaToday)
+        .order('record_date', { ascending: true }).order('site_id', { ascending: true }).range(from, to)),
     ])
+    if (sitesWeightError) {
+      console.error('Monthly trend weights load failed:', sitesWeightError)
+      return NextResponse.json({ error: '月度趋势站点资料读取失败，请重试' }, { status: 500 })
+    }
     const domainOfSite = new Map<string, string>((sitesForWeight ?? []).map((s: { id: string; domain: string }) => [s.id, s.domain]))
     const domainWeights: Record<string, { pc: number; mobile: number }> = {}
     for (const r of (weightRows ?? []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
@@ -134,23 +155,19 @@ export async function GET(req: Request) {
     // 页面看起来"这个月没有涨跌词"但其实是查询失败，不是真的没数据）。全部
     // 改成串行调用，宁可慢一点也不要相互抢导致超时；反正过去的月份缓存后
     // 只会在第一次未命中时付这个代价。
-    const { data: appRows, error: appErr } = await service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'app', p_limit: 50 })
-    const { data: gameRows, error: gameErr } = await service.rpc('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'game', p_limit: 50 })
-    const { data: rankupRows, error: rankupErr } = await service.rpc('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankup', p_limit: 100 })
-    const { data: rankdownRows, error: rankdownErr } = await service.rpc('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankdown', p_limit: 100 })
-    const { data: continuousRows, error: continuousErr } = await service.rpc('monthly_continuous_trend', { p_start: start, p_end: end, p_limit: 100 })
+    async function aggregate(name: string, parameters: Record<string, unknown>) {
+      const { data, error } = await service.rpc(name, parameters)
+      if (error) throw new Error(`Monthly trend ${name} failed: ${error.message}`)
+      return data ?? []
+    }
+    const appRows = await aggregate('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'app', p_limit: 50 })
+    const gameRows = await aggregate('monthly_new_keyword_top', { p_start: start, p_end: end, p_content_type: 'game', p_limit: 50 })
+    const rankupRows = await aggregate('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankup', p_limit: 100 })
+    const rankdownRows = await aggregate('monthly_rank_change_top', { p_start: start, p_end: end, p_type: 'rankdown', p_limit: 100 })
+    const continuousRows = await aggregate('monthly_continuous_trend', { p_start: start, p_end: end, p_limit: 100 })
     // 搜索量变动跟分组任务"搜索量上涨"同一个数据源（keyword_volume），up/down
     // 一起查一次，前端按正负拆成两栏——见 supabase/schema.sql 里的注释。
-    const { data: volumeChangeRows, error: volumeChangeErr } = await service.rpc('monthly_volume_change_top', { p_start: start, p_end: end, p_limit: 300 })
-
-    const rpcError = appErr || gameErr || rankupErr || rankdownErr || continuousErr || volumeChangeErr
-    if (rpcError) {
-      // A stale current-month snapshot is still more useful than turning the whole
-      // trend page into an error while one of the expensive aggregates times out.
-      console.error('Failed to refresh monthly trend drilldown', rpcError)
-      if (cachedPayload && !forceRefresh) return NextResponse.json(cachedPayload)
-      return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-    }
+    const volumeChangeRows = await aggregate('monthly_volume_change_top', { p_start: start, p_end: end, p_limit: 300 })
 
     const volumeChangeList = (volumeChangeRows ?? []) as { keyword: string; volume: number; volume_change: number; domains: string[] }[]
     const volumeRising = volumeChangeList.filter(r => r.volume_change > 0).sort((a, b) => b.volume_change - a.volume_change).slice(0, 100)
@@ -183,39 +200,6 @@ export async function GET(req: Request) {
     return NextResponse.json(payload)
   }
 
-  const [earliestResult, latestResult] = await Promise.all([
-    service.from('raw_keywords').select('content_date')
-      .not('content_date', 'is', null).order('content_date', { ascending: true }).limit(1).maybeSingle(),
-    service.from('raw_keywords').select('content_date')
-      .not('content_date', 'is', null).order('content_date', { ascending: false }).limit(1).maybeSingle(),
-  ])
-
-  if (earliestResult.error || latestResult.error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
-
-  const earliestRow = earliestResult.data
-  const latestRow = latestResult.data
-
-  if (!earliestRow || !latestRow) return NextResponse.json({ months: [], earliestMonth: null })
-
-  const months = monthsBetween(earliestRow.content_date.slice(0, 7), latestRow.content_date.slice(0, 7))
-  const latestMonth = months[months.length - 1]
-  const [summaryCacheResult, detailCacheResult] = await Promise.all([
-    service
-      .from('monthly_trend_summary_cache')
-      .select('month, app_count, game_count, computed_at, is_final')
-      .in('month', months),
-    service
-      .from('monthly_trend_cache')
-      .select('month, is_final')
-      .eq('month', latestMonth)
-      .maybeSingle(),
-  ])
-  const { data: cachedRows, error: summaryCacheError } = summaryCacheResult
-
-  if (summaryCacheError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-
   type SummaryCacheRow = {
     month: string
     app_count: number
@@ -223,19 +207,48 @@ export async function GET(req: Request) {
     computed_at: string
     is_final: boolean
   }
+  type DetailCacheRow = { month: string; is_final: boolean }
+
+  const [earliestResult, latestResult, summaryCacheResult, detailCacheResult] = await Promise.all([
+    service.from('raw_keywords').select('content_date')
+      .not('content_date', 'is', null).order('content_date', { ascending: true }).limit(1).maybeSingle(),
+    service.from('raw_keywords').select('content_date')
+      .not('content_date', 'is', null).order('content_date', { ascending: false }).limit(1).maybeSingle(),
+    // Archived months outlive the raw 40-day detail. Read their small metadata
+    // rows as well, so old months do not disappear when the source is pruned.
+    service.from('monthly_trend_summary_cache')
+      .select('month, app_count, game_count, computed_at, is_final').order('month', { ascending: true }),
+    service.from('monthly_trend_cache').select('month, is_final').order('month', { ascending: true }),
+  ])
+  const queryError = earliestResult.error || latestResult.error || summaryCacheResult.error || detailCacheResult.error
+  if (queryError) {
+    console.error('Monthly trend overview cache load failed:', queryError)
+    return NextResponse.json({ error: '月度趋势概览读取失败，请重试' }, { status: 500 })
+  }
 
   const summaryByMonth = new Map<string, SummaryCacheRow>(
-    ((cachedRows ?? []) as SummaryCacheRow[]).map(row => [row.month, row]),
+    ((summaryCacheResult.data ?? []) as SummaryCacheRow[]).map(row => [row.month, row]),
   )
+  const detailByMonth = new Map<string, DetailCacheRow>(
+    ((detailCacheResult.data ?? []) as DetailCacheRow[]).map(row => [row.month, row]),
+  )
+  const bounds = [
+    earliestResult.data?.content_date?.slice(0, 7),
+    latestResult.data?.content_date?.slice(0, 7),
+    ...summaryByMonth.keys(), ...detailByMonth.keys(),
+  ].filter((month): month is string => typeof month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort()
+  if (bounds.length === 0) return NextResponse.json({ months: [], earliestMonth: null, defaultMonth: null, unavailableMonths: [] })
+
   const currentMonth = currentMonthCN()
+  const malaysiaToday = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
+  const months = monthsBetween(bounds[0], bounds[bounds.length - 1]).filter(month => month <= currentMonth)
   const monthsToRefresh = months.filter(month => {
-    const cachedRow = summaryByMonth.get(month)
-    if (!cachedRow) return true
-    if (month < currentMonth) return !cachedRow.is_final
-    // Normal page views always prefer the cached current-month snapshot, even
-    // after its short freshness window. The post-crawl job owns refreshes so a
-    // team member never has to wait for a full aggregation just to open the tab.
-    return forceRefresh
+    const row = summaryByMonth.get(month)
+    if (month < currentMonth && row?.is_final) return false
+    if (monthlyTrendArchiveState(month, malaysiaToday) === 'expired') return false
+    // Opening a page may use the last current-month snapshot. Cron owns its
+    // daily refresh; finalized historical snapshots are never overwritten.
+    return !row || (month < currentMonth && !row.is_final) || forceRefresh
   })
 
   if (monthsToRefresh.length > 0) {
@@ -245,60 +258,62 @@ export async function GET(req: Request) {
       p_start: `${refreshStartMonth}-01`,
       p_end: monthEnd(refreshEndMonth),
     })
-
     if (refreshError) {
       console.error('Failed to refresh monthly trend summary', refreshError)
-      // If every requested month has an older snapshot, serve it and retry on the
-      // next request. Missing months cannot be represented safely as zero here.
-      const hasMissingMonth = monthsToRefresh.some(month => !summaryByMonth.has(month))
-      if (forceRefresh || hasMissingMonth) {
-        return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+      if (forceRefresh || monthsToRefresh.some(month => !summaryByMonth.has(month))) {
+        return NextResponse.json({ error: '月度趋势概览尚未准备完成，请稍后重试' }, { status: 503 })
       }
     } else {
       const freshByMonth = new Map<string, { app_count: number; game_count: number }>(
         ((freshRows ?? []) as { month: string; app_count: number; game_count: number }[])
-          .map(row => [row.month, {
-            app_count: Number(row.app_count) || 0,
-            game_count: Number(row.game_count) || 0,
-          }]),
+          .map(row => [row.month, { app_count: Number(row.app_count) || 0, game_count: Number(row.game_count) || 0 }]),
       )
       const computedAt = new Date().toISOString()
       const rowsToCache: SummaryCacheRow[] = monthsToRefresh.map(month => {
         const fresh = freshByMonth.get(month)
         return {
-          month,
-          app_count: fresh?.app_count ?? 0,
-          game_count: fresh?.game_count ?? 0,
-          computed_at: computedAt,
-          is_final: month < currentMonth,
+          month, app_count: fresh?.app_count ?? 0, game_count: fresh?.game_count ?? 0,
+          computed_at: computedAt, is_final: month < currentMonth,
         }
       })
-
-      for (const row of rowsToCache) summaryByMonth.set(row.month, row)
-      const { error: summaryWriteError } = await service
-        .from('monthly_trend_summary_cache')
+      const { error: summaryWriteError } = await service.from('monthly_trend_summary_cache')
         .upsert(rowsToCache, { onConflict: 'month' })
       if (summaryWriteError) {
         console.error('Failed to cache monthly trend summary', summaryWriteError)
-        if (forceRefresh) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+        if (forceRefresh) return NextResponse.json({ error: '月度趋势归档保存失败' }, { status: 500 })
       }
+      for (const row of rowsToCache) summaryByMonth.set(row.month, row)
     }
   }
 
-  const results = months.map(month => {
-    const row = summaryByMonth.get(month)
-    return { month, app: row?.app_count ?? 0, game: row?.game_count ?? 0 }
+  const unavailableMonths = months.filter(month => month < currentMonth && !summaryByMonth.get(month)?.is_final)
+    .map(month => ({
+      month,
+      code: 'MONTH_NOT_ARCHIVED',
+      reason: monthlyTrendArchiveState(month, malaysiaToday) === 'expired'
+        ? '概览尚未归档，原始资料已超出 40 天保留范围'
+        : '概览尚未完成归档',
+      detailAvailable: detailByMonth.get(month)?.is_final === true,
+    }))
+  // Missing/partial historical months must never be disguised as zero counts.
+  const results = months.filter(month => month === currentMonth || summaryByMonth.get(month)?.is_final)
+    .flatMap(month => {
+      const row = summaryByMonth.get(month)
+      return row ? [{ month, app: row.app_count, game: row.game_count }] : []
+    })
+  const availableDetails = results.map(row => row.month).filter(month => {
+    const row = detailByMonth.get(month)
+    return !!row && (month === currentMonth || row.is_final)
   })
+  const defaultMonth = availableDetails[availableDetails.length - 1] ?? null
+  return NextResponse.json({ months: results, earliestMonth: months[0] ?? null, defaultMonth, unavailableMonths })
+}
 
-  // Only auto-open the latest month when its heavy drilldown already exists in
-  // cache. A fresh deployment or a missed cron must never turn page opening into
-  // six serial aggregate queries; the user can still choose a month manually.
-  if (detailCacheResult.error) {
-    console.error('Failed to inspect monthly trend drilldown cache', detailCacheResult.error)
+export async function GET(req: Request) {
+  try {
+    return await getMonthlyTrend(req)
+  } catch (error) {
+    console.error('Monthly trend request failed:', error)
+    return NextResponse.json({ error: '月度趋势资料读取失败，请重试' }, { status: 500 })
   }
-  const defaultMonth = detailCacheResult.data && (
-    latestMonth === currentMonth || detailCacheResult.data.is_final === true
-  ) ? latestMonth : null
-
-  return NextResponse.json({ months: results, earliestMonth: months[0], defaultMonth })
 }

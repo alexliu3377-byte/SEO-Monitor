@@ -28,7 +28,7 @@ test('application keywords force AI tool and browser subcategories', () => {
   assert.equal(inferredAppSubcategory('谷歌浏览器下载'), '浏览器')
   assert.equal(inferredAppSubcategory('Microsoft Edge'), '浏览器')
   assert.equal(inferredAppSubcategory('AI浏览器推荐'), '浏览器')
-  assert.equal(inferredAppSubcategory('百度地图'), null)
+  assert.equal(inferredAppSubcategory('百度地图'), '导航')
   assert.equal(inferredAppSubcategory('AirPlay投屏'), null)
 })
 

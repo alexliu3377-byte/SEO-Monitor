@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { getBrowserClient } from '@/lib/supabase'
-import { fetchAllRows } from '@/lib/supabase-paginate'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from 'recharts'
@@ -122,8 +121,17 @@ interface PageData {
   rankDate: string
   rankupAll: { keyword: string; volume: number }[]
   rankdownAll: { keyword: string; volume: number }[]
+  rankupCount: number
+  rankdownCount: number
   unstableAll: { keyword: string; volume: number; upDays: number; downDays: number }[]
-  rankAllData: { keyword: string; volume: number; type: string; stat_date: string }[]
+  unstableCount: number
+}
+
+interface RankOverview {
+  rankDate: string | null
+  rankup: PageData['rankupAll']; rankdown: PageData['rankdownAll']
+  rankupCount: number; rankdownCount: number
+  unstable: PageData['unstableAll']; unstableCount: number
 }
 
 export default function SiteIntelDetailPage() {
@@ -134,9 +142,13 @@ export default function SiteIntelDetailPage() {
   const [data, setData] = useState<PageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const pageRequest = useRef<AbortController | null>(null)
+  const [modalError, setModalError] = useState('')
+  const [indexedPagesError, setIndexedPagesError] = useState('')
 
   const [indexedPages, setIndexedPages] = useState<IndexedPageRow[]>([])
   const [indexedPagesTotal, setIndexedPagesTotal] = useState(0)
+  const [indexedPagesLoading, setIndexedPagesLoading] = useState(true)
 
   const [kwTab, setKwTab] = useState<'app' | 'game'>('app')
   const [rankTab, setRankTab] = useState<'up' | 'down'>('up')
@@ -159,87 +171,153 @@ export default function SiteIntelDetailPage() {
   const [kwModalAppCount, setKwModalAppCount] = useState(0)
   const [kwModalGameCount, setKwModalGameCount] = useState(0)
   const [rankModalDate, setRankModalDate] = useState('')
+  const [rankModalRows, setRankModalRows] = useState<PageData['rankupAll']>([])
+  const [rankModalCounts, setRankModalCounts] = useState({ up: 0, down: 0 })
+  const [rankModalLoading, setRankModalLoading] = useState(false)
+  const [unstableModalRows, setUnstableModalRows] = useState<PageData['unstableAll']>([])
+  const [unstableModalTotal, setUnstableModalTotal] = useState(0)
+  const [unstableModalLoading, setUnstableModalLoading] = useState(false)
+  const [modalRetry, setModalRetry] = useState(0)
 
   useEffect(() => {
     if (!id) return
     loadData()
+    return () => pageRequest.current?.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  async function handleKwDateChange(date: string) {
+  function handleKwDateChange(date: string) {
     if (!date || !id) return
     setKwModalDate(date)
     setKwModalPage(0)
-    setKwModalLoading(true)
-    try {
-      const supabase = getBrowserClient()
-      const [appRows, gameRows, appCnt, gameCnt] = await Promise.all([
-        fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase.from('raw_keywords').select('id, keyword').eq('site_id', id).eq('content_date', date)
-          .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%').order('id').range(from, to)),
-        fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase.from('raw_keywords').select('id, keyword').eq('site_id', id).eq('content_date', date)
-          .eq('content_type', 'game').not('keyword', 'like', '%电脑版%').order('id').range(from, to)),
-        supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', date)
-          .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%'),
-        supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', date)
-          .eq('content_type', 'game').not('keyword', 'like', '%电脑版%'),
-      ])
-      setKwModalAppAll(appRows.map(r => ({ keyword: r.keyword })))
-      setKwModalGameAll(gameRows.map(r => ({ keyword: r.keyword })))
-      setKwModalAppCount(appCnt.count ?? 0)
-      setKwModalGameCount(gameCnt.count ?? 0)
-    } finally {
-      setKwModalLoading(false)
-    }
   }
 
+  useEffect(() => {
+    if (!kwModal || !id || !kwModalDate) return
+    const controller = new AbortController()
+    setKwModalLoading(true)
+    setModalError('')
+    async function load() {
+      const supabase = getBrowserClient()
+      let pageQuery = supabase.from('raw_keywords').select('id, keyword').eq('site_id', id).eq('content_date', kwModalDate).not('keyword', 'like', '%电脑版%')
+      pageQuery = kwModalTab === 'game' ? pageQuery.eq('content_type', 'game') : pageQuery.or('content_type.eq.app,content_type.is.null')
+      const [pageResult, appCnt, gameCnt] = await Promise.all([
+        pageQuery.order('id').range(kwModalPage * modalPageSize, (kwModalPage + 1) * modalPageSize - 1).abortSignal(controller.signal),
+        supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', kwModalDate)
+          .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%'),
+        supabase.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', id).eq('content_date', kwModalDate)
+          .eq('content_type', 'game').not('keyword', 'like', '%电脑版%'),
+      ])
+      for (const response of [pageResult, appCnt, gameCnt]) if (response.error) throw new Error(response.error.message)
+      if (controller.signal.aborted) return
+      if (kwModalTab === 'app') setKwModalAppAll(pageResult.data ?? [])
+      else setKwModalGameAll(pageResult.data ?? [])
+      setKwModalAppCount(appCnt.count ?? 0)
+      setKwModalGameCount(gameCnt.count ?? 0)
+    }
+    void load().catch(error => { if (!controller.signal.aborted) setModalError(error instanceof Error ? error.message : '关键词读取失败，请重试') })
+      .finally(() => { if (!controller.signal.aborted) setKwModalLoading(false) })
+    return () => controller.abort()
+  }, [kwModal, id, kwModalDate, kwModalTab, kwModalPage, modalPageSize, modalRetry])
+
+  useEffect(() => {
+    if (!rankModal || !site || !rankModalDate) return
+    const controller = new AbortController()
+    setRankModalLoading(true); setModalError('')
+    async function load() {
+      const supabase = getBrowserClient()
+      const table = site!.has_rank_title ? 'site_keyword_ranks' : 'rank_changes'
+      const query = (countOnly: boolean) => {
+        let result = countOnly ? supabase.from(table).select('id', { count: 'exact', head: true }) : supabase.from(table).select('id, keyword, volume')
+        result = result.eq('site_id', id).eq('stat_date', rankModalDate)
+        if (site!.has_rank_title) result = result.eq('platform', 'mobile').gt('volume', 0)
+        return result.abortSignal(controller.signal)
+      }
+      const [up, down, page] = await Promise.all([
+        query(true).eq('type', 'rankup'), query(true).eq('type', 'rankdown'),
+        query(false).eq('type', rankModalTab === 'up' ? 'rankup' : 'rankdown')
+          .order('volume', { ascending: false }).order('id').range(rankModalPage * modalPageSize, (rankModalPage + 1) * modalPageSize - 1),
+      ])
+      for (const response of [up, down, page]) if (response.error) throw new Error(response.error.message)
+      if (controller.signal.aborted) return
+      setRankModalRows((page.data ?? []) as PageData['rankupAll'])
+      setRankModalCounts({ up: up.count ?? 0, down: down.count ?? 0 })
+    }
+    void load().catch(error => { if (!controller.signal.aborted) setModalError(error instanceof Error ? error.message : '排名读取失败，请重试') })
+      .finally(() => { if (!controller.signal.aborted) setRankModalLoading(false) })
+    return () => controller.abort()
+  }, [rankModal, site, id, rankModalDate, rankModalTab, rankModalPage, modalPageSize, modalRetry])
+
+  useEffect(() => {
+    if (!unstableModal || !id) return
+    const controller = new AbortController()
+    setUnstableModalLoading(true); setModalError('')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Promise.resolve((getBrowserClient() as any).rpc('get_site_rank_overview', {
+      p_site_id: id, p_date_start: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
+      p_date_end: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+      p_unstable_offset: unstableModalPage * modalPageSize, p_unstable_limit: modalPageSize,
+    }).abortSignal(controller.signal)).then(response => {
+      const result = response as { data: RankOverview; error: { message: string } | null }
+      if (result.error) throw new Error(result.error.message)
+      if (controller.signal.aborted) return
+      setUnstableModalRows(result.data.unstable); setUnstableModalTotal(result.data.unstableCount)
+    }).catch(error => { if (!controller.signal.aborted) setModalError(error instanceof Error ? error.message : '不稳定词读取失败，请重试') })
+      .finally(() => { if (!controller.signal.aborted) setUnstableModalLoading(false) })
+    return () => controller.abort()
+  }, [unstableModal, id, unstableModalPage, modalPageSize, modalRetry])
+
   async function loadData() {
+    pageRequest.current?.abort()
+    const controller = new AbortController()
+    pageRequest.current = controller
     setLoading(true)
+    setIndexedPagesLoading(true)
     setError(null)
     try {
       const supabase = getBrowserClient()
       const d30ago = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-      const { data: siteRow } = await supabase.from('sites')
-        .select('id, domain, name, has_rank_title').eq('id', id).maybeSingle() as { data: SiteRow | null }
+      const { data: siteRow, error: siteError } = await supabase.from('sites')
+        .select('id, domain, name, has_rank_title').eq('id', id).abortSignal(controller.signal).maybeSingle() as { data: SiteRow | null; error: { message: string } | null }
+      if (siteError) throw new Error(siteError.message)
 
       if (!siteRow) { setError('站点不存在'); setLoading(false); return }
       setSite(siteRow)
 
       const [
-        { data: wh },
-        { data: is },
-        { data: rd },
-        { data: appRaw },
-        { data: gameRaw },
+        weightResult, snapshotResult, rankResult, appResult, gameResult,
       ] = await Promise.all([
         supabase.from('weight_history')
           .select('record_date,pc_weight,mobile_weight,pc_ip,pc_ip_max,mobile_ip,mobile_ip_max')
-          .eq('site_id', id).gte('record_date', d30ago).order('record_date'),
+          .eq('site_id', id).gte('record_date', d30ago).lte('record_date', new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)).order('record_date').abortSignal(controller.signal),
         supabase.from('index_snapshots')
           .select('snapshot_date,index_count')
-          .eq('site_id', id).gte('snapshot_date', d30ago).order('snapshot_date'),
-        (async () => ({ data: await fetchAllRows<{ id: string; keyword: string; volume: number; type: string; stat_date: string }>((from, to) => {
-          const q = siteRow.has_rank_title
-          ? supabase.from('site_keyword_ranks').select('id,keyword,volume,type,stat_date')
-              .eq('site_id', id).eq('platform', 'mobile').gt('volume', 0)
-              .gte('stat_date', d30ago)
-          : supabase.from('rank_changes').select('id,keyword,volume,type,stat_date')
-              .eq('site_id', id).gte('stat_date', d30ago)
-          return q.order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)
-        }) }))(),
+          .eq('site_id', id).gte('snapshot_date', d30ago).lte('snapshot_date', new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)).order('snapshot_date').abortSignal(controller.signal),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase as any).rpc('get_site_rank_overview', { p_site_id: id, p_date_start: d30ago, p_date_end: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10) }).abortSignal(controller.signal),
         supabase.from('raw_keywords')
           .select('keyword,content_date,content_type')
           .eq('site_id', id)
           .or('content_type.eq.app,content_type.is.null')
           .not('keyword', 'like', '%电脑版%')
-          .order('content_date', { ascending: false }).limit(200),
+          .order('content_date', { ascending: false }).limit(12).abortSignal(controller.signal),
         supabase.from('raw_keywords')
           .select('keyword,content_date,content_type')
           .eq('site_id', id)
           .eq('content_type', 'game')
           .not('keyword', 'like', '%电脑版%')
-          .order('content_date', { ascending: false }).limit(200),
+          .order('content_date', { ascending: false }).limit(12).abortSignal(controller.signal),
       ])
+      for (const response of [weightResult, snapshotResult, rankResult, appResult, gameResult]) {
+        if (response.error) throw new Error(response.error.message)
+      }
+      if (controller.signal.aborted) return
+      const wh = weightResult.data
+      const is = snapshotResult.data
+      const appRaw = appResult.data
+      const gameRaw = gameResult.data
+      const ranks = rankResult.data as RankOverview
 
       const result: PageData = {
         pcWeight: 0, mobileWeight: 0,
@@ -250,7 +328,9 @@ export default function SiteIntelDetailPage() {
         weightTrend: [], indexTrend: [], ipTrend: [],
         kwDate: '', appKw: [], gameKw: [], appKwAll: [], gameKwAll: [],
         appCount: 0, gameCount: 0,
-        rankDate: '', rankupAll: [], rankdownAll: [], unstableAll: [], rankAllData: [],
+        rankDate: ranks.rankDate ?? '', rankupAll: ranks.rankup, rankdownAll: ranks.rankdown,
+        rankupCount: ranks.rankupCount, rankdownCount: ranks.rankdownCount,
+        unstableAll: ranks.unstable, unstableCount: ranks.unstableCount,
       }
 
       // Weight history
@@ -283,42 +363,6 @@ export default function SiteIntelDetailPage() {
         result.indexTrend = isArr.map(s => ({ date: s.snapshot_date.slice(5), count: s.index_count }))
       }
 
-      // Rank changes
-      type RD = { keyword: string; volume: number; type: string; stat_date: string }
-      const rdArr = (rd || []) as RD[]
-      const latestRankDate = rdArr.length > 0 ? rdArr[0].stat_date : ''
-      result.rankDate = latestRankDate
-      result.rankAllData = rdArr
-      if (latestRankDate) {
-        const today = rdArr.filter(r => r.stat_date === latestRankDate)
-        result.rankupAll = today.filter(r => r.type === 'rankup').map(r => ({ keyword: r.keyword, volume: r.volume })).sort((a, b) => b.volume - a.volume)
-        result.rankdownAll = today.filter(r => r.type === 'rankdown').map(r => ({ keyword: r.keyword, volume: r.volume })).sort((a, b) => b.volume - a.volume)
-      }
-
-      // Unstable keywords
-      const upMap = new Map<string, number>()
-      const downMap = new Map<string, number>()
-      const volMap = new Map<string, number[]>()
-      for (const r of rdArr) {
-        if (r.type === 'rankup') upMap.set(r.keyword, (upMap.get(r.keyword) ?? 0) + 1)
-        else downMap.set(r.keyword, (downMap.get(r.keyword) ?? 0) + 1)
-        if (r.volume > 0) {
-          if (!volMap.has(r.keyword)) volMap.set(r.keyword, [])
-          volMap.get(r.keyword)!.push(r.volume)
-        }
-      }
-      const unstable: PageData['unstableAll'] = []
-      for (const [kw, upDays] of Array.from(upMap.entries())) {
-        const downDays = downMap.get(kw) ?? 0
-        if (downDays > 0 && upDays + downDays >= 3) {
-          const vols = volMap.get(kw) || []
-          const volume = vols.length > 0 ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : 0
-          unstable.push({ keyword: kw, volume, upDays, downDays })
-        }
-      }
-      unstable.sort((a, b) => b.volume - a.volume)
-      result.unstableAll = unstable
-
       // Keywords
       type KwRaw = { keyword: string; content_date: string; content_type: string }
       const latestAppDate = (appRaw || []).length > 0 ? (appRaw![0] as KwRaw).content_date : ''
@@ -342,24 +386,31 @@ export default function SiteIntelDetailPage() {
             .eq('site_id', id).eq('content_date', latestKwDate)
             .eq('content_type', 'game').not('keyword', 'like', '%电脑版%'),
         ])
+        if (appCnt.error) throw new Error(appCnt.error.message)
+        if (gameCnt.error) throw new Error(gameCnt.error.message)
         result.appCount = appCnt.count ?? appAll.length
         result.gameCount = gameCnt.count ?? gameAll.length
       }
 
+      if (controller.signal.aborted) return
       setData(result)
 
       // Load indexed pages (12 most recent)
-      const ipRes = await fetch(`/api/sites/index-pages?siteId=${id}&page=0&pageSize=12&timeFilter=all&statusFilter=all`)
-      if (ipRes.ok) {
-        const ipData = await ipRes.json()
-        setIndexedPages(ipData.rows || [])
-        setIndexedPagesTotal(ipData.total || 0)
-      }
+      setLoading(false)
+      setIndexedPagesError('')
+      void fetch(`/api/sites/index-pages?siteId=${id}&page=0&pageSize=12&timeFilter=all&statusFilter=all`, { signal: controller.signal })
+        .then(async response => {
+          const body = await response.json()
+          if (!response.ok) throw new Error(body.error || '收录页面读取失败，请重试')
+          if (controller.signal.aborted) return
+          setIndexedPages(body.rows || []); setIndexedPagesTotal(body.total || 0)
+        }).catch(error => { if (!controller.signal.aborted) setIndexedPagesError(error instanceof Error ? error.message : '收录页面读取失败，请重试') })
+        .finally(() => { if (!controller.signal.aborted) setIndexedPagesLoading(false) })
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '加载失败')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
@@ -389,7 +440,7 @@ export default function SiteIntelDetailPage() {
   const kwList = kwTab === 'app' ? data.appKw : data.gameKw
   const kwCount = kwTab === 'app' ? data.appCount : data.gameCount
   const rankList = rankTab === 'up' ? data.rankupAll.slice(0, 12) : data.rankdownAll.slice(0, 12)
-  const rankCount = rankTab === 'up' ? data.rankupAll.length : data.rankdownAll.length
+  const rankCount = rankTab === 'up' ? data.rankupCount : data.rankdownCount
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
@@ -555,11 +606,11 @@ export default function SiteIntelDetailPage() {
               <div className="flex gap-1">
                 <button onClick={() => setRankTab('up')}
                   className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${rankTab === 'up' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  涨入{rankTab === 'up' ? ` (${data.rankupAll.length})` : ''}
+                  涨入{rankTab === 'up' ? ` (${data.rankupCount})` : ''}
                 </button>
                 <button onClick={() => setRankTab('down')}
                   className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${rankTab === 'down' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                  跌出{rankTab === 'down' ? ` (${data.rankdownAll.length})` : ''}
+                  跌出{rankTab === 'down' ? ` (${data.rankdownCount})` : ''}
                 </button>
               </div>
             }
@@ -627,11 +678,11 @@ export default function SiteIntelDetailPage() {
                     </div>
                   )}
                 </div>
-                {data.unstableAll.length > 12 && (
+                {data.unstableCount > 12 && (
                   <div className="mt-3 flex justify-center">
                     <button onClick={() => { setUnstableModal(true); setUnstableModalPage(0) }}
                       className="text-xs border rounded px-2 py-0.5 transition-colors text-green-500 hover:text-green-700 border-green-100 hover:border-green-200">
-                      查看全部 {data.unstableAll.length} 条
+                      查看全部 {data.unstableCount} 条
                     </button>
                   </div>
                 )}
@@ -653,7 +704,7 @@ export default function SiteIntelDetailPage() {
               </Link>
             )}
           </div>
-          {indexedPages.length === 0 ? (
+          {indexedPagesLoading ? <EmptyState text="正在读取收录页面…" /> : indexedPagesError ? <p role="status" className="py-5 text-xs text-red-600">{indexedPagesError}</p> : indexedPages.length === 0 ? (
             <div className="flex items-center justify-center h-24 text-sm text-gray-400">暂无收录页面数据</div>
           ) : (
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
@@ -686,7 +737,8 @@ export default function SiteIntelDetailPage() {
       {/* 关键词 Modal */}
       {kwModal && (() => {
         const list = kwModalTab === 'app' ? kwModalAppAll : kwModalGameAll
-        const paged = list.slice(kwModalPage * modalPageSize, (kwModalPage + 1) * modalPageSize)
+        const paged = list
+        const total = kwModalTab === 'app' ? kwModalAppCount : kwModalGameCount
         return (
           <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
@@ -715,6 +767,7 @@ export default function SiteIntelDetailPage() {
                 ))}
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-3">
+                {modalError && <div role="status" className="flex items-center gap-3 py-3 text-xs text-red-600">{modalError}<button type="button" className="btn-secondary" onClick={() => setModalRetry(value => value + 1)}>重试</button></div>}
                 {kwModalLoading ? (
                   <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
                     <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -723,7 +776,7 @@ export default function SiteIntelDetailPage() {
                     </svg>
                     加载中…
                   </div>
-                ) : paged.length === 0 ? (
+                ) : paged.length === 0 && !modalError ? (
                   <p className="text-center text-gray-400 py-10 text-sm">暂无数据</p>
                 ) : (
                   <ul className="divide-y divide-gray-100">
@@ -733,7 +786,7 @@ export default function SiteIntelDetailPage() {
                   </ul>
                 )}
               </div>
-              <PaginationBar page={kwModalPage} total={list.length} pageSize={modalPageSize}
+              <PaginationBar page={kwModalPage} total={total} pageSize={modalPageSize}
                 onPageChange={p => setKwModalPage(p)}
                 onPageSizeChange={s => { setModalPageSize(s); setKwModalPage(0) }} />
             </div>
@@ -743,11 +796,8 @@ export default function SiteIntelDetailPage() {
 
       {/* 排名波动 Modal */}
       {rankModal && (() => {
-        const filteredDate = rankModalDate || data.rankDate
-        const filteredUp = data.rankAllData.filter(r => r.stat_date === filteredDate && r.type === 'rankup').sort((a, b) => b.volume - a.volume)
-        const filteredDown = data.rankAllData.filter(r => r.stat_date === filteredDate && r.type === 'rankdown').sort((a, b) => b.volume - a.volume)
-        const list = rankModalTab === 'up' ? filteredUp : filteredDown
-        const paged = list.slice(rankModalPage * modalPageSize, (rankModalPage + 1) * modalPageSize)
+        const paged = rankModalRows
+        const total = rankModalCounts[rankModalTab]
         return (
           <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
@@ -767,12 +817,13 @@ export default function SiteIntelDetailPage() {
                   <button key={t} onClick={() => { setRankModalTab(t); setRankModalPage(0) }}
                     className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors mr-2 ${rankModalTab === t ? (t === 'up' ? 'border-green-500 text-green-600' : 'border-red-500 text-red-600') : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                     {t === 'up' ? '涨入' : '跌出'}
-                    <span className="ml-1.5 text-xs text-gray-400">({t === 'up' ? filteredUp.length : filteredDown.length})</span>
+                    <span className="ml-1.5 text-xs text-gray-400">({rankModalCounts[t]})</span>
                   </button>
                 ))}
               </div>
               <div className="flex-1 overflow-y-auto">
-                {paged.length === 0 ? (
+                {modalError && <div role="status" className="flex items-center gap-3 px-5 py-3 text-xs text-red-600">{modalError}<button type="button" className="btn-secondary" onClick={() => setModalRetry(value => value + 1)}>重试</button></div>}
+                {rankModalLoading ? <EmptyState text="正在读取排名…" /> : paged.length === 0 && !modalError ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无数据</p>
                 ) : (
                   <table aria-label="数据表格" className="w-full text-sm">
@@ -793,7 +844,7 @@ export default function SiteIntelDetailPage() {
                   </table>
                 )}
               </div>
-              <PaginationBar page={rankModalPage} total={list.length} pageSize={modalPageSize}
+              <PaginationBar page={rankModalPage} total={total} pageSize={modalPageSize}
                 onPageChange={p => setRankModalPage(p)}
                 onPageSizeChange={s => { setModalPageSize(s); setRankModalPage(0) }} />
             </div>
@@ -803,8 +854,7 @@ export default function SiteIntelDetailPage() {
 
       {/* 不稳定词 Modal */}
       {unstableModal && (() => {
-        const list = data.unstableAll
-        const paged = list.slice(unstableModalPage * modalPageSize, (unstableModalPage + 1) * modalPageSize)
+        const paged = unstableModalRows
         return (
           <div role="dialog" aria-modal="true" aria-label="详情窗口" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
@@ -818,7 +868,8 @@ export default function SiteIntelDetailPage() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto">
-                {paged.length === 0 ? (
+                {modalError && <div role="status" className="flex items-center gap-3 px-5 py-3 text-xs text-red-600">{modalError}<button type="button" className="btn-secondary" onClick={() => setModalRetry(value => value + 1)}>重试</button></div>}
+                {unstableModalLoading ? <EmptyState text="正在读取不稳定词…" /> : paged.length === 0 && !modalError ? (
                   <p className="text-center text-gray-400 py-16 text-sm">暂无不稳定词</p>
                 ) : (
                   <table aria-label="数据表格" className="w-full text-sm">
@@ -845,7 +896,7 @@ export default function SiteIntelDetailPage() {
                   </table>
                 )}
               </div>
-              <PaginationBar page={unstableModalPage} total={list.length} pageSize={modalPageSize}
+              <PaginationBar page={unstableModalPage} total={unstableModalTotal} pageSize={modalPageSize}
                 onPageChange={p => setUnstableModalPage(p)}
                 onPageSizeChange={s => { setModalPageSize(s); setUnstableModalPage(0) }} />
             </div>

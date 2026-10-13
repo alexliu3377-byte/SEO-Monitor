@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio'
 import * as iconv from 'iconv-lite'
 import { Element } from 'domhandler'
 import { createClient } from '@/lib/supabase-server'
+import { unstable_cache } from 'next/cache'
 import {
   parseHaoyouPopularRanking,
   parseHaoyouSearchTrends,
@@ -41,7 +42,7 @@ async function loadPage() {
   try {
     const res = await fetch('https://www.3839.com/timeline.html', {
       headers: HEADERS,
-      next: { revalidate: SIX_HOURS },
+      cache: 'no-store',
       signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return null
@@ -132,7 +133,7 @@ async function fetchHotChart(): Promise<HaoyouPopularItem[]> {
   try {
     const res = await fetch('https://www.3839.com/app/hykb_web/index.php?m=top&ac=rank_list&type=hot2&page=1&offset=0', {
       headers: { ...HEADERS, 'X-Requested-With': 'XMLHttpRequest' },
-      next: { revalidate: SIX_HOURS },
+      cache: 'no-store',
       signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return []
@@ -145,7 +146,7 @@ async function fetchSearchTrends() {
   try {
     const response = await fetch('https://www.3839.com/top/hot.html', {
       headers: HEADERS,
-      next: { revalidate: SIX_HOURS },
+      cache: 'no-store',
       signal: AbortSignal.timeout(12000),
     })
     if (!response.ok) return []
@@ -157,29 +158,49 @@ async function fetchSearchTrends() {
   } catch { return [] }
 }
 
-export async function GET(request: Request) {
-  // 跟 monthly-trend 同一个门槛——登录即可查，不限 super/admin。之前这里
-  // 完全没做校验，无鉴权无限流地代理抓取第三方站点，跟同目录其它图表接口的
-  // 设计意图（"要求登录"）不一致。
-  const authClient = await createClient()
-  const { data: { user } } = await authClient.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+const readSearch = unstable_cache(async () => {
+  const searchItems = await fetchSearchTrends()
+  if (!searchItems.length) throw new Error('好游快爆搜索趋势暂未取得资料')
+  return { searchItems,updatedAt: new Date().toISOString(),failed: false }
+}, ['haoyou-search-success-v3'], { revalidate: SIX_HOURS })
 
-  if (new URL(request.url).searchParams.get('view') === 'search') {
-    return NextResponse.json({ searchItems: await fetchSearchTrends() })
-  }
+const readHot = unstable_cache(async () => {
+  const hotItems = await fetchHotChart()
+  if (!hotItems.length) throw new Error('好游快爆热门榜暂时读取失败')
+  return { hotItems,updatedAt: new Date().toISOString() }
+}, ['haoyou-hot-success-v3'], { revalidate: SIX_HOURS })
 
-  const [$, hotItems] = await Promise.all([loadPage(), fetchHotChart()])
-  if (!$) return NextResponse.json({ upcomingToday: [], upcoming: [], baoliao: [], updates: [], hotItems })
-
+const readTimeline = unstable_cache(async (day: string) => {
+  void day // Date is part of the cache key: yesterday's “today” cannot leak.
+  const $ = await loadPage()
+  if (!$ || !$('.panelList').length) throw new Error('好游快爆平台资讯暂时读取失败')
   const upcomingPanel = parsePanel($, '1')
   const updatesPanel = parsePanel($, '3')
-
-  return NextResponse.json({
+  return {
     upcomingToday: upcomingPanel.today,
     upcoming: upcomingPanel.upcoming,
     baoliao: [...upcomingPanel.baoliao, ...updatesPanel.baoliao],
     updates: [...updatesPanel.today, ...updatesPanel.upcoming],
-    hotItems,
+    updatedAt: new Date().toISOString(),
+  }
+}, ['haoyou-timeline-success-v3'], { revalidate: SIX_HOURS })
+
+export async function GET(request: Request) {
+  const { data: { user } } = await (await createClient()).auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (new URL(request.url).searchParams.get('view') === 'search') {
+    try { return NextResponse.json(await readSearch()) } catch {
+      return NextResponse.json({ searchItems: [],updatedAt: null,failed: true,error: '好游快爆搜索趋势暂未取得资料，请稍后重试' })
+    }
+  }
+  const day = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0,10)
+  const [timeline, hot] = await Promise.allSettled([readTimeline(day),readHot()])
+  const parts = [timeline,hot].filter(part => part.status === 'fulfilled').map(part => part.value)
+  const failed = timeline.status === 'rejected' || hot.status === 'rejected'
+  return NextResponse.json({
+    ...(timeline.status === 'fulfilled' ? timeline.value : { upcomingToday: [],upcoming: [],baoliao: [],updates: [] }),
+    hotItems: hot.status === 'fulfilled' ? hot.value.hotItems : [],
+    updatedAt: parts.map(part => part.updatedAt).sort()[0] ?? null,
+    failed,...(failed ? { error: '部分好游快爆资料暂时读取失败，已取得的资料仍可查看' } : {}),
   })
 }

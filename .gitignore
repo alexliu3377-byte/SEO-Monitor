@@ -36,3 +36,6 @@ next-env.d.ts
 
 # Local audit artifacts
 .codex-*.png
+
+# Temporary checkouts used for coordinated worker fixes
+/.task-work/

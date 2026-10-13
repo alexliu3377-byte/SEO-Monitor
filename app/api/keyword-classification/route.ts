@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { revalidateTag, unstable_cache } from 'next/cache'
 import {
   isKeywordPrimaryCategory,
   isRankingKeyword,
@@ -11,6 +12,18 @@ import type { UserRole } from '@/lib/user-context'
 
 const CLASSIFICATION_STATUSES: KeywordClassificationStatus[] = ['pending', 'confirmed']
 type LayoutStatus = 'unassigned' | 'assigned' | 'issue'
+
+const SUMMARY_TAG = 'keyword-classification-summary'
+// Summary cards are global, not dependent on the logged-in user's site access.
+// Cache only this aggregate; authorization, site groups and filtered pages are
+// still checked independently on every request.
+const getClassificationSummary = unstable_cache(async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = createServiceClient() as any
+  const { data, error } = await service.rpc('keyword_classification_summary')
+  if (error) throw new Error(`Keyword summary failed: ${error.message}`)
+  return data ?? []
+}, ['keyword-classification-summary-v1'], { revalidate: 300, tags: [SUMMARY_TAG] })
 
 interface TaskGroupRow {
   id: string
@@ -113,26 +126,26 @@ export async function GET(request: Request) {
   const from = page * pageSize
 
   try {
-    const [{ data, count, error }, summaryResult, siteGroups] = await Promise.all([
+    const [{ data, count, error }, summary, siteGroups] = await Promise.all([
       query.range(from, from + pageSize - 1),
-      service.rpc('keyword_classification_summary'),
+      getClassificationSummary(),
       loadAccessibleSiteGroups(service, access.userId, access.role),
     ])
 
-    if (error || summaryResult.error) {
-      console.error('Keyword layout load failed:', error?.message || summaryResult.error?.message)
+    if (error) {
+      console.error('Keyword layout load failed:', error.message)
       return NextResponse.json({ error: '词库补充资料读取失败' }, { status: 500 })
     }
 
     return NextResponse.json({
       items: data ?? [],
       total: count ?? 0,
-      summary: summaryResult.data ?? [],
+      summary,
       siteGroups,
     })
   } catch (error) {
-    console.error('Keyword layout site groups load failed:', error)
-    return NextResponse.json({ error: '分组任务站点读取失败' }, { status: 500 })
+    console.error('Keyword layout load failed:', error)
+    return NextResponse.json({ error: '词库补充资料读取失败，请重试' }, { status: 500 })
   }
 }
 
@@ -302,6 +315,7 @@ export async function PATCH(request: Request) {
     reviewed_at: new Date().toISOString(),
   }).eq('keyword', keyword)
   if (error) return NextResponse.json({ error: '保存分类失败' }, { status: 500 })
+  revalidateTag(SUMMARY_TAG, { expire: 0 })
   return NextResponse.json({ ok: true })
 }
 
@@ -328,5 +342,6 @@ export async function DELETE(request: Request) {
     console.error('Keyword exclusion failed:', error.message)
     return NextResponse.json({ error: '删除词库资料失败' }, { status: 500 })
   }
+  revalidateTag(SUMMARY_TAG, { expire: 0 })
   return NextResponse.json({ ok: true })
 }

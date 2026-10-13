@@ -1,0 +1,237 @@
+name: Build derived SEO data
+
+on:
+  workflow_call:
+    inputs:
+      date:
+        type: string
+        required: true
+    secrets:
+      NEXT_PUBLIC_SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_ROLE_KEY:
+        required: true
+      CRON_SECRET:
+        required: true
+      NEXT_PUBLIC_VERCEL_URL:
+        required: true
+      GEMINI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  DEFER_CRAWL_ROLLUP: 'true'
+
+concurrency:
+  group: seo-derived-data-${{ inputs.date }}
+  cancel-in-progress: false
+
+jobs:
+  # After the final index retry, refresh complete radar/environment data.
+  # These refreshes do not wait for tracking.
+  post_index_refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Refresh environment daily snapshot
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          curl --fail-with-body --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/environment/daily-snapshot"
+      - name: Compute hot radar, word library and group caches on runner
+        env:
+          DATA_DATE: ${{ inputs.date }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/refresh-hot-radar-cache.ts
+
+  # Keep this separate from environment/hot-radar refreshes: a slow monthly
+  # aggregate must not make post_index_refresh fail and block keyword classification.
+  monthly_trend_refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Refresh monthly trend overview and drilldowns
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+        run: |
+          MONTH=$(TZ=Asia/Kuala_Lumpur date +%Y-%m)
+          MONTH_START=$(TZ=Asia/Kuala_Lumpur date +%Y-%m-01)
+          PREVIOUS_MONTH=$(TZ=Asia/Kuala_Lumpur date -d "$MONTH_START -1 month" +%Y-%m)
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?refresh=1"
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?month=$PREVIOUS_MONTH"
+          curl --fail-with-body --show-error --silent --retry 1 --retry-all-errors --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/charts/monthly-trend?month=$MONTH&refresh=1"
+
+  tracking_setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      total: ${{ steps.gen.outputs.total }}
+    steps:
+      - name: Compute tracking matrix
+        id: gen
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          COUNT=$(curl -sf \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/sites?select=id&has_rank_title=eq.true" | \
+            python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          TOTAL=$(python3 -c "import math; print(max(1, math.ceil(${COUNT}/5)))")
+          MATRIX=$(python3 -c "import json; print(json.dumps({'group': list(range(${TOTAL}))}))")
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+  tracking:
+    needs: tracking_setup
+    if: ${{ needs.tracking_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tracking_setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tracking
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/crawl.ts --step=tracking --date=${{ inputs.date }} --group=${{ matrix.group }} --total-groups=${{ needs.tracking_setup.outputs.total }}
+
+  tracking_finalize:
+    needs: [tracking_setup, tracking]
+    if: ${{ needs.tracking.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Finalize tracking shards before caches
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/crawl.ts --finalize --step=tracking --date=${{ inputs.date }} --total-groups=${{ needs.tracking_setup.outputs.total }}
+
+  tracking_cache_setup:
+    needs: tracking_finalize
+    if: ${{ needs.tracking_finalize.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - name: Load task groups
+        id: groups
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          TASK_GROUPS_JSON=$(curl --fail-with-body --show-error --silent --max-time 60 \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/task_groups?select=id,name&order=name.asc")
+          MATRIX=$(TASK_GROUPS_JSON="$TASK_GROUPS_JSON" python3 -c "import json,os; rows=json.loads(os.environ['TASK_GROUPS_JSON']); print(json.dumps({'include':[{'group_id':r['id'],'group_name':r['name']} for r in rows]}, ensure_ascii=False))")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  post_tracking_refresh:
+    needs: tracking_cache_setup
+    if: ${{ needs.tracking_cache_setup.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tracking_cache_setup.outputs.matrix) }}
+    steps:
+      - name: Refresh group tracking cache - ${{ matrix.group_name }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
+          GROUP_ID: ${{ matrix.group_id }}
+        run: |
+          RESPONSE=$(curl --fail-with-body --show-error --silent --max-time 330 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$VERCEL_URL/api/tracking-cache/refresh?groupId=$GROUP_ID")
+          echo "$RESPONSE"
+          RESPONSE="$RESPONSE" python3 -c "import json,os,sys; sys.exit(0 if json.loads(os.environ['RESPONSE']).get('success') is True else 1)"
+
+  # Keyword classification is deliberately last. Crawls, retries, tracking,
+  # all caches and environment/hot-radar refreshes must finish first. The
+  # monthly cache is best-effort, so a failed refresh must not suppress Gemini.
+  classify_new_keywords:
+    needs: [post_index_refresh, post_tracking_refresh, monthly_trend_refresh]
+    if: >-
+      always() &&
+      needs.post_index_refresh.result == 'success' &&
+      needs.post_tracking_refresh.result == 'success' &&
+      needs.monthly_trend_refresh.result != 'cancelled' &&
+      needs.monthly_trend_refresh.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Classify pending keywords with Gemini
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run keywords:classify -- --provider=gemini --batch-size=100 --batches=20
+
+
+  finish:
+    needs: [post_index_refresh, monthly_trend_refresh, tracking_finalize, post_tracking_refresh, classify_new_keywords]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Record real derived-data completion
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATA_DATE: ${{ inputs.date }}
+          DERIVED_SUCCESS: ${{ needs.post_index_refresh.result == 'success' && needs.monthly_trend_refresh.result == 'success' && needs.tracking_finalize.result == 'success' && needs.post_tracking_refresh.result == 'success' && needs.classify_new_keywords.result == 'success' }}
+        run: |
+          SUCCESS_ARG=""
+          if [ "$DERIVED_SUCCESS" = "true" ]; then SUCCESS_ARG="--success"; fi
+          npx tsx scripts/crawl.ts --finish-derivation --date="$DATA_DATE" $SUCCESS_ARG
+          if [ "$DERIVED_SUCCESS" != "true" ]; then echo "::error::Derived data is incomplete; inspect failed cache/tracking/classification jobs"; exit 1; fi

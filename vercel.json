@@ -1,4 +1,5 @@
 {
+  "regions": ["hnd1"],
   "functions": {
     "app/api/cron/route.ts": {
       "maxDuration": 300

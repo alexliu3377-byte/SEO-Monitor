@@ -8,21 +8,16 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: Call hot-radar refresh API
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Compute caches on runner without a Vercel request timeout
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          VERCEL_URL: ${{ secrets.NEXT_PUBLIC_VERCEL_URL }}
-        run: |
-          RESPONSE=$(curl -sf \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$VERCEL_URL/api/hot-radar/refresh")
-          echo "$RESPONSE"
-          SUCCESS=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('success',''))")
-          if [ "$SUCCESS" = "True" ]; then
-            echo "Hot radar cache refreshed successfully"
-          else
-            echo "ERROR: API returned failure"
-            exit 1
-          fi
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/refresh-hot-radar-cache.ts

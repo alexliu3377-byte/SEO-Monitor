@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
 
@@ -38,7 +38,7 @@ interface DetailRow  { date: string; domain: string }
 interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
 
 type Tab      = 'cross' | 'volumeRising' | 'new' | 'rank' | 'streak' | 'wordLib'
-type PageSize = 50 | 100 | 500
+type PageSize = 20 | 50 | 100 | 500
 const PAGE_SIZES: PageSize[] = [50, 100, 500]
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -252,6 +252,7 @@ export default function HotRadarPage() {
   const [data, setData]           = useState<RadarData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
+  const [radarNotice, setRadarNotice] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('volumeRising')
   const [minSites, setMinSites]   = useState(1)
   const [minStreak, setMinStreak] = useState(2)
@@ -273,24 +274,41 @@ export default function HotRadarPage() {
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibData, setWordLibData] = useState<(WordEntry & { longTailCount: number })[]>([])
   const [wordLibLoading, setWordLibLoading] = useState(false)
-  const [wordLibLoaded, setWordLibLoaded] = useState(false)
+  const [wordLibRetry, setWordLibRetry] = useState(0)
+  const [wordLibTotal, setWordLibTotal] = useState(0)
+  const [wordLibDates, setWordLibDates] = useState<string[]>([])
+  const [wordLibQuery, setWordLibQuery] = useState({ keyword: '', site: '' })
+  const wordLibAbortRef = useRef<AbortController | null>(null)
+  const [wordLibError, setWordLibError] = useState<string | null>(null)
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [wordLibMinSites, setWordLibMinSites] = useState(1)
 
   const today     = useMemo(() => getMYDate(),    [])
   const yesterday = useMemo(() => getMYDate(-1),  [])
+  const effectivePageSize: PageSize = activeTab === 'wordLib' ? 20 : pageSize
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const keyword = filterKeyword.trim()
+      const site = filterSite.trim()
+      setWordLibQuery(current => current.keyword === keyword && current.site === site ? current : { keyword, site })
+      if (activeTab === 'wordLib') setPage(0)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [filterKeyword, filterSite, activeTab])
 
   // ── Fetch ────────────────────────────────────────────────────────────────
 
   async function fetchWeights() {
     const db = getBrowserClient()
     const d14 = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
-    const [{ data: siteRows }, { data: whRows }] = await Promise.all([
+    const [{ data: siteRows, error: siteError }, { data: whRows, error: weightError }] = await Promise.all([
       db.from('sites').select('id, domain, friend_links'),
       db.from('weight_history').select('site_id, record_date, pc_weight, mobile_weight')
         .gte('record_date', d14).order('record_date'),
     ])
+    if (siteError || weightError) throw new Error('站点权重暂时读取失败，已取得的词仍可查看')
     const sites = (siteRows || []) as { id: string; domain: string; friend_links?: string[] | null }[]
     const idToDomain = new Map(sites.map(s => [s.id, s.domain]))
     setSiteIdMap(idToDomain)
@@ -433,19 +451,45 @@ export default function HotRadarPage() {
   useEffect(() => {
     setLoading(true)
     fetch('/api/hot-radar')
-      .then(r => r.json())
-      .then(d => setData(d))
+      .then(async r => {
+        const body = await r.json()
+        if (!r.ok) throw new Error(body.error || '热词资料读取失败')
+        if (!Array.isArray(body.newWords) || !Array.isArray(body.rankWords) || !Array.isArray(body.streakWords) || !Array.isArray(body.volumeRisingWords)) throw new Error('热词资料格式无效')
+        return body
+      })
+      .then(d => {
+        setData(d)
+        if (d.cache?.failedSections?.length) setRadarNotice('部分资料暂未完成刷新，当前保留上次成功保存的结果。')
+        else if (d.cache?.sourceComplete === false) setRadarNotice('本批采集尚未全部确认完成，当前显示已取得的资料。')
+      })
       .catch(e => setError(e.message || '加载失败'))
       .finally(() => setLoading(false))
-    fetchWeights()
+    void fetchWeights().catch(e => setRadarNotice(e.message || '站点权重读取失败，已取得的词仍可查看'))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (activeTab !== 'wordLib' || wordLibLoaded || wordLibLoading) return
+    if (activeTab !== 'wordLib') return
+    wordLibAbortRef.current?.abort()
+    const controller = new AbortController()
+    wordLibAbortRef.current = controller
     setWordLibLoading(true)
-    fetch('/api/wordlib')
-      .then(r => r.json())
-      .then(({ data }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null }) => {
+    setWordLibError(null)
+    const params = new URLSearchParams({
+      page: String(page), pageSize: '20', q: wordLibQuery.keyword, site: wordLibQuery.site,
+      minSites: String(wordLibMinSites), minLongTail: '2',
+      sort: ['date', 'longTailCount', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
+      direction: sortDir || 'desc',
+    })
+    if (filterDate) params.set('date', filterDate)
+    fetch(`/api/wordlib?${params}`, { signal: controller.signal })
+      .then(async r => {
+        const body = await r.json()
+        if (!r.ok) throw new Error(body.error || '词库资料读取失败')
+        if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('词库资料格式无效')
+        return body
+      })
+      .then(({ data, total, availableDates }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null; total: number; availableDates: string[] }) => {
+        if (controller.signal.aborted) return
         setWordLibData((data || []).map(r => {
           const last_date = normalizeWordLibDate(r.last_date, today, yesterday)
           return {
@@ -460,11 +504,20 @@ export default function HotRadarPage() {
             first_date: '',
           }
         }))
-        setWordLibLoaded(true)
+        setWordLibTotal(total)
+        setWordLibDates(availableDates ?? [])
+        const lastPage = Math.max(0, Math.ceil(total / 20) - 1)
+        if (page > lastPage) setPage(lastPage)
+        if (filterDate && !availableDates?.includes(filterDate)) { setFilterDate(''); setPage(0) }
+        setWordLibError(null)
       })
-      .catch(() => { setWordLibData([]) })
-      .finally(() => { setWordLibLoading(false) })
-  }, [activeTab, wordLibLoaded, wordLibLoading, today, yesterday])
+      .catch(error => {
+        if (controller.signal.aborted) return
+        setWordLibError(error instanceof Error ? error.message : '词库读取失败')
+      })
+      .finally(() => { if (!controller.signal.aborted) setWordLibLoading(false) })
+    return () => controller.abort()
+  }, [activeTab, page, wordLibQuery, wordLibMinSites, filterDate, sortCol, sortDir, wordLibRetry, today, yesterday])
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -537,25 +590,23 @@ export default function HotRadarPage() {
     })
   }, [filtered, minStreak, yesterday])
 
-  const wordLibFiltered = useMemo(
-    () => wordLibData.filter(w => w.siteCount >= wordLibMinSites),
-    [wordLibData, wordLibMinSites]
-  )
-
   const baseList = useMemo(() => !filtered ? [] :
     activeTab === 'cross'        ? filtered.crossWords        :
     activeTab === 'volumeRising' ? filtered.volumeRisingWords :
     activeTab === 'new'          ? filtered.newWords          :
     activeTab === 'rank'         ? filtered.rankWords         :
-    activeTab === 'wordLib'      ? wordLibFiltered            :
+    activeTab === 'wordLib'      ? wordLibData                :
     filteredStreakWords,
-  [filtered, activeTab, wordLibFiltered, filteredStreakWords])
+  [filtered, activeTab, wordLibData, filteredStreakWords])
 
-  const availableDates = useMemo(() => Array.from(new Set(
+  const availableDates = useMemo(() => activeTab === 'wordLib' ? wordLibDates : Array.from(new Set(
     baseList.map(row => row.last_date).filter(Boolean),
-  )).sort((a, b) => b.localeCompare(a)), [baseList])
+  )).sort((a, b) => b.localeCompare(a)), [baseList, activeTab, wordLibDates])
 
   const activeList = useMemo(() => {
+    // Search, date, site count and sorting are applied to the whole cache in
+    // SQL. This response already contains exactly the requested page.
+    if (activeTab === 'wordLib') return wordLibData
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let list = [...(baseList as any[])]
     if (filterSite.trim()) {
@@ -590,9 +641,10 @@ export default function HotRadarPage() {
     }
     return list
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseList, filterSite, filterKeyword, filterDate, sortCol, sortDir])
+  }, [baseList, filterSite, filterKeyword, filterDate, sortCol, sortDir, activeTab, wordLibData])
 
-  const pagedList = activeList.slice(page * pageSize, (page + 1) * pageSize)
+  const pagedList = activeTab === 'wordLib' ? activeList : activeList.slice(page * effectivePageSize, (page + 1) * effectivePageSize)
+  const activeTotal = activeTab === 'wordLib' ? wordLibTotal : activeList.length
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -681,6 +733,7 @@ export default function HotRadarPage() {
         ))}
       </div>
 
+      {radarNotice && activeTab !== 'wordLib' && <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">{radarNotice}</div>}
       <div className="card">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-400 gap-3">
@@ -701,14 +754,14 @@ export default function HotRadarPage() {
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">站点</span>
                 <input aria-label="输入内容" type="text" value={filterSite}
-                  onChange={e => { setFilterSite(e.target.value); setPage(0) }}
+                  onChange={e => { setFilterSite(e.target.value); if (activeTab !== 'wordLib') setPage(0) }}
                   placeholder="输入域名..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-36" />
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">关键词</span>
                 <input aria-label="输入内容" type="text" value={filterKeyword}
-                  onChange={e => { setFilterKeyword(e.target.value); setPage(0) }}
+                  onChange={e => { setFilterKeyword(e.target.value); if (activeTab !== 'wordLib') setPage(0) }}
                   placeholder="搜索..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-32" />
               </div>
@@ -761,15 +814,15 @@ export default function HotRadarPage() {
                   className={`text-xs px-2.5 py-1 rounded font-medium transition-all duration-200 ${
                     copied ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-blue-500 text-white hover:bg-blue-600'
                   }`}>
-                  {copied ? '已复制 ✓' : '复制关键词'}
+                  {copied ? '已复制 ✓' : activeTab === 'wordLib' ? '复制本页关键词' : '复制关键词'}
                 </button>
                 <span className="text-gray-200">|</span>
                 <span className="text-xs text-gray-400">每页</span>
-                <select aria-label="选择选项" value={pageSize} onChange={e => { setPageSize(Number(e.target.value) as PageSize); setPage(0) }}
+                <select aria-label="选择选项" value={effectivePageSize} onChange={e => { setPageSize(Number(e.target.value) as PageSize); setPage(0) }}
                   className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-700 focus:outline-none">
-                  {PAGE_SIZES.map(s => <option key={s} value={s}>{s} 条</option>)}
+                  {(activeTab === 'wordLib' ? [20] : PAGE_SIZES).map(s => <option key={s} value={s}>{s} 条</option>)}
                 </select>
-                <span className="text-xs text-gray-400">共 {activeList.length} 条</span>
+                <span className="text-xs text-gray-400">共 {activeTotal} 条</span>
               </div>
             </div>
 
@@ -1063,6 +1116,12 @@ export default function HotRadarPage() {
               )}
 
               {/* 更新词库：6列 */}
+              {activeTab === 'wordLib' && wordLibError && (
+                <div role="alert" className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <span>{wordLibError}，已有资料会保留。</span>
+                  <button className="btn-secondary whitespace-nowrap" disabled={wordLibLoading} onClick={() => setWordLibRetry(value => value + 1)}>重试</button>
+                </div>
+              )}
               {activeTab === 'wordLib' && wordLibLoading && (
                 <div className="flex items-center justify-center py-16 text-gray-400 gap-3">
                   <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
@@ -1094,7 +1153,7 @@ export default function HotRadarPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {pagedList.length === 0 ? (
-                      <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无数据</td></tr>
+                      <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">{wordLibError ? '词库读取失败，请点击上方重试' : '没有匹配的词库资料'}</td></tr>
                     ) : (
                       (pagedList as (WordEntry & { longTailCount: number })[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
@@ -1124,7 +1183,7 @@ export default function HotRadarPage() {
               )}
 
             </div>
-            <PaginationBar page={page} total={activeList.length} pageSize={pageSize} onPageChange={setPage} />
+            <PaginationBar page={page} total={activeTotal} pageSize={effectivePageSize} onPageChange={setPage} />
           </>
         )}
       </div>

@@ -50,6 +50,17 @@ const nextConfig = {
         ],
       },
       { source: '/:path*', headers: securityHeaders },
+      {
+        // Only the design tool needs same-origin canvas/preview frames and
+        // user-supplied HTTPS images. Keep the tighter policy elsewhere.
+        source: '/page-studio/:path*',
+        headers: securityHeaders.filter(header => header.key === 'Content-Security-Policy').map(header => ({
+          ...header,
+          value: header.value
+            .replace("img-src 'self' data: blob: https://images.unsplash.com", "img-src 'self' data: blob: https:")
+            .replace('frame-src https://challenges.cloudflare.com', "frame-src 'self' blob: https://challenges.cloudflare.com"),
+        })),
+      },
     ]
   },
   async redirects() {

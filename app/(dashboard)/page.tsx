@@ -137,6 +137,7 @@ export function ContentDashboardPage() {
   const [kwModalSite, setKwModalSite] = useState<AlertItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const dashboardRequest = useRef<AbortController | null>(null)
 
   // 图表日期范围——2026-08-14 从预设"当月/近3个月/全年"改成自定义起止日期。
   // 默认一个月，用户可以自己选，配合下面 load() 里按 chartFrom 动态限定查询
@@ -155,13 +156,23 @@ export function ContentDashboardPage() {
   const [weightModalSite, setWeightModalSite] = useState<WeightChangeItem | null>(null)
   const [weightModalTab, setWeightModalTab] = useState<'weight' | 'ip' | 'index' | 'keywords' | 'rank' | 'unstable'>('weight')
   const [weightModalExtra, setWeightModalExtra] = useState<WeightModalExtra | null>(null)
+  const [weightModalError, setWeightModalError] = useState('')
+  const weightModalRequest = useRef<AbortController | null>(null)
   const [weightModalKwTab, setWeightModalKwTab] = useState<'app' | 'game'>('app')
   const [weightModalRankTab, setWeightModalRankTab] = useState<'up' | 'down'>('up')
   const [indexModalSite, setIndexModalSite] = useState<IndexAlertItem | null>(null)
 
-  useEffect(() => { load() }, [chartFrom])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); return () => dashboardRequest.current?.abort() }, [chartFrom, chartTo])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const request = weightModalRequest.current
+    if (!weightModalSite) request?.abort()
+    return () => request?.abort()
+  }, [weightModalSite])
 
   async function load() {
+    dashboardRequest.current?.abort()
+    const controller = new AbortController()
+    dashboardRequest.current = controller
     setLoading(true)
     setError(null)
     try {
@@ -169,48 +180,36 @@ export function ContentDashboardPage() {
       const yesterday = getMY(-1)
       const d28 = getMY(-30)
       const d30 = getMY(-30)
-      // 2026-08-13/14：weight_history/index_snapshots 之前固定拉365天（后来试过
-      // 缩到90天）全站数据，都会撞上 Supabase/PostgREST 单次查询3000行硬顶——
-      // 验证过这两张表当时90天和365天查出来的行数完全一样（都是3098/3099行），
-      // 说明表本身历史都还没攒够90天就已经超标，缩固定天数窗口治标不治本。
-      // 改成查询起点跟着用户在图表上选的 chartFrom 走（不再是写死的天数）：
-      // 权重变动/收录变动这两个提醒卡片只需要最近8天算日环比，所以起点取
-      // "chartFrom 和 8天前哪个更晚"——用户选的范围比8天短时，起点兜底不早于
-      // 8天前，保证提醒卡片一直有数据算；用户选得比8天长时，起点跟着 chartFrom
-      // 走。配合图表控件那边的最大跨度限制（见下方 maxChartSpanDays），单次查询
-      // 行数可以一直稳定压在3000以下，不用管站点数字以后涨到多少。
       const d8 = getMY(-8)
-      const rangeFrom = chartFrom < d8 ? chartFrom : d8
-
-      const [
-        sitesApiRes,
-        { data: snapsRaw },
-        { data: wrecsRaw },
-        { data: kwStatsRaw },
-      ] = await Promise.all([
-        fetch('/api/competitor-daily/sites').then(async response => {
-          const body = await response.json() as { sites?: Site[]; error?: string }
-          if (!response.ok) throw new Error(body.error || '站点读取失败')
-          return body
-        }),
-        db.from('index_snapshots')
-          .select('site_id, snapshot_date, index_count')
-          .gte('snapshot_date', rangeFrom)
-          .order('snapshot_date'),
-        db.from('weight_history')
-          .select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
-          .gte('record_date', rangeFrom)
-          .order('record_date'),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (db.from('competitor_kw_stats') as any)
-          .select('site_id, stat_date, app_count, game_count')
-          .gte('stat_date', d28)
-          .lte('stat_date', yesterday),
-      ])
-
-      // 首页与竞品日收使用同一套可见范围：普通站点全员可见，
-      // 重点／侧重站点只对获授权的普通组员开放；管理员与超管查看全部。
+      const response = await fetch('/api/competitor-daily/sites', { signal: controller.signal })
+      const sitesApiRes = await response.json() as { sites?: Site[]; error?: string }
+      if (!response.ok) throw new Error(sitesApiRes.error || '站点读取失败')
       const siteList = sitesApiRes.sites ?? []
+      const siteIds = siteList.map(site => site.id)
+      const fetchSnapshots = (start: string, end: string) => siteIds.length ? fetchAllRows<IndexSnap>((from, to) => db
+        .from('index_snapshots').select('site_id, snapshot_date, index_count')
+        .in('site_id', siteIds).gte('snapshot_date', start).lte('snapshot_date', end)
+        .order('snapshot_date').order('site_id').range(from, to).abortSignal(controller.signal)) : Promise.resolve([])
+      const fetchWeights = (start: string, end: string) => siteIds.length ? fetchAllRows<WeightRec>((from, to) => db
+        .from('weight_history').select('site_id, record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
+        .in('site_id', siteIds).gte('record_date', start).lte('record_date', end)
+        .order('record_date').order('site_id').range(from, to).abortSignal(controller.signal)) : Promise.resolve([])
+      // Chart history is bounded by both selected dates. Alerts always use their
+      // recent baseline, even when the user selects an older chart interval.
+      const today = getMY()
+      const chartSnapshots = fetchSnapshots(chartFrom, chartTo)
+      const chartWeights = fetchWeights(chartFrom, chartTo)
+      const [snapsRaw, wrecsRaw, alertSnaps, alertWeights, kwStatsRaw] = await Promise.all([
+        chartSnapshots,
+        chartWeights,
+        chartFrom <= d30 && chartTo >= today ? chartSnapshots : fetchSnapshots(d30, today),
+        chartFrom <= d8 && chartTo >= today ? chartWeights : fetchWeights(d8, today),
+        siteIds.length ? fetchAllRows<KwStatRow>((from, to) => db.from('competitor_kw_stats')
+          .select('site_id, stat_date, app_count, game_count').in('site_id', siteIds)
+          .gte('stat_date', d28).lte('stat_date', yesterday).order('stat_date').order('site_id')
+          .range(from, to).abortSignal(controller.signal)) : Promise.resolve([]),
+      ])
+      if (controller.signal.aborted) return
       setSites(siteList)
       setIndexSnaps((snapsRaw || []) as IndexSnap[])
       setWeightRecs((wrecsRaw || []) as WeightRec[])
@@ -219,7 +218,7 @@ export function ContentDashboardPage() {
       const wChanges: WeightChangeItem[] = []
       const d7ago = getMY(-7)
       for (const s of siteList) {
-        const siteRecs = ((wrecsRaw || []) as WeightRec[])
+        const siteRecs = alertWeights
           .filter(r => r.site_id === s.id)
           .sort((a, b) => a.record_date.localeCompare(b.record_date))
         if (siteRecs.length < 2) continue
@@ -239,7 +238,7 @@ export function ContentDashboardPage() {
       // Index alerts: check each snapshot in the last 7 days against its historical water level
       const iAlerts: IndexAlertItem[] = []
       for (const s of siteList) {
-        const siteSnaps = ((snapsRaw || []) as IndexSnap[])
+        const siteSnaps = alertSnaps
           .filter(r => r.site_id === s.id && r.snapshot_date >= d30)
           .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
         const recentSnaps = siteSnaps.filter(r => r.snapshot_date > d7ago)
@@ -283,12 +282,12 @@ export function ContentDashboardPage() {
       const firstCat = (['large', 'medium', 'small'] as Category[]).find(
         c => siteList.some(s => s.category === c)
       )
-      if (firstCat) setActiveCategory(firstCat)
+      if (firstCat) setActiveCategory(current => siteList.some(site => site.category === current) ? current : firstCat)
 
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败')
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : '加载失败')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
@@ -369,65 +368,57 @@ export function ContentDashboardPage() {
   }
 
   async function fetchWeightModalExtra(siteId: string) {
+    weightModalRequest.current?.abort()
+    const controller = new AbortController()
+    weightModalRequest.current = controller
+    setWeightModalError('')
     setWeightModalExtra({ appKw: [], gameKw: [], appCount: 0, gameCount: 0, kwDate: '', rankupAll: [], rankdownAll: [], rankupCount: 0, rankdownCount: 0, rankDate: '', unstableAll: [], loading: true })
-    const db = getBrowserClient()
-    const d30ago = getMY(-30)
-    const [{ data: appRaw }, { data: gameRaw }, { data: rdRaw }] = await Promise.all([
+    try {
+      const db = getBrowserClient()
+      const [appResult, gameResult, rankResult] = await Promise.all([
       db.from('raw_keywords').select('keyword,content_date').eq('site_id', siteId)
         .or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%')
-        .order('content_date', { ascending: false }).limit(200),
+        .order('content_date', { ascending: false }).limit(12).abortSignal(controller.signal),
       db.from('raw_keywords').select('keyword,content_date').eq('site_id', siteId)
         .eq('content_type', 'game').not('keyword', 'like', '%电脑版%')
-        .order('content_date', { ascending: false }).limit(200),
-      (async () => ({ data: await fetchAllRows<{ id: string; keyword: string; volume: number; type: string; stat_date: string }>((from, to) => db
-        .from('rank_changes').select('id,keyword,volume,type,stat_date')
-        .eq('site_id', siteId).gte('stat_date', d30ago)
-        .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to)) }))(),
-    ])
+        .order('content_date', { ascending: false }).limit(12).abortSignal(controller.signal),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (db as any).rpc('get_site_rank_overview', { p_site_id: siteId, p_date_start: getMY(-30), p_date_end: getMY() }).abortSignal(controller.signal),
+      ])
+    for (const result of [appResult, gameResult, rankResult]) if (result.error) throw new Error(result.error.message)
+    if (controller.signal.aborted) return
+    const appRaw = appResult.data
+    const gameRaw = gameResult.data
     type KwRaw = { keyword: string; content_date: string }
     const latestAppDate = (appRaw || []).length > 0 ? (appRaw![0] as KwRaw).content_date : ''
     const latestGameDate = (gameRaw || []).length > 0 ? (gameRaw![0] as KwRaw).content_date : ''
     const latestKwDate = [latestAppDate, latestGameDate].filter(Boolean).sort().reverse()[0] || ''
     const appAll = ((appRaw || []) as KwRaw[]).filter(k => k.content_date === latestKwDate).map(k => ({ keyword: k.keyword }))
     const gameAll = ((gameRaw || []) as KwRaw[]).filter(k => k.content_date === latestKwDate).map(k => ({ keyword: k.keyword }))
-    type RD = { keyword: string; volume: number; type: string; stat_date: string }
-    const rdArr = (rdRaw || []) as RD[]
-    const latestRankDate = rdArr.length > 0 ? rdArr[0].stat_date : ''
-    let rankupAll: { keyword: string; volume: number }[] = []
-    let rankdownAll: { keyword: string; volume: number }[] = []
-    if (latestRankDate) {
-      const today = rdArr.filter(r => r.stat_date === latestRankDate)
-      rankupAll = today.filter(r => r.type === 'rankup').map(r => ({ keyword: r.keyword, volume: r.volume })).sort((a, b) => b.volume - a.volume)
-      rankdownAll = today.filter(r => r.type === 'rankdown').map(r => ({ keyword: r.keyword, volume: r.volume })).sort((a, b) => b.volume - a.volume)
+    const [appCount, gameCount] = latestKwDate ? await Promise.all([
+      db.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', siteId).eq('content_date', latestKwDate).or('content_type.eq.app,content_type.is.null').not('keyword', 'like', '%电脑版%').abortSignal(controller.signal),
+      db.from('raw_keywords').select('id', { count: 'exact', head: true }).eq('site_id', siteId).eq('content_date', latestKwDate).eq('content_type', 'game').not('keyword', 'like', '%电脑版%').abortSignal(controller.signal),
+    ]) : [{ count: 0, error: null }, { count: 0, error: null }]
+    if (appCount.error) throw new Error(appCount.error.message)
+    if (gameCount.error) throw new Error(gameCount.error.message)
+    if (controller.signal.aborted) return
+    const ranks = rankResult.data as {
+      rankup: WeightModalExtra['rankupAll']; rankdown: WeightModalExtra['rankdownAll'];
+      unstable: WeightModalExtra['unstableAll']; rankupCount: number; rankdownCount: number; rankDate: string | null
     }
-    const upMap = new Map<string, number>()
-    const downMap = new Map<string, number>()
-    const volMap = new Map<string, number[]>()
-    for (const r of rdArr) {
-      if (r.type === 'rankup') upMap.set(r.keyword, (upMap.get(r.keyword) ?? 0) + 1)
-      else downMap.set(r.keyword, (downMap.get(r.keyword) ?? 0) + 1)
-      if (r.volume > 0) {
-        if (!volMap.has(r.keyword)) volMap.set(r.keyword, [])
-        volMap.get(r.keyword)!.push(r.volume)
-      }
-    }
-    const unstableAll: { keyword: string; volume: number; upDays: number; downDays: number }[] = []
-    for (const [kw, upDays] of Array.from(upMap.entries())) {
-      const downDays = downMap.get(kw) ?? 0
-      if (downDays > 0 && upDays + downDays >= 3) {
-        const vols = volMap.get(kw) || []
-        const volume = vols.length > 0 ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : 0
-        unstableAll.push({ keyword: kw, volume, upDays, downDays })
-      }
-    }
-    unstableAll.sort((a, b) => b.volume - a.volume || (b.upDays + b.downDays) - (a.upDays + a.downDays))
     setWeightModalExtra({
       appKw: appAll.slice(0, 12), gameKw: gameAll.slice(0, 12),
-      appCount: appAll.length, gameCount: gameAll.length, kwDate: latestKwDate,
-      rankupAll: rankupAll.slice(0, 12), rankdownAll: rankdownAll.slice(0, 12),
-      rankupCount: rankupAll.length, rankdownCount: rankdownAll.length,
-      rankDate: latestRankDate, unstableAll: unstableAll.slice(0, 12), loading: false,
+      appCount: appCount.count ?? 0, gameCount: gameCount.count ?? 0, kwDate: latestKwDate,
+      rankupAll: ranks.rankup, rankdownAll: ranks.rankdown,
+      rankupCount: ranks.rankupCount, rankdownCount: ranks.rankdownCount,
+      rankDate: ranks.rankDate ?? '', unstableAll: ranks.unstable, loading: false,
     })
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setWeightModalError(error instanceof Error ? error.message : '详情读取失败，请重试')
+        setWeightModalExtra(current => current ? { ...current, loading: false } : current)
+      }
+    }
   }
 
   if (loading) {
@@ -781,6 +772,7 @@ export function ContentDashboardPage() {
             </div>
             {/* Tab content */}
             <div className="px-6 py-4 overflow-y-auto flex-1">
+              {weightModalError && <div role="status" className="mb-3 flex items-center gap-3 text-xs text-red-600"><span>{weightModalError}</span><button type="button" className="btn-secondary" onClick={() => fetchWeightModalExtra(weightModalSite.site_id)}>重试</button></div>}
               {weightModalTab === 'weight' && (
                 weightTrend.length >= 2 ? (
                   <>

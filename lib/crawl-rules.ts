@@ -16,9 +16,21 @@ export interface RuleSection {
 
 export const CRAWL_RULES: RuleSection[] = [
   {
+    key: 'crawl-reliability',
+    title: '抓取完成与资料保护',
+    badge: '2026-10-13 · 分片完成检查 · 原子写入',
+    items: [
+      { label: '真实完成', text: '每日任务和立即重试全部分片结束后，由独立 finalize job 检查本次 workflow 的分片完成记录，再统一运行一次关键词信号汇总；汇总 RPC 返回 error 即失败，不发布完成标记。empty/fail/suspect 在重试后仍存在时会输出明确告警及 complete=false；processing_complete 只表示全部分片已结束，不代表全部站点采集成功。' },
+      { label: '缓存依赖', text: '每个完整来源步骤结束后检查当天 keywords、weight、rank、rank-title、index-pages 是否都已完成；资料未齐时正常跳过，最后实际完成的任一步骤会启动独立的 derived-crawl-data 后处理链。数据库按日期/资料版本原子领取，禁止并发重复刷新；部分站点为空或失败仍会列出名单和complete=false。不会挂runner等待一小时，也不依赖index cron一定最后结束。' },
+      { label: '排名保护', text: 'rank/rank-title 先抓取并校验资料，之后通过 replace_crawl_rank_rows 在数据库事务内替换非空的平台/涨跌组合。同站同日同表用事务锁串行写入，插入失败自动回滚删除；外站失败或空结果保留原有资料。公开手动 cron 入口使用同样的原子写入。' },
+      { label: '定时限制', text: 'cron 表示计划触发时刻，GitHub 可能延迟投递任务或等待 runner，并非固定一小时。此修复保证完整性检查与失败可见，不能保证任务在上午9点前结束；需要严格准点时应另外配置可靠的电脑或外部调度。' },
+      { label: '月度鉴权', text: '月度趋势服务入口允许请求到达 handler，仍由 handler 校验 CRON_SECRET 或用户登录；刷新缓存只允许通过有效 CRON_SECRET 的服务请求。' },
+    ],
+  },
+  {
     key: 'keywords',
     title: '关键词抓取',
-    badge: 'step=keywords · GitHub Actions · 目标 01:05 MYT（cron 00:05 MYT + 排队约 1h）',
+    badge: 'step=keywords · GitHub Actions · 计划 00:05 MYT（实际触发可能延迟）',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 5 16 * * * UTC = 00:05 MYT 当天)，动态 matrix job 并行（每6个站点1个job，由 setup job 查询当前站点总数自动计算），每组抓约6个站点（2026-08-28 从每组5个调到6个——账号是 GitHub Free，同时最多跑20个job，站点数涨到81个后每组5个会切出17个job、加上weight/rank同期都在20左右，几个步骤前后脚排队时经常撞上并发上限，导致任务一天比一天晚才跑，用户反馈"8点多才跑"实测确认过；调大分组后单步job数降到约14个，留足余量。用户明确要求分组别调太大（原计划调到10）——单个job处理的站点越多，一旦触发限流或中途异常，一次失败牵连的站点也越多，6个是"job数够低、单job风险也不大"的折中）；实际执行脚本：scripts/crawl.ts（非 /api/cron，两条路径）；GitHub runner 排队时长不固定（曾观察到短至~20分钟，也曾因并发超限累积到数小时），实际执行时间约 00:30-01:30 MYT 之间（并发正常时）。2026-08-18 前 cron 定在 23:30 MYT（前一天），排队时间偶尔明显短于预期的1小时，导致抓取在当天0点前完成、scripts/crawl.ts 用执行时刻的马来西亚当地日期打 content_date，被错误记成前一天——改成 00:05 MYT（当天）触发，即使排队时间趋近于0也不会再跨到前一天。主抓完成后在同一个 workflow 内立即补抓失败/空站；如果主 job 整体失败且没有写出单站日志，会自动完整重跑一次，避免过去独立 retry cron 的盲区' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 list_url 已填写的站点；is_enabled 由用户在网站管理"关键词数据"开关控制，关闭后跳过关键词抓取但权重/排名照常运行' },
@@ -36,7 +48,7 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'weight',
     title: '权重+收录',
-    badge: 'step=weight · GitHub Actions · 目标 01:30 MYT（cron 00:30 MYT + 排队约 1h）',
+    badge: 'step=weight · GitHub Actions · 计划 00:30 MYT（实际触发可能延迟）',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 16 * * * UTC = 00:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 01:30 MYT（并发正常时）。主抓完成后在同一个 workflow 内立即重试失败站' },
       { label: '数据来源', text: '爱站 aizhan.com，抓取 PC/移动权重、收录数、来路IP区间' },
@@ -49,7 +61,7 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'rank',
     title: '排名变动',
-    badge: 'step=rank · GitHub Actions · 目标 02:30 MYT（cron 01:30 MYT + 排队约 1h）',
+    badge: 'step=rank · GitHub Actions · 计划 01:30 MYT（实际触发可能延迟）',
     items: [
       { label: '触发方式', text: 'GitHub Actions daily-crawl.yml (cron 30 17 * * * UTC = 01:30 MYT 当天)，动态 matrix job 并行（每6个站点1个job，2026-08-28 从每组4个调到6个，理由见"关键词抓取"章节同名说明——账号并发上限20个job+单job站点数不宜太多）；实际执行脚本：scripts/crawl.ts；实际执行约 02:30 MYT（并发正常时）。主抓完成后在同一个 workflow 内立即重试失败/空站' },
       { label: '抓取对象', text: '仅 is_enabled=true 且 has_rank_data=true 的站点；has_rank_data 由用户在网站管理手动开关（列表里显示为"涨跌"），cron 不会自动修改该字段' },
@@ -58,7 +70,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '并行策略', text: '排名段1-5最多2个并发（各自启动前随机延迟0-400ms），段内按页顺序，每页间隔300ms；每页请求带 Referer=上一页URL（第1页 Referer=站点首页），模拟真实"点下一页"的跳转链，而不是每次都用固定 Referer（2026-07-27 加入：实测发现翻页 100% 卡在第1-2页、从未翻到第3页，怀疑反爬专门检查翻页请求的 Referer 链；2026-08 切到纯 fetch 后继续保留这个逻辑；同批 2026-08-02 还发现5段完全并行会被爱站按 UND_ERR_SOCKET 拒绝大部分连接，改成2并发+抖动后消失）' },
       { label: '限流保护', text: '涨入完成后随机等3-5秒抓跌出（随机间隔减少爱站检测风险）；涨跌其中一方为0时等5秒重试1次；连续3站均为空触发熔断，暂停5分钟后补抓；涨入/跌出任一方>150但另一方=0时标记 suspect（疑似漏抓），不影响已有数据写入，由 retry-crawl.yml 05:00 MYT 自动重抓；站点间45秒间隔' },
       { label: '去重', text: '同关键词出现在多个排名段时保留搜索量最高的记录' },
-      { label: '写入表', text: 'rank_changes（有数据时先删当日旧记录再插入）/ keyword_volume（涨入+跌出词搜索量，永久表，含 latest_trend 字段标记最新趋势；已有记录不被 volume=0 覆盖。prev_volume/volume_change 表示本次抓取的短期变化，baseline_volume/net_volume_change 表示从系统建立可靠追踪起点至今的累计净变化。因此 0→100→50 会保留为“累计净增50、本次下降50”，不会因本次回落而从搜索量趋势列表消失。旧表曾覆盖历史，迁移时仅对当前正在上涨的词使用尚存的 prev_volume 作起点；其余从迁移日当前值开始，不编造已丢失的旧趋势）' },
+      { label: '写入表', text: 'rank_changes 按站点/日期/涨跌组合原子替换，仅替换采集到非空结果的组合，失败回滚且空结果保留旧资料。keyword_volume 永久保存搜索量与 latest_trend；volume=0 不覆盖已有搜索量。prev_volume/volume_change 是本次变化，baseline_volume/net_volume_change 是可靠追踪起点以来的累计净变化，例如0→100→50仍保留累计净增50。' },
       { label: '静默失败风险', text: '爱站IP限流后返回空，两次重试都空则不写数据，标记 empty；单侧>150另侧=0时标记 suspect 供重抓；涨跌均为0无法区分"真无涨跌"与"被限流"，但单侧>150另侧=0基本可确认为漏抓。另：若整个 job 在拿到会话 cookie 之前就崩溃（比如网络问题），会连累到没有任何单站日志——同 2026-07 Playwright 超时那次一样是 retry-crawl.yml 的盲区，需要看 activity_log 该 job 是否有 activityEnd（长期停在"进行中"就是这种崩溃，不是真的还在跑）' },
       { label: '补抓历史日期', text: 'scripts/crawl.ts --step=rank 支持 --date=YYYY-MM-DD 覆盖"今天"（默认取当前 MYT 日期）；爱站排名页本身按日期区分 URL（当天省略日期段，历史日期带日期段），所以可以补抓过去某一天的涨跌词，仅影响 rank 步骤，不影响同一次运行里的其它 step；daily-crawl.yml 的 workflow_dispatch 对应加了 date 输入框，透传为这个 --date 参数（rank/rank-title 都支持，其它 step 忽略）' },
     ],
@@ -128,8 +140,8 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '并行策略', text: '排名段 1-5 同时并行（各开一个浏览器 page），段内按页顺序，每页间隔 300ms；4 个组合顺序执行，组合间隔随机 3-5 秒；站点间间隔 60 秒' },
       { label: '翻页上限', text: '每段最多 15 页；抓取全部词（不过滤 volume=0）' },
       { label: '排名字段', text: '新排名（rank_position）= "第11名" → 11；原排名（prev_rank）= "50名外" → NULL；含页面标题（title）和排名页 URL' },
-      { label: '写入表', text: 'site_keyword_ranks（永久保留，含 prev_rank + title + url，按 site_id+keyword+stat_date+platform+type 唯一，每次运行先删当日全部记录再写入）/ keyword_volume（移动端 rankup+rankdown，upsert；rankup 优先级高于 rankdown；含 latest_trend 字段；同上一步一样写入前先算 prev_volume/volume_change）' },
-      { label: '数据保留', text: 'site_keyword_ranks 永久保留，不自动删除' },
+      { label: '写入表', text: 'site_keyword_ranks 含 prev_rank/title/url，按 site_id+keyword+stat_date+platform+type 唯一。每个平台/涨跌组合在非空结果校验后原子替换，失败或空结果保留旧资料。keyword_volume 合并移动端涨入/跌出，rankup 优先，写入前计算搜索量变化。' },
+      { label: '数据保留', text: 'site_keyword_ranks 排名明细保留40天，历史报告与成效追踪继续保留。' },
       { label: '限流风险', text: '爱站返回空时标记为"无数据（疑似限流或无词）"，不写入；站点间 60s 间隔降低限流概率' },
     ],
   },
@@ -237,7 +249,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: 'site_rank_keywords 死表清理（同一天，排查数据库空间时发现）', text: '排查数据库空间占用时发现 site_keyword_ranks（106MB，scripts/crawl-rank.ts 每天写入的现役表）和 site_rank_keywords（75MB，字段几乎一样只少了 prev_rank）两张名字相近的表——比对迁移函数源码确认后者是更早期建的、后来被前者取代的遗留表，早就没有任何日常抓取逻辑再写入，只有网站管理"排名/涨跌"模式切换时的迁移工具（/api/migrate-rank-site）还在指向它，而且指错了地方（迁移过去的数据进了一张不会再更新的死表）。已删除 site_rank_keywords，迁移工具的两个数据库函数改名重写为 migrate_rank_changes_to_site_keyword_ranks / migrate_site_keyword_ranks_to_rank_changes，正确指向现役表；get_hot_rank_words/get_hot_streak_words 里跟 site_rank_keywords 的 UNION 分支也同步改成 site_keyword_ranks（不能不改，删表当天就会报表不存在的错）' },
       { label: '静默失败覆盖好缓存的bug（2026-08-13 修复）', text: '用户反馈"交叉词/竞品涨排名/连续上涨词又看不到了"——排查发现 get_hot_rank_words/get_hot_streak_words 单次真实耗时约15秒，跟函数体里设的20秒 statement_timeout 余量很薄，真实负载稍高就会被 Postgres 中止报错；但 computeHotRadarPayload() 之前完全没检查这几个 RPC 调用的 error，直接 `(data || [])` 把报错静默当成"这块本来就没数据"，缓存被写成空数组覆盖掉上次的正常数据。修复：① 每个 RPC 调用加 error 检查+失败重试一次（rpcWithRetry，隔3秒重试，真实负载多是瞬时的）；② refresh 接口拿到失败的分块名单后，先读一次旧缓存，报错的那几块沿用旧值而不是用这次的空数组覆盖，只有真正算成功的块才更新——宁可某块数据暂时不是今天算的，也不要让它突然变成空白；③ maxDuration 从60秒提到90秒，给重试留够时间。' },
       { label: '"竞品涨排名"/"连续上涨词"根治性重做（2026-08-20）', text: '08-13 修的是"别用空结果覆盖好缓存"，没解决"为什么会超时"——rank_changes 持续每天净增约5.35万行，从08-13起 get_hot_rank_words/get_hot_streak_words 实际上每天都在超时，靠上面那层保护悄悄沿用08-13当天算出来的旧数据，表现为"资料停在8月13号不再更新"但完全不报错，用户隔了一周才发现。这次改成增量维护：新表 keyword_signal_rollup（site_id+keyword+type 唯一，一行不是一天，存最近30天内出现过的日期数组 recent_dates），新函数 refresh_keyword_signal_rollup(p_date) 每天只扫当天的 rank_changes+site_keyword_ranks（两三万行级别，不是30天全量），UPSERT时把数组按30天窗口裁剪好；get_hot_rank_words/get_hot_streak_words 的 CREATE OR REPLACE 换成查这张小表，函数名/参数/返回列完全不变，调用方（lib/hot-radar.ts）不用改一行。这样查询速度只取决于"今天新增了多少行"，跟 rank_changes/site_keyword_ranks 历史总量彻底脱钩，不会再随数据变多重新变慢。顺带把之前"只读 rank_changes（涨跌）、不含 site_keyword_ranks（排名）"的缺口也补上了——两张源表 UNION 进同一张汇总表（同一个站点"排名"/"涨跌"两种模式互斥，不会同一天两边都有数据，UNION 不需要处理冲突）。"搜索量上涨"tab 判断涨跌方向的辅助查询、分组任务"涨排更新"/"跌排更新"两个tab（之前是完全独立现场查 site_keyword_ranks 30天窗口+limit(3000) 的另一套代码）都跟着一起改读这张汇总表。' },
-      { label: '写入表（2026-08-20 补充，2026-08-26 修正调用频率）', text: 'keyword_signal_rollup——site_id+keyword+type 主键；scripts/crawl.ts 的 runRank()、scripts/crawl-rank.ts、app/api/cron/route.ts 的 rank/rank-title 两个写入点，写完当天 rank_changes/site_keyword_ranks 后调一次 refresh_keyword_signal_rollup(today)。该函数内部按 stat_date=当天 处理全部数据，跟分片无关；GH Actions 分片跑（--group/--total-groups）时改成只有 group=0 那一片调用，其余分片跳过——8/26发现之前每个分片都各调一次，rank-title 8分片+rank约6-8分片一天十几次重复全量重算同一天数据，是CPU/Disk IO被打满、rankWords/streakWords 反复算失败的主因，已修复；app/api/cron/route.ts 走 Vercel 单次触发无分片，照常每次都调' },
+      { label: '写入表与汇总时机（2026-10-13）', text: 'keyword_signal_rollup 以 site_id+keyword+type 为主键。GH Actions 在同一步骤全部采集分片与重试完成后，由单独 finalize job 调用一次 refresh_keyword_signal_rollup(data_date)，不再由 group0 提早刷新；检查 RPC error 后才记录步骤完成。单站手动 cron 在该站写入完成后刷新。' },
     ],
   },
   {

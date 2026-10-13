@@ -6,11 +6,13 @@ import { useEffect, useMemo, useState } from 'react'
 import AppDialog from '@/components/app-dialog'
 import {
   PageStudioProject,
+  PageStudioProjectSummary,
   createPageStudioProject,
   deletePageStudioProject,
   downloadPageDocument,
   extractImportedCode,
-  loadPageStudioProjects,
+  loadPageStudioProjectSummaries,
+  getPageStudioProject,
   readPageStudioProjects,
   savePageStudioProject,
 } from '@/lib/page-studio'
@@ -23,7 +25,7 @@ function formatTime(value: string) {
 
 export default function PageStudioProjects() {
   const router = useRouter()
-  const [projects, setProjects] = useState<PageStudioProject[]>([])
+  const [projects, setProjects] = useState<PageStudioProjectSummary[]>([])
   const [dialog, setDialog] = useState<'blank' | 'import' | 'ai' | null>(null)
   const [name, setName] = useState('')
   const [html, setHtml] = useState('')
@@ -34,10 +36,13 @@ export default function PageStudioProjects() {
   const [aiDescription, setAiDescription] = useState('')
   const [aiDevice, setAiDevice] = useState<'desktop' | 'mobile'>('desktop')
   const [generating, setGenerating] = useState(false)
+  const [exportingId, setExportingId] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
 
   useEffect(() => {
     let active = true
-    loadPageStudioProjects()
+    setLoading(true); setStorageError('')
+    loadPageStudioProjectSummaries()
       .then(items => { if (active) setProjects(items) })
       .catch(error => {
         if (!active) return
@@ -46,7 +51,7 @@ export default function PageStudioProjects() {
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [])
+  }, [retry])
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [projects]
@@ -72,7 +77,7 @@ export default function PageStudioProjects() {
     router.push(`/page-studio/editor/${saved.id}`)
   }
 
-  async function removeProject(project: PageStudioProject) {
+  async function removeProject(project: PageStudioProjectSummary) {
     if (!window.confirm(`删除“${project.name}”？数据库中的这份草稿将无法恢复。`)) return
     try {
       await deletePageStudioProject(project.id)
@@ -82,6 +87,19 @@ export default function PageStudioProjects() {
       return
     }
     setProjects(current => current.filter(item => item.id !== project.id))
+  }
+
+  async function exportProject(projectId: string) {
+    if (exportingId) return
+    setExportingId(projectId)
+    try {
+      const project = await getPageStudioProject(projectId)
+      const page = project?.pages.find(item => item.id === project.activePageId) ?? project?.pages[0]
+      if (!project || !page) throw new Error('项目不存在或没有可导出的页面')
+      downloadPageDocument(project, page)
+      setStorageError('')
+    } catch (error) { setStorageError(error instanceof Error ? error.message : '导出失败，请重试') }
+    finally { setExportingId(null) }
   }
 
   async function generateProject() {
@@ -133,7 +151,7 @@ export default function PageStudioProjects() {
 
       <main className="mx-auto max-w-[1380px] p-5 sm:p-8">
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:flex-row sm:items-center sm:justify-between"><span><strong>保存位置：</strong>Supabase 云端数据库。</span><span className="text-xs text-emerald-700">本机旧资料会在首次打开时自动导入。</span></div>
-        {storageError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{storageError}</div>}
+        {storageError && <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{storageError}</span><button type="button" onClick={() => setRetry(value => value + 1)} className="btn-secondary">重新读取</button></div>}
 
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
@@ -161,14 +179,13 @@ export default function PageStudioProjects() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {sortedProjects.map(project => {
-                    const activePage = project.pages.find(page => page.id === project.activePageId) ?? project.pages[0]
                     return (
                       <tr key={project.id} className="hover:bg-slate-50/70">
                         <td className="px-5 py-3"><Link href={`/page-studio/projects/${project.id}`} className="font-semibold text-slate-900 hover:text-emerald-700">{project.name}</Link><p className="mt-0.5 text-xs text-slate-400">{project.id}</p></td>
                         <td className="px-4 py-3 text-sm text-slate-600">{project.pages.length} 页</td>
                         <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${project.status === 'exported' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{project.status === 'exported' ? '已导出' : '草稿'}</span></td>
                         <td className="px-4 py-3 text-sm text-slate-500">{formatTime(project.updatedAt)}</td>
-                        <td className="px-5 py-3"><div className="flex justify-end gap-2"><Link href={`/page-studio/projects/${project.id}`} className="btn-ghost">打开</Link><button type="button" onClick={() => activePage && downloadPageDocument(project, activePage)} className="btn-ghost">导出首页</button><button type="button" onClick={() => void removeProject(project)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button></div></td>
+                        <td className="px-5 py-3"><div className="flex justify-end gap-2"><Link href={`/page-studio/projects/${project.id}`} className="btn-ghost">打开</Link><button type="button" onClick={() => void exportProject(project.id)} disabled={exportingId !== null} className="btn-ghost disabled:opacity-50">{exportingId === project.id ? '读取中…' : '导出首页'}</button><button type="button" onClick={() => void removeProject(project)} className="inline-flex min-h-11 items-center rounded-md border border-red-200 bg-white px-3 text-sm font-medium text-red-600 hover:bg-red-50">删除</button></div></td>
                       </tr>
                     )
                   })}

@@ -24,6 +24,7 @@ import {
   extractImportedCode,
   getPageStudioProject,
   loadPageStudioFavoriteModules,
+  readPageStudioFavoriteModules,
   loadPageStudioProjectVersions,
   savePageStudioProject,
   updatePageStudioFavoriteModule,
@@ -189,6 +190,7 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         setReady(true)
         return
       }
+      if (!stored.pages?.length) throw new Error('项目没有可编辑的页面，请回到项目管理重新建立页面')
       const initialProject = stored
       projectRef.current = stored
       setProject(stored)
@@ -225,13 +227,18 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
         },
         canvas: { styles: [], scripts: [], infiniteCanvas: true },
       })
+      editorRef.current = editor
 
       // Page Studio owns these shortcuts so copy/paste has one predictable target.
       // Keeping GrapesJS defaults as well would execute the same key press twice.
       ;['core:undo', 'core:redo', 'core:copy', 'core:paste', 'core:component-delete'].forEach(keymap => editor.Keymaps.remove(keymap))
 
       const blocks = editor.BlockManager
-      const storedFavoriteModules = await loadPageStudioFavoriteModules()
+      const storedFavoriteModules = await loadPageStudioFavoriteModules().catch(error => {
+        if (!disposed) setStorageError(error instanceof Error ? error.message : '收藏模块读取失败，请稍后重试')
+        return readPageStudioFavoriteModules()
+      })
+      if (disposed) return
       favoriteModulesRef.current = storedFavoriteModules
       setFavoriteModules(storedFavoriteModules)
       storedFavoriteModules.forEach(module => registerFavoriteBlock(editor, module))
@@ -1047,9 +1054,13 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const current = snapshotCurrent()
     if (!current) return
     const page = current.pages.find(item => item.id === current.activePageId) ?? current.pages[0]
-    await copyPageDocument(current, page)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
+    try {
+      await copyPageDocument(current, page)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setStorageError('复制失败，请允许浏览器访问剪贴板后重试')
+    }
   }
 
   function replaceCurrentWithCode() {
@@ -1081,9 +1092,13 @@ export default function PageStudioEditor({ projectId }: { projectId: string }) {
     const current = snapshotCurrent()
     if (!current) return
     const page = current.pages.find(item => item.id === current.activePageId) ?? current.pages[0]
-    await navigator.clipboard.writeText(buildPageChangeReport(current, page))
-    setReportCopied(true)
-    window.setTimeout(() => setReportCopied(false), 1800)
+    try {
+      await navigator.clipboard.writeText(buildPageChangeReport(current, page))
+      setReportCopied(true)
+      window.setTimeout(() => setReportCopied(false), 1800)
+    } catch {
+      setStorageError('复制失败，请允许浏览器访问剪贴板后重试')
+    }
   }
 
   if (!project) {

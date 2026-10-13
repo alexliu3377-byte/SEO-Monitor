@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { createAizhanHttpSession, fetchRankupWithTitleViaHttp, fetchRankdownWithTitleViaHttp } from '../lib/crawler-aizhan-http'
-import { activityStart, activityEnd, siteLog } from '../lib/activity-log'
+import { startCrawlActivity as activityStart, finishCrawlActivity as activityEnd, writeCrawlSiteLog as siteLog, checkDatabaseResult as sbCheck, replaceCollectedRankRows } from '../lib/crawl-reliability'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
 
 const supabase = createClient(
@@ -141,6 +141,8 @@ async function upsertDiscovery(params: {
 }
 
 async function main() {
+  if (dateOverride && !/^\d{4}-\d{2}-\d{2}$/.test(dateOverride)) throw new Error('Invalid --date value')
+  if (!Number.isInteger(group) || !Number.isInteger(totalGroups) || group < 0 || totalGroups < 1 || group >= totalGroups) throw new Error('Invalid crawl group partition')
   const today = dateOverride ?? getMalaysiaDate()
   const totalStart = Date.now()
 
@@ -163,36 +165,29 @@ async function main() {
 
   const allSites = (sitesRaw || []) as { id: string; domain: string; track_pc_rank: boolean | null }[]
 
-  if (allSites.length === 0) {
-    console.log('  没有开启排名追踪的站点，退出')
-    return
-  }
 
   let candidateSites = allSites
 
   // Retry mode: only process today's failed/empty sites
   if (retryFailed) {
-    const todayStart = new Date(today + 'T00:00:00+08:00').toISOString()
-    const todayEnd   = new Date(today + 'T23:59:59.999+08:00').toISOString()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: acts } = await (supabase as any)
+    const { data: acts } = sbCheck(await (supabase as any)
       .from('activity_log')
       .select('id')
       .eq('step', 'rank-title')
       .eq('type', 'cron_task')
-      .gte('logged_at', todayStart)
-      .lte('logged_at', todayEnd)
+      .eq('data_date', today), 'read rank-title retry activities')
     const actIds = ((acts || []) as { id: string }[]).map(a => a.id)
     if (actIds.length === 0) {
       console.log('  重试模式：今日尚无 rank-title 主抓取记录，退出\n')
       return
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: failLogs } = await (supabase as any)
+    const { data: failLogs } = sbCheck(await (supabase as any)
       .from('activity_site_log')
       .select('domain')
       .in('activity_id', actIds)
-      .in('status', ['fail', 'empty'])
+      .in('status', ['fail', 'empty', 'suspect']), 'read rank-title failed sites')
     const failedDomains = new Set(((failLogs || []) as { domain: string }[]).map(l => l.domain))
     console.log(`  重试模式：今日 rank-title 失败/空 ${failedDomains.size} 站`)
     if (failedDomains.size === 0) { console.log('  无失败站点，退出\n'); return }
@@ -223,7 +218,12 @@ async function main() {
     groupIndex: group,
     totalGroups,
     ip: ip ?? undefined,
+    dataDate: today,
   })
+  if (sites.length === 0) {
+    await activityEnd(supabase, activityId, { status: 'done', summary: '本分片无开启排名追踪的站点', durationMs: Date.now() - totalStart })
+    return
+  }
 
   const types: ('rankup' | 'rankdown')[] = ['rankup', 'rankdown']
 
@@ -251,16 +251,13 @@ async function main() {
     console.log(`\n${'─'.repeat(50)}`)
     console.log(`  [${i + 1}/${sites.length}] ${domain}  (${ts()})  平台=${platforms.join('+')}`)
 
-    // Clear today's existing data for this site (both platforms)
-    await supabase.from('site_keyword_ranks').delete()
-      .eq('site_id', siteId).eq('stat_date', today)
-
     // keyword_volume: collect from mobile rankup + rankdown; rankup takes priority if same keyword
     const kwVolumeMap = new Map<string, { volume: number; latest_trend: string }>()
 
     let siteSaved = 0
     let siteAnyData = false
     let siteFailed = false
+    let siteEmpty = false
     const siteDetails: string[] = []
 
     for (const platform of platforms) {
@@ -274,6 +271,7 @@ async function main() {
           if (entries.length === 0) {
             console.log(`    ${label.padEnd(16)} ⚠  无数据（疑似限流或无词）`)
             siteDetails.push(`${label}=0`)
+            siteEmpty = true
             await delay(3000 + Math.floor(Math.random() * 2000))
             continue
           }
@@ -291,11 +289,9 @@ async function main() {
             url: e.url || null,
           }))
 
-          for (const chunk of chunkArray(rows, 500)) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabase.from('site_keyword_ranks') as any)
-              .upsert(chunk, { onConflict: 'site_id,keyword,stat_date,platform,type' })
-          }
+          // Replace only this non-empty platform/type. External failures and
+          // empty responses retain its old data; DB errors roll back deletion.
+          await replaceCollectedRankRows(supabase, siteId, today, 'site_keyword_ranks', rows)
 
           if (eligibleAliases.length > 0) {
             for (const e of entries) {
@@ -349,6 +345,7 @@ async function main() {
     }
 
     // Upsert keyword_volume (mobile rankup + rankdown)
+    try {
     if (kwVolumeMap.size > 0) {
       const allEntries = Array.from(kwVolumeMap.entries())
       const withVol = allEntries.filter(([, v]) => v.volume > 0)
@@ -358,27 +355,33 @@ async function main() {
       await upsertKeywordVolumeWithChange(supabase, withVol)
       for (const chunk of chunkArray(noVol, 500)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword', ignoreDuplicates: true })
+        sbCheck(await (supabase.from('keyword_volume') as any).upsert(chunk, { onConflict: 'keyword', ignoreDuplicates: true }), 'zero-volume insert')
       }
       const rankupNoVol = noVol.filter(r => r.latest_trend === 'rankup').map(r => r.keyword)
       const rankdownNoVol = noVol.filter(r => r.latest_trend === 'rankdown').map(r => r.keyword)
       for (const chunk of chunkArray(rankupNoVol, 500)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankup' }).in('keyword', chunk)
+        sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankup' }).in('keyword', chunk), 'rankup trend update')
       }
       for (const chunk of chunkArray(rankdownNoVol, 500)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankdown' }).in('keyword', chunk)
+        sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankdown' }).in('keyword', chunk), 'rankdown trend update')
       }
       const up = allEntries.filter(([, v]) => v.latest_trend === 'rankup').length
       const dn = allEntries.filter(([, v]) => v.latest_trend === 'rankdown').length
       console.log(`    keyword_volume   ✓  更新 ${kwVolumeMap.size} 条（涨=${up} 跌=${dn}）`)
     }
+    } catch (error) {
+      siteFailed = true
+      totalFailed++
+      siteDetails.push(`keyword_volume=ERR (${error instanceof Error ? error.message : error})`)
+    }
 
     // Per-site log
-    const siteStatus = siteFailed ? 'fail' : siteAnyData ? 'ok' : 'empty'
+    const siteStatus = siteFailed ? 'fail' : siteAnyData ? siteEmpty ? 'suspect' : 'ok' : 'empty'
     if (siteStatus === 'ok') okSites++
     else if (siteStatus === 'empty') emptySites++
+    else if (siteStatus === 'suspect') emptySites++
     else failSites++
 
     if (activityId) {
@@ -401,22 +404,15 @@ async function main() {
   console.log(`  完成  总词条=${totalSaved}  失败=${totalFailed}  耗时=${elapsed(dur)}`)
   console.log(`${'✓'.repeat(60)}\n`)
 
-  // 增量维护"连续上涨词/竞品涨排名"汇总表（2026-08-20）——见 crawl.ts runRank()
-  // 同名调用的注释。2026-08-26 发现：函数内部按 stat_date 处理"当天全部"数据，
-  // 跟分片无关，之前每个分片都各调一次是纯重复劳动，rank-title 一天8个分片就是
-  // 8次全量重算，是CPU/Disk IO被打满的主因之一。改成只由 group 0 调用一次。
-  if (group === 0) {
-    try {
-      await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today })
-    } catch (e) {
-      console.error(`  ⚠ refresh_keyword_signal_rollup 失败: ${e instanceof Error ? e.message : e}`)
-    }
+  // One workflow finalizer runs the rollup after all shards and retries.
+  if (totalGroups === 1 && process.env.DEFER_CRAWL_ROLLUP !== 'true') {
+    sbCheck(await supabase.rpc('refresh_keyword_signal_rollup', { p_date: today }), 'standalone keyword signal rollup')
   }
 
   // End activity log
   if (activityId) {
     await activityEnd(supabase, activityId, {
-      status: failSites > 0 ? 'warn' : emptySites === sites.length ? 'warn' : 'done',
+      status: failSites > 0 || emptySites > 0 ? 'warn' : 'done',
       ok: okSites,
       empty: emptySites,
       fail: failSites,

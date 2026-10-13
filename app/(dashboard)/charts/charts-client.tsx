@@ -72,9 +72,30 @@ function SectionHeader({ title, color, updatedAt }: { title: string; color: stri
     <div className="flex items-center gap-3 mb-4">
       <div className={`w-1 h-5 rounded-full ${color}`} />
       <h2 className="text-base font-bold text-gray-800">{title}</h2>
-      <span className="text-xs text-gray-400 ml-auto">{updatedAt} 更新</span>
+      <span className="text-xs text-gray-400 ml-auto">{updatedAt ? `${updatedAt} 更新` : '暂无采集时间'}</span>
     </div>
   )
+}
+
+async function readChartData(url: string, signal: AbortSignal) {
+  const response = await fetch(url, { signal })
+  const data = await response.json().catch(() => null)
+  if (!response.ok || !data) throw new Error(data?.error || '资料读取失败，请重试')
+  return data
+}
+
+function formatCollectedAt(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+}
+
+function ChartError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return <div role="status" className="mb-3 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+    <span>{error}</span>
+    <button type="button" onClick={onRetry} className="btn-secondary whitespace-nowrap">重试</button>
+  </div>
 }
 
 function Card({ title, subtitle, icon, list, footer, accent, sourceUrl, sourceLabel }: {
@@ -262,46 +283,54 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
   const [haoyouHotItems, setHaoyouHotItems] = useState<HaoyouHotItem[]>([])
   const [haoyouLoading, setHaoyouLoading] = useState(true)
   const [haoyouUpdatedAt, setHaoyouUpdatedAt] = useState('')
+  const [hotError, setHotError] = useState('')
+  const [todayError, setTodayError] = useState('')
+  const [haoyouError, setHaoyouError] = useState('')
+  const [retry, setRetry] = useState(0)
 
   const [modal, setModal] = useState<ModalState | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
-    const now = new Date()
-    const ts = `${String(now.getMonth() + 1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
     if (source === 'taptap') {
-      fetch('/api/charts/taptap-hot', { signal: controller.signal })
-        .then((r) => r.json())
-        .then((d) => { setHotItems(d.items ?? []); setHotUpdatedAt(ts) })
-        .catch(() => {})
-        .finally(() => setHotLoading(false))
+      setHotLoading(true); setTodayLoading(true); setHotError(''); setTodayError('')
+      readChartData('/api/charts/taptap-hot', controller.signal)
+        .then((d) => { if (!controller.signal.aborted) {
+          setHotItems(d.items ?? []); setHotUpdatedAt(formatCollectedAt(d.updatedAt))
+          if (d.failed) setHotError(d.error || '热门榜最近采集失败，当前展示上次成功资料')
+        } })
+        .catch(error => { if (!controller.signal.aborted) setHotError(error instanceof Error ? error.message : '热门榜读取失败') })
+        .finally(() => { if (!controller.signal.aborted) setHotLoading(false) })
 
-      fetch('/api/charts/taptap-today', { signal: controller.signal })
-        .then((r) => r.json())
+      readChartData('/api/charts/taptap-today', controller.signal)
         .then((d) => {
+          if (controller.signal.aborted) return
           setTodayGames(d.todayGames ?? [])
           setUpcomingGames(d.upcomingGames ?? [])
           setTopEvents(d.topEvents ?? [])
+          if (d.failed) setTodayError(d.error || '今日游戏最近采集失败，当前展示上次成功资料')
         })
-        .catch(() => {})
-        .finally(() => setTodayLoading(false))
+        .catch(error => { if (!controller.signal.aborted) setTodayError(error instanceof Error ? error.message : '今日游戏读取失败') })
+        .finally(() => { if (!controller.signal.aborted) setTodayLoading(false) })
       return () => controller.abort()
     }
 
-    fetch('/api/charts/haoyou', { signal: controller.signal })
-      .then((r) => r.json())
+    setHaoyouLoading(true); setHaoyouError('')
+    readChartData('/api/charts/haoyou', controller.signal)
       .then((d) => {
+        if (controller.signal.aborted) return
         setHaoyouUpcomingToday(d.upcomingToday ?? [])
         setHaoyouUpcoming(d.upcoming ?? [])
         setHaoyouBaoliao(d.baoliao ?? [])
         setHaoyouUpdates(d.updates ?? [])
         setHaoyouHotItems(d.hotItems ?? [])
-        setHaoyouUpdatedAt(ts)
+        setHaoyouUpdatedAt(formatCollectedAt(d.updatedAt))
+        if (d.failed) setHaoyouError(d.error || '好游快爆最近采集失败，当前展示上次成功资料')
       })
-      .catch(() => {})
-      .finally(() => setHaoyouLoading(false))
+      .catch(error => { if (!controller.signal.aborted) setHaoyouError(error instanceof Error ? error.message : '好游快爆读取失败') })
+      .finally(() => { if (!controller.signal.aborted) setHaoyouLoading(false) })
     return () => controller.abort()
-  }, [source])
+  }, [source, retry])
 
   function openModal(title: string, items: React.ReactNode[]) {
     setModal({ title, items })
@@ -339,7 +368,9 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
     <div className="space-y-10">
       {/* ── TapTap ── */}
       {source === 'taptap' && <div>
-        <SectionHeader title="TapTap" color="bg-teal-500" updatedAt={hotUpdatedAt || '加载中…'} />
+        <SectionHeader title="TapTap" color="bg-teal-500" updatedAt={hotUpdatedAt} />
+        {hotError && <ChartError error={hotError} onRetry={() => setRetry(value => value + 1)} />}
+        {todayError && <ChartError error={todayError} onRetry={() => setRetry(value => value + 1)} />}
         <div className="grid gap-5 xl:grid-cols-3">
 
           {/* 今日游戏 */}
@@ -401,7 +432,8 @@ function SourceRankingTab({ source }: { source: 'taptap' | 'haoyou' }) {
 
       {/* ── 好游快爆 ── */}
       {source === 'haoyou' && <div>
-        <SectionHeader title="好游快爆" color="bg-green-500" updatedAt={haoyouUpdatedAt || '加载中…'} />
+        <SectionHeader title="好游快爆" color="bg-green-500" updatedAt={haoyouUpdatedAt} />
+        {haoyouError && <ChartError error={haoyouError} onRetry={() => setRetry(value => value + 1)} />}
         <div className="grid gap-5 xl:grid-cols-3">
 
           {/* 即将上线 */}
@@ -506,22 +538,34 @@ function SearchTrendsTab() {
   const [haoyouItems, setHaoyouItems] = useState<SearchTrendItem[]>([])
   const [tapTapLoading, setTapTapLoading] = useState(true)
   const [haoyouLoading, setHaoyouLoading] = useState(true)
+  const [tapTapError, setTapTapError] = useState('')
+  const [haoyouError, setHaoyouError] = useState('')
+  const [tapTapUpdatedAt, setTapTapUpdatedAt] = useState('')
+  const [haoyouUpdatedAt, setHaoyouUpdatedAt] = useState('')
+  const [retry, setRetry] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/charts/taptap-search-trends', { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data) => setTapTapItems(Array.isArray(data.items) ? data.items : []))
-      .catch(() => {})
+    setTapTapLoading(true); setHaoyouLoading(true); setTapTapError(''); setHaoyouError('')
+    readChartData('/api/charts/taptap-search-trends', controller.signal)
+      .then((data) => { if (!controller.signal.aborted) {
+        setTapTapItems(Array.isArray(data.items) ? data.items : [])
+        setTapTapUpdatedAt(formatCollectedAt(data.updatedAt))
+        if (data.failed) setTapTapError(data.error || '最近采集失败，当前展示上次成功资料')
+      } })
+      .catch(error => { if (!controller.signal.aborted) setTapTapError(error instanceof Error ? error.message : '热门搜索读取失败') })
       .finally(() => { if (!controller.signal.aborted) setTapTapLoading(false) })
 
-    fetch('/api/charts/haoyou?view=search', { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data) => setHaoyouItems(Array.isArray(data.searchItems) ? data.searchItems : []))
-      .catch(() => {})
+    readChartData('/api/charts/haoyou?view=search', controller.signal)
+      .then((data) => { if (!controller.signal.aborted) {
+        setHaoyouItems(Array.isArray(data.searchItems) ? data.searchItems : [])
+        setHaoyouUpdatedAt(formatCollectedAt(data.updatedAt))
+        if (data.failed) setHaoyouError(data.error || '最近采集失败，当前展示上次成功资料')
+      } })
+      .catch(error => { if (!controller.signal.aborted) setHaoyouError(error instanceof Error ? error.message : '热门搜索读取失败') })
       .finally(() => { if (!controller.signal.aborted) setHaoyouLoading(false) })
     return () => controller.abort()
-  }, [])
+  }, [retry])
 
   return (
     <div className="grid gap-4 md:grid-cols-3">
@@ -539,6 +583,8 @@ function SearchTrendsTab() {
             <span className="whitespace-nowrap text-[11px] text-teal-700">每日读取一次</span>
           </div>
         </div>
+        {tapTapUpdatedAt && <p className="px-4 pt-2 text-[11px] text-gray-400">{tapTapUpdatedAt} 更新</p>}
+        {tapTapError && <ChartError error={tapTapError} onRetry={() => setRetry(value => value + 1)} />}
         <SearchTrendList items={tapTapItems} loading={tapTapLoading} emptyText="今日暂未取得 TapTap 热门搜索" tone="teal" />
       </section>
 
@@ -555,6 +601,8 @@ function SearchTrendsTab() {
             <span className="whitespace-nowrap text-[11px] text-green-700">每 6 小时更新</span>
           </div>
         </div>
+        {haoyouUpdatedAt && <p className="px-4 pt-2 text-[11px] text-gray-400">{haoyouUpdatedAt} 更新</p>}
+        {haoyouError && <ChartError error={haoyouError} onRetry={() => setRetry(value => value + 1)} />}
         <SearchTrendList items={haoyouItems} loading={haoyouLoading} emptyText="暂未取得好游快爆热门搜索" tone="green" />
       </section>
 
