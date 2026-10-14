@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { monthlyTrendArchiveState } from '../lib/monthly-trend-archive'
+import { includeMonthlyTrendOverviewMonth, monthlyTrendArchiveState } from '../lib/monthly-trend-archive'
+
+test('overview starts in August 2026 without removing July archives', () => {
+  assert.equal(includeMonthlyTrendOverviewMonth('2026-07'), false)
+  assert.equal(includeMonthlyTrendOverviewMonth('2026-08'), true)
+  assert.equal(includeMonthlyTrendOverviewMonth('2026-09'), true)
+  assert.equal(includeMonthlyTrendOverviewMonth('2027-07'), true)
+  assert.equal(includeMonthlyTrendOverviewMonth('2026-13'), false)
+  assert.equal(monthlyTrendArchiveState('2026-07', '2026-10-14', true), 'archived')
+})
 
 test('a completed month remains rebuildable only while its first day is retained', () => {
   assert.equal(monthlyTrendArchiveState('2026-10', '2026-11-01'), 'rebuildable')

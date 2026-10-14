@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { monthlyTrendArchiveState } from '@/lib/monthly-trend-archive'
+import { includeMonthlyTrendOverviewMonth, monthlyTrendArchiveState } from '@/lib/monthly-trend-archive'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 
 export const maxDuration = 300
@@ -236,7 +236,7 @@ async function getMonthlyTrend(req: Request) {
     earliestResult.data?.content_date?.slice(0, 7),
     latestResult.data?.content_date?.slice(0, 7),
     ...summaryByMonth.keys(), ...detailByMonth.keys(),
-  ].filter((month): month is string => typeof month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort()
+  ].filter((month): month is string => typeof month === 'string' && includeMonthlyTrendOverviewMonth(month)).sort()
   if (bounds.length === 0) return NextResponse.json({ months: [], earliestMonth: null, defaultMonth: null, unavailableMonths: [] })
 
   const currentMonth = currentMonthCN()
