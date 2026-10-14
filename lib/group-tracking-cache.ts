@@ -3,6 +3,7 @@ import { fetchAllRows } from '@/lib/supabase-paginate'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { buildDeviceRankSnapshots, fetchLatestUrlRanks, type DeviceRankSnapshot } from '@/lib/tracking-rank-lookup'
 import { dedupeTrackingTargets } from '@/lib/tracking-target-dedupe'
+import { isIncrementalOperation } from '@/lib/submission-operation'
 import {
   computeSourceEffectiveness, currentMonth, effectiveMatchesForClaim, RANK_BUCKETS,
   type RankMatch, type SourceEffectivenessEntry,
@@ -333,7 +334,7 @@ type RawTrackRow = {
 // 查询"变成"不带任何筛选、查一个分组的全量历史"——谁来筛选、筛什么，交给
 // 调用方（路由）在读出缓存之后自己做内存过滤，缓存本身要对所有请求通用。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function computeGroupTrackingPayload(service: any, groupId: string): Promise<EnrichedTrackRow[]> {
+export async function computeGroupTrackingPayload(service: any, groupId: string, onlyClaimId?: string): Promise<EnrichedTrackRow[]> {
   const { data: membersRaw } = await service
     .from('task_group_members').select('user_id, username').eq('group_id', groupId)
   const memberList = (membersRaw || []) as { user_id: string; username: string | null }[]
@@ -356,7 +357,15 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
   // three-group refresh exceed Vercel's function limit as history accumulated.
   const dedupedRows: RawTrackRow[] = []
   const pageSize = 1000
-  for (let offset = 0; ; offset += pageSize) {
+  if (onlyClaimId) {
+    // An explicit overwrite only changes one claim. Re-score its latest
+    // snapshot without re-reading ranking evidence for the entire group.
+    const { data, error } = await service.from('site_tracking_records').select('*')
+      .eq('group_id', groupId).eq('claim_id', onlyClaimId)
+      .order('record_date', { ascending: false }).order('id', { ascending: true }).limit(1)
+    if (error) throw error
+    dedupedRows.push(...(data ?? []) as RawTrackRow[])
+  } else for (let offset = 0; ; offset += pageSize) {
     const { data, error } = await service.rpc('get_latest_group_tracking_records', {
       p_group_id: groupId,
       p_offset: offset,
@@ -437,7 +446,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
   // 名 vs 这条claim刚开始追踪、还没攒够前一天数据）——只对 prev_rank_position
   // 为null的"更新"行查（有真实prev_rank_position的已经证明不是新的）。
   const urlsNeedingHistory = reportRows
-    .filter(r => r.operation_type === '更新' && r.prev_rank_position == null && r.page_url)
+    .filter(r => isIncrementalOperation(r.operation_type) && r.prev_rank_position == null && r.page_url)
     .map(r => r.page_url as string)
   const firstRankedDates = await fetchFirstRankedDates(service, urlsNeedingHistory)
 
@@ -490,7 +499,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
         ? snapshot.prev_rank_position - snapshot.rank_position
         : null
       const deviceIsNewRank = snapshot.prev_rank_position == null && isNewRank
-      const deviceScore = r.operation_type === '更新'
+      const deviceScore = isIncrementalOperation(r.operation_type)
         ? explainUpdateEffectScore({
             rankPos: snapshot.rank_position,
             prevRankPos: snapshot.prev_rank_position,
@@ -506,7 +515,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
 
     let score: number
     let updateEffectBreakdown: UpdateEffectBreakdown | null = null
-    if (r.operation_type === '更新') {
+    if (isIncrementalOperation(r.operation_type)) {
       updateEffectBreakdown = explainUpdateEffectScore({
         rankPos: r.rank_position, prevRankPos: r.prev_rank_position, rankVolume: r.rank_volume,
         isIndexed, indexFirstSeen: r.index_first_seen, submitDate: r.submit_date, isNewRank,
@@ -515,7 +524,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     } else {
       score = computeOutcomeScore(r.rank_position, isIndexed, rankChange, r.rank_volume)
     }
-    const pageIndexScore = r.operation_type === '更新'
+    const pageIndexScore = isIncrementalOperation(r.operation_type)
       ? isIndexed && (r.index_first_seen == null || r.index_first_seen >= r.submit_date) ? 2 : 0
       : isIndexed ? 1 : 0
     if (deviceRankings.length > 0) {
@@ -527,7 +536,7 @@ export async function computeGroupTrackingPayload(service: any, groupId: string)
     // 老URL"的历史)，只有 prev_rank_position 为null的那个匹配才可能是"新"。
     const matchesWithNewFlag = matches.map(m => ({
       ...m,
-      isNewRank: r.operation_type === '更新' && m.prev_rank_position == null && isNewRank,
+      isNewRank: isIncrementalOperation(r.operation_type) && m.prev_rank_position == null && isNewRank,
     }))
 
     return {

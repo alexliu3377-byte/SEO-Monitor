@@ -8,6 +8,8 @@ import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
+import { isIncrementalOperation } from '@/lib/submission-operation'
+import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
@@ -188,7 +190,7 @@ function buildSubmissionHistory(rows: SubmissionHistoryRow[]) {
   for (const row of rows) {
     const keyword = (row.final_keyword || row.keyword).toLowerCase()
     const submittedAt = row.submitted_at || row.claimed_date
-    const updateCount = row.operation_type === '更新' ? 1 : 0
+    const updateCount = isIncrementalOperation(row.operation_type) ? 1 : 0
     const existing = kwMap.get(keyword)
     if (!existing) kwMap.set(keyword, { lastSubmittedAt: submittedAt, updateCount })
     else kwMap.set(keyword, {
@@ -2072,15 +2074,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'member_claimed_keywords', filter: `group_id=eq.${activeGroupId}` },
         (payload) => {
           const rec = (payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old) as ClaimedKeyword & { user_id: string; claimed_date: string }
-          if (!rec || rec.user_id !== effectiveViewingId || rec.claimed_date !== today) return
-          if (payload.eventType === 'INSERT') {
-            if (rec.status !== 'dismissed') setClaimedKeywords(prev => prev.some(k => k.id === rec.id) ? prev : [...prev, rec])
-          } else if (payload.eventType === 'UPDATE') {
-            if (rec.status === 'dismissed') setClaimedKeywords(prev => prev.filter(k => k.id !== rec.id))
-            else setClaimedKeywords(prev => prev.map(k => k.id === rec.id ? { ...k, status: rec.status, operation_type: rec.operation_type, final_keyword: rec.final_keyword, page_url: rec.page_url } : k))
-          } else if (payload.eventType === 'DELETE') {
-            setClaimedKeywords(prev => prev.filter(k => k.id !== (payload.old as { id: string }).id))
-          }
+          setClaimedKeywords(prev => applyClaimRealtimeEvent(prev, payload.eventType, rec, effectiveViewingId, today))
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -3525,8 +3519,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                             {isExpanded && (isViewingOwn || canManage) && (
                               <div className="px-3 pb-2.5 ml-7 space-y-1">
                                 <div className="flex items-center gap-1.5">
+                                  {k.operation_type === '覆盖' && <span className="rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] text-purple-700">覆盖</span>}
                                   {(['新增', '更新'] as const).map(op => (
-                                    <button key={op}
+                                    <button key={op} disabled={k.operation_type === '覆盖'}
                                       onClick={() => { saveClaim(k.id, 'operation_type', k.operation_type === op ? '' : op); setInvalidClaimIds(prev => { const n = new Set(prev); n.delete(k.id); return n }) }}
                                       className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${k.operation_type === op ? (op === '新增' ? 'bg-green-500 border-green-500 text-white' : 'bg-blue-500 border-blue-500 text-white') : isInvalid && !k.operation_type ? 'border-red-300 text-red-400 hover:border-red-400' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
                                       {op}
@@ -3535,18 +3530,23 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                                   {isInvalid && !k.operation_type && <span className="text-[10px] text-red-400">必选</span>}
                                 </div>
                                 <input aria-label="输入内容"
+                                  key={k.operation_type === '覆盖' ? `overwrite-keyword-${k.final_keyword}` : 'editable-keyword'}
                                   type="text"
                                   defaultValue={k.final_keyword ?? ''}
+                                  readOnly={k.operation_type === '覆盖'}
                                   placeholder="最终做的词"
                                   className={`w-full text-xs px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-green-400 bg-white placeholder-gray-300 ${isInvalid && !k.final_keyword?.trim() ? 'border-red-300 placeholder-red-300' : 'border-gray-200'}`}
                                   onBlur={e => { if (e.target.value !== (k.final_keyword ?? '')) { saveClaim(k.id, 'final_keyword', e.target.value); if (e.target.value.trim()) setInvalidClaimIds(prev => { const n = new Set(prev); n.delete(k.id); return n }) } }}
                                 />
                                 <input aria-label="输入内容"
+                                  key={k.operation_type === '覆盖' ? `overwrite-url-${k.page_url}` : 'editable-url'}
                                   type="text"
                                   defaultValue={k.page_url ?? ''}
+                                  readOnly={k.operation_type === '覆盖'}
                                   placeholder="https://..."
                                   className={`w-full text-xs px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-green-400 bg-white placeholder-gray-300 font-mono ${isInvalid && !k.page_url?.trim() ? 'border-red-300 placeholder-red-300' : 'border-gray-200'}`}
                                   onBlur={e => {
+                                    if (k.operation_type === '覆盖') return
                                     const normalized = normalizeUrl(e.target.value)
                                     if (normalized !== e.target.value) e.target.value = normalized
                                     if (normalized !== (k.page_url ?? '')) {
@@ -3555,6 +3555,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                                     }
                                   }}
                                 />
+                                {k.operation_type === '覆盖' && <p className="text-[11px] leading-5 text-gray-500">需再次覆盖时，请到成效报告使用“覆盖名称”。</p>}
                                 {k.status === 'pending' && (
                                   <button onClick={() => submitOne(k.id)} disabled={submittingOneId === k.id}
                                     className="w-full mt-1 py-1 text-xs font-medium bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-colors">

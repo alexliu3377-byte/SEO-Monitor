@@ -168,6 +168,9 @@ export async function POST(
   if (!keyword || typeof keyword !== 'string' || keyword.trim().length > 200 || typeof source !== 'string' || source.length > 100) {
     return NextResponse.json({ error: '缺少必要参数' }, { status: 400 })
   }
+  if (operation_type === '覆盖') {
+    return NextResponse.json({ error: '覆盖已有提交请使用成效报告的“覆盖名称”，不能作为新任务添加' }, { status: 400 })
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
@@ -371,6 +374,10 @@ export async function PATCH(
   }
   if (currentClaimError) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   if (!currentClaim) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
+  if ((currentClaim.operation_type === '覆盖' && (final_keyword !== undefined || page_url !== undefined || operation_type !== undefined))
+    || (operation_type === '覆盖' && currentClaim.operation_type !== '覆盖')) {
+    return NextResponse.json({ error: '请从成效报告的“覆盖名称”修改，确保关键词、成员、日期和历史一起保存' }, { status: 409 })
+  }
 
   const nextClaim: ClaimSubmissionFields = {
     ...currentClaim,

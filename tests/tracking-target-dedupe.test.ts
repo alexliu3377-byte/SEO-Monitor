@@ -46,3 +46,11 @@ test('does not merge rows without a page URL', () => {
 
   assert.equal(dedupeTrackingTargets([first, second]).length, 2)
 })
+
+test('same-day overwrite supersedes new/update without creating duplicate credit', () => {
+  const initial = row({ claim_id: 'z' })
+  const update = row({ claim_id: 'y', operation_type: '更新' })
+  const overwritten = row({ claim_id: 'a', operation_type: '覆盖' })
+  assert.deepEqual(dedupeTrackingTargets([initial, update, overwritten]), [overwritten])
+  assert.deepEqual(dedupeTrackingTargets([overwritten, initial, update]), [overwritten])
+})

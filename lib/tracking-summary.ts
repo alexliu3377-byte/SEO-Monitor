@@ -7,6 +7,7 @@
 import { computeOutcomeScore, explainUpdateEffectScore } from '@/lib/outcome-score'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { classifyContentCategory, type ContentCategory } from '@/lib/content-category'
+import { isIncrementalOperation } from '@/lib/submission-operation'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -76,7 +77,7 @@ export function computeRowScore(
   submitDate: string,
   indexFirstSeen: string | null | undefined
 ): number {
-  if (operationType === '更新') {
+  if (isIncrementalOperation(operationType)) {
     return explainUpdateEffectScore({
       rankPos, prevRankPos, rankVolume, isIndexed,
       indexFirstSeen: indexFirstSeen ?? null, submitDate, isNewRank: false,

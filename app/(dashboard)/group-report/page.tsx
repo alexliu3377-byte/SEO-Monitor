@@ -3,12 +3,15 @@
 import Link from 'next/link'
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { useUser } from '@/lib/user-context'
 import { explainOutcomeScore, type UpdateEffectBreakdown } from '@/lib/outcome-score'
+import { isIncrementalOperation } from '@/lib/submission-operation'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
 const SHOW_SUBMISSION_DETAILS = false
+const SubmissionOverwriteDialog = dynamic(() => import('@/components/submission-overwrite-dialog'), { ssr: false })
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -186,6 +189,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
   const [overviewLoading, setOverviewLoading] = useState(!groupId)
   const [loadError, setLoadError] = useState<{ scope: string; message: string } | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
+  const [showOverwrite, setShowOverwrite] = useState(false)
 
   // Detail modal state
   const [detailModal, setDetailModal] = useState<{ date: string; userId: string; username: string } | null>(null)
@@ -472,15 +476,21 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
             <h1 className="text-2xl font-bold tracking-tight text-gray-950">{groupId ? (activeGroup?.name || '选择分组') : '全部分组提交概况'}</h1>
             <p className="mt-1.5 text-sm text-gray-500">{groupId ? '成效追踪与追踪总汇' : '集中查看所有可见分组及成员的提交情况'}</p>
           </div>
-          {groupId && groups.length > 0 && (
-            <select aria-label="切换成效报告分组" value={activeTabId}
-              onChange={event => router.push(`/content/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
-              className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:outline-none focus:ring-green-500">
-              {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {activeGroup && <button type="button" className="btn-secondary whitespace-nowrap" onClick={() => setShowOverwrite(true)}>覆盖名称</button>}
+            {groupId && groups.length > 0 && (
+              <select aria-label="切换成效报告分组" value={activeTabId}
+                onChange={event => router.push(`/content/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
+                className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+                {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            )}
+          </div>
         </div>
       </div>
+
+      {showOverwrite && activeGroup && <SubmissionOverwriteDialog key={activeGroup.id} groupId={activeGroup.id} groupName={activeGroup.name}
+        onClose={() => setShowOverwrite(false)} onSaved={() => { setOPage(0); setRetryNonce(value => value + 1) }} />}
 
       {loadError && (
         <div role="alert" className="mx-6 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -671,6 +681,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       <option value="">全部操作</option>
                       <option value="新增">新增</option>
                       <option value="更新">更新</option>
+                      <option value="覆盖">覆盖</option>
                     </select>
                     <select aria-label="选择选项" value={oFilterIndex} onChange={e => { setOFilterIndex(e.target.value); setOPage(0) }}
                       className="text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-700 bg-white">
@@ -729,7 +740,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                             return (
                               <div key={row.id} className={`grid ${OCOLS} gap-x-2 px-4 py-2.5 hover:bg-gray-50/60 transition-colors items-center`}>
                                 <div className="flex justify-center">
-                                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${row.operation_type === '新增' ? 'bg-green-50 text-green-600' : row.operation_type === '更新' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${row.operation_type === '新增' ? 'bg-green-50 text-green-600' : row.operation_type === '覆盖' ? 'bg-purple-50 text-purple-700' : row.operation_type === '更新' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
                                     {row.operation_type ?? '—'}
                                   </span>
                                 </div>
@@ -1260,7 +1271,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
             </div>
           )
         }
-        if (row.operation_type === '更新' && row.updateEffectBreakdown) {
+        if (isIncrementalOperation(row.operation_type) && row.updateEffectBreakdown) {
           const u = row.updateEffectBreakdown
           const liftDesc = u.rankPos == null ? '没有排名'
             : u.isNewRank ? `真新排名（历史上从没排过名）`
@@ -1273,7 +1284,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                   <div className="min-w-0">
                     <h3 className="text-base font-semibold text-gray-900 truncate" title={row.final_keyword || row.keyword}>{row.final_keyword || row.keyword}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">"更新"成效是怎么算出来的</p>
+                    <p className="text-xs text-gray-400 mt-0.5">“{row.operation_type}”成效是怎么算出来的</p>
                   </div>
                   <button onClick={() => setScoreDetailRow(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 flex-shrink-0">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -1300,7 +1311,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                     <span className="font-medium text-gray-800 tabular-nums">+{u.indexConfirmScore}</span>
                   </div>
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-gray-700 font-semibold">更新成效分</span>
+                    <span className="text-gray-700 font-semibold">{row.operation_type}成效分</span>
                     <span className={`text-lg font-bold tabular-nums ${u.total > 0 ? 'text-green-600' : 'text-gray-800'}`}>{u.total.toFixed(1)}</span>
                   </div>
                   {row.env_excluded && (

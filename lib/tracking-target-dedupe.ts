@@ -1,3 +1,5 @@
+import { submissionOperationPriority } from './submission-operation'
+
 export interface TrackingTargetRow {
   claim_id: string
   keyword: string
@@ -23,7 +25,9 @@ function normalizePageUrl(value: string): string {
 
 function isLaterSubmission<T extends TrackingTargetRow>(candidate: T, current: T): boolean {
   if (candidate.submit_date !== current.submit_date) return candidate.submit_date > current.submit_date
-  if (candidate.operation_type !== current.operation_type) return candidate.operation_type === '更新'
+  const candidatePriority = submissionOperationPriority(candidate.operation_type)
+  const currentPriority = submissionOperationPriority(current.operation_type)
+  if (candidatePriority !== currentPriority) return candidatePriority > currentPriority
   return candidate.claim_id > current.claim_id
 }
 
