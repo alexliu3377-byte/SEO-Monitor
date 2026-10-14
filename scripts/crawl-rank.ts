@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { createAizhanHttpSession, fetchRankupWithTitleViaHttp, fetchRankdownWithTitleViaHttp } from '../lib/crawler-aizhan-http'
 import { startCrawlActivity as activityStart, finishCrawlActivity as activityEnd, writeCrawlSiteLog as siteLog, checkDatabaseResult as sbCheck, replaceCollectedRankRows } from '../lib/crawl-reliability'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
+import { updateKeywordVolumeTrends } from '../lib/keyword-trend-update'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -359,14 +360,8 @@ async function main() {
       }
       const rankupNoVol = noVol.filter(r => r.latest_trend === 'rankup').map(r => r.keyword)
       const rankdownNoVol = noVol.filter(r => r.latest_trend === 'rankdown').map(r => r.keyword)
-      for (const chunk of chunkArray(rankupNoVol, 500)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankup' }).in('keyword', chunk), 'rankup trend update')
-      }
-      for (const chunk of chunkArray(rankdownNoVol, 500)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankdown' }).in('keyword', chunk), 'rankdown trend update')
-      }
+      await updateKeywordVolumeTrends(supabase, rankupNoVol, 'rankup')
+      await updateKeywordVolumeTrends(supabase, rankdownNoVol, 'rankdown')
       const up = allEntries.filter(([, v]) => v.latest_trend === 'rankup').length
       const dn = allEntries.filter(([, v]) => v.latest_trend === 'rankdown').length
       console.log(`    keyword_volume   ✓  更新 ${kwVolumeMap.size} 条（涨=${up} 跌=${dn}）`)

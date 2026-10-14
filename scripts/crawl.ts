@@ -13,6 +13,7 @@ import {
 import { createAizhanHttpSession, fetchRankChangesViaHttp } from '../lib/crawler-aizhan-http'
 import { startCrawlActivity as activityStart, finishCrawlActivity as activityEnd, writeCrawlSiteLog as siteLog, finalizeCrawlStep, checkCrawlDependencies, replaceCollectedRankRows, claimCrawlDerivation, finishCrawlDerivation, DAILY_CRAWL_DEPENDENCIES } from '../lib/crawl-reliability'
 import { upsertKeywordVolumeWithChange } from '../lib/keyword-volume'
+import { updateKeywordVolumeTrends } from '../lib/keyword-trend-update'
 import { fetchAllRows } from '../lib/supabase-paginate'
 import { fetchLatestUrlRanks } from '../lib/tracking-rank-lookup'
 import { pruneCompetitorDailyHistory } from '../lib/competitor-daily-retention'
@@ -412,14 +413,8 @@ async function runRank(sites: SiteRecord[], today: string, activityId: string | 
     // Update latest_trend for zero-volume keywords (ignoreDuplicates skips existing rows, so trend needs a separate update)
     const rankupNoVol = kwNoVol.filter(r => r.latest_trend === 'rankup').map(r => r.keyword)
     const rankdownNoVol = kwNoVol.filter(r => r.latest_trend === 'rankdown').map(r => r.keyword)
-    for (const chunk of chunkArray(rankupNoVol, 500)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankup' }).in('keyword', chunk), 'rankup trend update')
-    }
-    for (const chunk of chunkArray(rankdownNoVol, 500)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sbCheck(await (supabase.from('keyword_volume') as any).update({ latest_trend: 'rankdown' }).in('keyword', chunk), 'rankdown trend update')
-    }
+    await updateKeywordVolumeTrends(supabase, rankupNoVol, 'rankup')
+    await updateKeywordVolumeTrends(supabase, rankdownNoVol, 'rankdown')
   }
 
   for (let idx = 0; idx < sites.length; idx++) {
