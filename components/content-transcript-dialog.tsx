@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { transcriptStatusLabel, transcriptSourceLabel } from '@/lib/content-transcript'
 
-type Transcript = { status: string; text: string; textSource?: string; message?: string; updatedAt?: string; model?: string }
+type Transcript = { status: string; text: string; articleText?: string; videoExpected?: boolean; textSource?: string; message?: string; updatedAt?: string; model?: string }
 
 export default function ContentTranscriptDialog({ item, onClose }: {
   item: { id: string; title: string; url: string }; onClose: () => void
@@ -53,7 +53,8 @@ export default function ContentTranscriptDialog({ item, onClose }: {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(data?.text ?? '')
+      const text = data?.articleText && data?.text ? `文章正文\n${data.articleText}\n\n视频文字\n${data.text}` : data?.articleText || data?.text || ''
+      await navigator.clipboard.writeText(text)
       setCopyStatus('已复制文字')
     } catch { setCopyStatus('浏览器不允许自动复制，请选中文字后复制。') }
   }
@@ -74,7 +75,7 @@ export default function ContentTranscriptDialog({ item, onClose }: {
       <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div className="min-w-0">
-            <h2 id={headingId} className="text-base font-semibold">视频文字</h2>
+            <h2 id={headingId} className="text-base font-semibold">内容文字</h2>
             <p className="mt-1 break-words text-sm text-slate-600">{item.title}</p>
           </div>
           <button type="button" autoFocus onClick={onClose} aria-label="关闭文字窗口" className="btn-secondary shrink-0">关闭</button>
@@ -82,23 +83,32 @@ export default function ContentTranscriptDialog({ item, onClose }: {
         <div className="min-h-32 overflow-y-auto px-5 py-4" aria-busy={loading}>
           {loading ? <p role="status" className="text-sm text-slate-600">正在读取已保存的文字…</p>
             : error ? <p role="alert" className="text-sm text-red-600">{error}</p>
-              : data?.status === 'completed' ? <>
-                <p className="mb-4 text-xs text-slate-600">来源：{transcriptSourceLabel(data.textSource)} · 已统一简体，游戏名、软件名等请对照原视频核实。</p>
-                <div className="whitespace-pre-wrap break-words text-sm leading-7">{data.text}</div>
-              </> : <div role="status">
+              : <>
+                {data?.articleText && <section aria-label="文章正文">
+                  <h3 className="mb-2 text-sm font-semibold">文章正文</h3>
+                  <div className="whitespace-pre-wrap break-words text-sm leading-7">{data.articleText}</div>
+                  <p className="mt-2 text-xs text-slate-600">来源：文章正文 · 已统一简体，保留原文内容，未自动改写。</p>
+                </section>}
+                {data?.text && <section aria-label="视频文字" className={data.articleText ? 'mt-5 border-t border-slate-100 pt-4' : ''}>
+                  {data.articleText && <h3 className="mb-2 text-sm font-semibold">视频文字</h3>}
+                  <p className="mb-4 text-xs text-slate-600">来源：{transcriptSourceLabel(data.textSource)} · 已统一简体，游戏名、软件名等请对照原视频核实。</p>
+                  <div className="whitespace-pre-wrap break-words text-sm leading-7">{data.text}</div>
+                </section>}
+                {data?.status !== 'completed' && <div role="status" className={data?.articleText ? 'mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3' : ''}>
+                {data?.articleText && <p className="mb-1 text-sm font-medium">正文已保存，{data.videoExpected ? '视频文字' : '其余内容'}尚未完成</p>}
                 <p className="text-sm font-medium">{transcriptStatusLabel(data?.status)}</p>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{data?.message || (data?.status === 'processing'
                   ? '采集电脑正在处理，文字完成后会自动保存。可以关闭窗口，稍后回来查看。'
-                  : data?.status === 'queued' ? '已加入自动任务，等待采集电脑处理。无需逐条点击转写。'
+                  : data?.status === 'queued' ? '已加入自动任务，等待采集电脑处理。无需逐条点击。'
                     : '请查看原文，或检查采集电脑上的自动转写任务及登录状态。')}</p>
-              </div>}
+              </div>}</>}
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-5 py-3">
           <p role="status" className="min-w-0 text-xs text-slate-600">{copyStatus}</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading} className="btn-secondary">刷新状态</button>
             <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn-secondary whitespace-nowrap">查看原文</a>
-            {data?.status === 'completed' && !error && <button type="button" onClick={copy} className="btn-secondary whitespace-nowrap">复制文字</button>}
+            {(data?.text || data?.articleText) && !error && <button type="button" onClick={copy} className="btn-secondary whitespace-nowrap">复制文字</button>}
           </div>
         </footer>
       </div>

@@ -182,7 +182,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
         <div>
           <h2 className="text-sm font-semibold text-slate-900">{kind === 'game' ? '游戏资讯动态' : kind === 'app' ? '应用内容动态' : '内容动态'}</h2>
           <p className="mt-1 text-xs text-slate-400">每次只读取当前筛选的 20 条缓存资料，翻页时再读取下一页。</p>
-          {transcriptStatusUnavailable && <p role="status" className="mt-1 text-xs text-amber-700">转写状态暂不可用，原文资料仍可查看。</p>}
+          {transcriptStatusUnavailable && <p role="status" className="mt-1 text-xs text-amber-700">文字状态暂不可用，原文资料仍可查看。</p>}
         </div>
         {kind === 'all' && <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="内容来源">

@@ -1,12 +1,12 @@
-export const TRANSCRIPT_SOURCES = ['bilibili', 'xiaohongshu'] as const
+export const TRANSCRIPT_SOURCES = ['bilibili', 'xiaohongshu', 'xiaoheihe_guide', 'xiaoheihe_ns'] as const
 export const TRANSCRIPT_RESULT_STATES = ['completed', 'blocked', 'failed', 'not_video', 'no_speech'] as const
-export const TRANSCRIPT_TEXT_SOURCES = ['platform_manual', 'platform_auto', 'local_asr'] as const
+export const TRANSCRIPT_TEXT_SOURCES = ['platform_manual', 'platform_auto', 'local_asr', 'article_body'] as const
 export type TranscriptStatus = 'queued' | 'processing' | typeof TRANSCRIPT_RESULT_STATES[number]
 export type TranscriptSegment = { start: number; end: number; text: string }
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function transcriptSourceLabel(source: string | null | undefined) {
-  return source === 'platform_manual' ? '平台字幕'
+  return source === 'article_body' ? '文章正文' : source === 'platform_manual' ? '平台字幕'
     : source === 'platform_auto' ? '平台自动字幕' : '本地语音识别'
 }
 
@@ -16,7 +16,7 @@ export function isTranscriptSource(source: string) {
 
 export function transcriptStatusLabel(status: string | null | undefined) {
   const labels: Record<string, string> = {
-    queued: '等待自动转写', processing: '正在转写', completed: '已转写',
+    queued: '等待文字处理', processing: '正在处理文字', completed: '文字已保存',
     blocked: '转写暂受限', failed: '转写失败', not_video: '不是视频', no_speech: '未识别到语音',
   }
   return labels[status ?? ''] ?? '转写尚未启用'
@@ -33,6 +33,11 @@ export function parseTranscriptResult(value: unknown) {
   const message = typeof row.message === 'string' ? row.message.trim() : ''
   const originalText = typeof row.originalText === 'string' ? row.originalText.trim() : text
   const textSource = row.textSource ?? 'local_asr'
+  const articleText = typeof row.articleText === 'string' ? row.articleText.trim() : ''
+  const originalArticleText = typeof row.originalArticleText === 'string' ? row.originalArticleText.trim() : articleText
+  const videoExpected = row.videoExpected === true
+  if (articleText.length > 120_000 || originalArticleText.length > 120_000 || Boolean(articleText) !== Boolean(originalArticleText)) return null
+  if (row.videoExpected !== undefined && typeof row.videoExpected !== 'boolean') return null
   if (!(TRANSCRIPT_TEXT_SOURCES as readonly unknown[]).includes(textSource) || originalText.length > 120_000) return null
   const segments = row.segments ?? []
   if (text.length > 120_000 || message.length > 500 || !Array.isArray(segments) || segments.length > 5000) return null
@@ -46,8 +51,11 @@ export function parseTranscriptResult(value: unknown) {
       || typeof segment.text !== 'string' || !segment.text.trim() || segment.text.length > 4000) return null
     previousStart = segment.start
   }
-  if (row.status === 'completed' ? !text || !segments.length : text.length > 0 || segments.length > 0 || !message) return null
-  if (row.status === 'completed' && (!originalText || text !== segments.map(part => part.text.trim()).join('\n'))) return null
+  const articleOnly = textSource === 'article_body'
+  if (row.status === 'completed') {
+    if (articleOnly ? !articleText || videoExpected || text || segments.length || originalText
+      : !text || !segments.length || !originalText || text !== segments.map(part => part.text.trim()).join('\n')) return null
+  } else if (text.length > 0 || segments.length > 0 || !message) return null
   if (row.status !== 'completed' && originalText) return null
   const language = typeof row.language === 'string' ? row.language.trim() : null
   const model = typeof row.model === 'string' ? row.model.trim() : null
@@ -57,6 +65,6 @@ export function parseTranscriptResult(value: unknown) {
   return {
     itemId: row.itemId, leaseToken: row.leaseToken, status: row.status as typeof TRANSCRIPT_RESULT_STATES[number],
     text, segments: segments as TranscriptSegment[], message, language, model, durationSeconds: duration,
-    originalText, textSource: textSource as typeof TRANSCRIPT_TEXT_SOURCES[number],
+    originalText, textSource: textSource as typeof TRANSCRIPT_TEXT_SOURCES[number], articleText, originalArticleText, videoExpected,
   }
 }

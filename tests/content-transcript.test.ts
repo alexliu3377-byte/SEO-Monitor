@@ -39,3 +39,18 @@ test('subtitle provenance and pre-conversion text are retained without mislabell
   assert.equal(parseTranscriptResult({ ...result, textSource: 'ocr' }), null)
   assert.equal(parseTranscriptResult({ ...result, text: '与段落不符' }), null)
 })
+
+test('article text is independent from video success and never invents time segments', () => {
+  const article = { ...result, text:'',originalText:'',segments:[],textSource:'article_body',articleText:'文章正文',originalArticleText:'文章正文',videoExpected:false }
+  assert.equal(parseTranscriptResult(article)?.articleText,'文章正文')
+  assert.equal(transcriptSourceLabel('article_body'),'文章正文')
+  assert.equal(isTranscriptSource('xiaoheihe_guide'),true)
+  assert.equal(isTranscriptSource('xiaoheihe_ns'),true)
+  assert.equal(parseTranscriptResult({...article,videoExpected:true}),null)
+  assert.equal(parseTranscriptResult({...article,articleText:''}),null)
+  assert.equal(parseTranscriptResult({...article,articleText:'大'.repeat(120001)}),null)
+  const partial=parseTranscriptResult({...article,status:'blocked',videoExpected:true,message:'视频要求验证，正文已保留'})
+  assert.equal(partial?.articleText,'文章正文')
+  assert.equal(partial?.status,'blocked')
+  assert.equal(parseTranscriptResult({...result,articleText:'文章',originalArticleText:'文章',videoExpected:true})?.text,'测试语音')
+})

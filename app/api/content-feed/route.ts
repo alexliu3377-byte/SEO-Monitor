@@ -70,7 +70,7 @@ export async function GET(request: Request) {
   // Read only tiny status metadata for the current page, never full transcripts.
   const transcriptStates = new Map<string, string>()
   let transcriptStatusUnavailable = false
-  const transcriptIds = (data ?? []).filter((row: { source: string }) => ['bilibili', 'xiaohongshu'].includes(row.source))
+  const transcriptIds = (data ?? []).filter((row: { source: string }) => ['bilibili', 'xiaohongshu', 'xiaoheihe_guide', 'xiaoheihe_ns'].includes(row.source))
     .map((row: { id: string }) => row.id)
   if (transcriptIds.length) {
     const transcriptResult = await service.from('content_feed_transcripts').select('item_id,status').in('item_id', transcriptIds)

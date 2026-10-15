@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     p_text: result.text, p_segments: result.segments, p_message: result.message,
     p_language: result.language, p_model: result.model, p_duration: result.durationSeconds,
     p_original_text: result.originalText, p_text_source: result.textSource,
+    p_article_text: result.articleText, p_original_article_text: result.originalArticleText, p_video_expected: result.videoExpected,
   })
   if (error) return NextResponse.json({ error: '转写结果保存失败' }, { status: 500 })
   if (data !== true) return NextResponse.json({ error: '任务已过期或已被其它任务处理，未覆盖现有文字' }, { status: 409 })

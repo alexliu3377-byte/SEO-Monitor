@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   let body
   try { body = JSON.parse(raw) } catch { return NextResponse.json({ error: '请求格式无效' }, { status: 400 }) }
   const sources = body?.sources
-  if (!Array.isArray(sources) || !sources.length || sources.length > 2 || sources.some(source => !TRANSCRIPT_SOURCES.includes(source))) {
+  if (!Array.isArray(sources) || !sources.length || sources.length > TRANSCRIPT_SOURCES.length || sources.some(source => !TRANSCRIPT_SOURCES.includes(source))) {
     return NextResponse.json({ error: '转写来源无效' }, { status: 400 })
   }
   const service = createServiceClient() as any
