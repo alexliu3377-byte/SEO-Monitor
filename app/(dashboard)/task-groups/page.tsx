@@ -1376,7 +1376,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
       if (controller.signal.aborted) return
-      setRadarNotice(radarCacheNotice(rd.cache, sections))
+      setRadarNotice(radarCacheNotice(rd.cache, sections, { showSourceStatus: false }))
       for (const key of keys) radarSectionsRef.current.add(key)
       setRadarData(previous => ({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
         ...(radarLoadedGroupId === groupId ? previous : {}), ...rd }))

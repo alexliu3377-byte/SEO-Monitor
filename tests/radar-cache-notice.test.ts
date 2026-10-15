@@ -29,3 +29,21 @@ test('a confirmed complete cache or an older server without metadata needs no st
   assert.equal(radarCacheNotice(undefined), null)
   assert.equal(radarCacheNotice({}), null)
 })
+
+test('workspace suppresses source-only notices without changing global radar behavior or metadata', () => {
+  for (const reason of ['partial', 'unfinished', 'unknown']) {
+    const metadata = { sourceComplete: false, sourceWarnings: [{ reason }] }
+    const original = structuredClone(metadata)
+    assert.equal(radarCacheNotice(metadata, ['rankWords'], { showSourceStatus: false }), null)
+    assert.notEqual(radarCacheNotice(metadata), null)
+    assert.deepEqual(metadata, original)
+  }
+  assert.equal(radarCacheNotice({ sourceComplete: false }, undefined, { showSourceStatus: false }), null)
+})
+
+test('workspace retains stale/cache failure notices even when source status is hidden', () => {
+  const options = { showSourceStatus: false }
+  assert.equal(radarCacheNotice({ failedSections: ['rankWords'] }, ['rankWords'], options)?.tone, 'warning')
+  assert.equal(radarCacheNotice({ stale: true }, ['rankWords'], options)?.tone, 'warning')
+  assert.equal(radarCacheNotice({ failedSections: ['rankWords'], sourceWarnings: [{ reason: 'partial' }] }, ['newWords'], options), null)
+})

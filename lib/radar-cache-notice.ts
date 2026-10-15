@@ -12,11 +12,19 @@ export interface RadarCacheNotice {
 
 // Browser-safe presentation shared by the group workspace and global radar.
 // Missing legacy/source-status metadata never implies a collection is running.
-export function radarCacheNotice(meta: RadarCacheMetadata | null | undefined, sections?: readonly string[]): RadarCacheNotice | null {
+export function radarCacheNotice(
+  meta: RadarCacheMetadata | null | undefined,
+  sections?: readonly string[],
+  options: { showSourceStatus?: boolean } = {},
+): RadarCacheNotice | null {
   if (!meta) return null
   if (meta.stale || meta.failedSections?.some(section => !sections || sections.includes(section))) {
     return { tone: 'warning', message: '部分资料暂未完成刷新，当前保留上次成功保存的结果。' }
   }
+  // The task workspace suppresses upstream collection notices when its
+  // cached results remain usable. This is presentation only: source metadata,
+  // crawl logs, genuine cache failures and the global radar remain unchanged.
+  if (options.showSourceStatus === false) return null
   if (meta.sourceWarnings?.some(warning => warning.reason === 'partial')) {
     return { tone: 'warning', message: '部分来源未取得完整资料，当前显示已取得的资料。' }
   }
