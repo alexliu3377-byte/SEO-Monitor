@@ -2,7 +2,7 @@
 
 ## 上线行为
 
-- B站、小红书、小黑盒攻略、小黑盒 NS 资料入库时自动创建去重队列。
+- 当前仅运行B站、小红书文字转换。小黑盒攻略/NS保留资料采集、历史文字和既有队列，不再领取文字任务；默认、all、手动入口与夜间流程均排除小黑盒，不消耗其认证失败重试。数据库历史兼容逻辑保留，不清空旧队列。
 - 采集电脑优先读取平台中文字幕：人工字幕优先于自动字幕，弹幕不算字幕。没有字幕且未受登录限制时，才使用本地CPU语音备用。不使用付费接口，也不在Vercel处理视频。
 - 繁体统一转简体，不猜改游戏名或错词。`查看原文`旁有同样紧凑的`查看文字`，弹窗和复制均为纯文字，不显示时间。标明平台字幕/平台自动字幕/本地语音识别，提示对照原文核实。
 - 原始文字、转换后文字和时间段保存到独立表；重采集和标题修改不会清空已完成文字。列表每次只查当前20条的状态，打开弹窗才读取正文，不在列表请求中携带文字、音频或时间段。小黑盒文章正文与视频文字独立保存；视频失败时保留正文，显示未完成原因，不能冒充全部完成。
@@ -60,27 +60,26 @@ Get-ScheduledTaskInfo -TaskName SEO-Content-Text-Bilibili
 主站和采集器运行各自Node测试、类型检查；Python运行`tests/test_transcribe_content.py`（媒体/ASR使用fixture，繁简转换使用真实OpenCC）。数据库队列/来源/租约测试在事务中回滚。UI检查桌面、手机、横屏、焦点、纯文字及错误重试。
 本地测试不能代替采集电脑上的真实字幕读取与入库。Runner离线或未安装电脑任务时，应明确报告未完成这部分验证。
 
-## 小黑盒图文与视频（2026/10/15）
+## 小黑盒图文与视频（历史实现，当前暂停）
 
 另应用 `20261015_content_article_text.sql`，扩展同一个私有队列，保留旧RPC供正在运行的旧任务兼容。文章原文与简体正文分别保存，不使用列表标题/摘要冒充全文，不为文章伪造时间戳。
 正文选择器来自平台公开BBSLink组件的 `.post__content`、`.image-text__content`、`.bbs-video__content-wrapper`；没有这些内容时不退回整页。去除导航、评论、脚本及视频控件。检测到可见验证码、空壳或跳转不正确时停止该来源，等待人工恢复，不逆向签名或绕过验证。
 视频支持页面实际提供的单个官方CDN媒体文件或B站嵌入地址；不支持的CDN、多视频、blob或其它嵌入明确标记受限，保留正文，不声称所有小黑盒视频均能处理。原生MP4缺少时长时仅允许有100MB下载上限的本地探测；未知时长流媒体不下载。识别前仍核对本地时长上限。
-本机公开文章访问只得到空壳/验证码组件，未宣称真实小黑盒正文、原生视频端到端验证成功。上线前通过DOM fixture、Python媒体fixture、SQL回滚测试和弹窗测试；采集电脑仍须逐源各测试一条。
+本机公开文章访问只得到空壳/验证码组件，未宣称真实小黑盒正文、原生视频端到端验证成功。过去通过的DOM fixture、Python媒体fixture、SQL回滚测试和弹窗测试不代表认证问题已解决；现在停止小黑盒文字处理，保留实现与已有资料。
 
 ## 新夜间串行任务（替代旧05:30独立任务）
 
-单个Windows任务 `SEO-Content-Night` 在01:30启动，内部依次等到：01:30攻略采集、02:00 NS采集、02:30 B站采集、04:00攻略文字、05:00 NS文字、06:00 B站文字。上一阶段未结束则顺延；一个来源失败继续其它来源，不重叠启动。夜间采集关闭立即转文字，小红书手动采集仍会处理文字。所有转文字程序另有跨来源互斥锁。
+单个Windows任务 `SEO-Content-Night` 在01:30启动，内部依次等到：01:30攻略采集、02:00 NS采集、02:30 B站采集、06:00 B站文字。小黑盒04:00/05:00文字阶段已暂停。上一阶段未结束则顺延；一个来源失败继续其它来源，不重叠启动。夜间采集关闭立即转文字，小红书手动采集仍会处理文字。所有转文字程序另有跨来源互斥锁。
 08:00停止开启新阶段和领取新文字，夜间单个文字子进程限30分钟、单轮启动预算40分钟；正在处理的一条可能顺延。它不保证网络、验证码、长音频或积压能在当晚全部完成，也不删除或假完成未处理的队列。
 任务仅在现有用户登录、电脑开机且不休眠时执行；错过启动时间不补跑至白天。不注册XHS自动任务、不保存密码、不立即启动、不默认覆盖已有同名任务。
 
-先在采集电脑更新仓库，运行依赖检查；然后各测试一条：
+先在采集电脑更新仓库，运行依赖检查；然后串行测试B站、小红书各一条：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-content-transcription.ps1 -EnvFile "C:\SEOCollector\seo-monitor\.env.trend.local" -Source xiaoheihe_guide -Limit 1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-content-transcription.ps1 -EnvFile "C:\SEOCollector\seo-monitor\.env.trend.local" -Source xiaoheihe_ns -Limit 1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-content-transcription.ps1 -EnvFile "C:\SEOCollector\seo-monitor\.env.trend.local" -Limit 1
 ```
 
-真实条目查看正常后再注册：
+测试脚本分别输出每个来源的入库结果，不把`processed=0`或图文/无语音当成文字测试成功。真实条目查看正常后再注册：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-night-content-task.ps1 -EnvFile "C:\SEOCollector\seo-monitor\.env.trend.local" -ReplaceStandaloneTranscription
@@ -96,3 +95,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-xiaohongsh
 ```
 
 若登录有效，无需每天重新登录；若失效，在原专用浏览器恢复登录并关闭窗口后重试。夜间任务注册、GitHub切换、真实来源测试均须分别记录，不能以脚本上线代替电脑已配置。
+
+## 媒体文件保留与清理
+
+可读平台字幕不下载音视频。语音备用才优先下载音轨，无独立音轨可能下载视频，默认限30分钟/100MB。临时媒体与Cookie放入单条`transcripts\job-*`目录，由外层程序在Python退出后清理，包括识别崩溃或超时；模型缓存`models`、日志`logs`、浏览器登录目录不删除。断电或外层程序被强杀仍可能残留，不自动扫描删除历史目录。
+此前手动测试的`C:\trend-collector-data\transcripts\manual-test`音频/txt不会自动清除，本次未删除。音视频和Cookie不上传数据库，正常结果只存文字、分段和状态等元数据。
