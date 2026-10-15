@@ -4,6 +4,7 @@ import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
+import { canClaimDistributedKeyword } from '@/lib/distributed-recipients'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -226,6 +227,17 @@ export async function POST(
   // production schemas validate `source` against the established source values, so
   // persist these rows as manual additions while keeping the batch workflow in the UI.
   const storedSource = source === '批量添加' ? '手动添加' : source
+  let distribution: { batch_id: string | null; daily_limit: number | null; recipient_user_ids: string[] | null } | null = null
+  if (storedSource === '分发词') {
+    const { data: word, error: wordError } = await service.from('distributed_keywords')
+      .select('batch_id,daily_limit,recipient_user_ids').eq('group_id', groupId).eq('keyword', keyword).maybeSingle()
+    if (wordError) return NextResponse.json({ error: '分发词权限读取失败，请重试' }, { status: 503 })
+    if (!word) return NextResponse.json({ error: '这个分发词已移除，请刷新列表' }, { status: 404 })
+    if (!canClaimDistributedKeyword(word.recipient_user_ids, targetUserId)) {
+      return NextResponse.json({ error: '这个词仅限指定组员认领，请选择对应组员' }, { status: 403 })
+    }
+    distribution = word
+  }
 
   // Check if ANY member of the group already claimed this keyword today (not
   // just the caller) — 2026-07-29: previously only checked the caller's own
@@ -265,10 +277,7 @@ export async function POST(
   // 认领 daily_limit 个，先到先得，跟上面"同词当天已被认领"是同一种"先查后插"
   // 模式，不额外加锁。只对 source='分发词' 生效，其它认领来源不受影响。
   if (storedSource === '分发词') {
-    const { data: dw } = await service
-      .from('distributed_keywords')
-      .select('batch_id, daily_limit')
-      .eq('group_id', groupId).eq('keyword', keyword).maybeSingle()
+    const dw = distribution
     if (dw?.batch_id && dw.daily_limit != null) {
       const { data: batchKeywords } = await service
         .from('distributed_keywords')
@@ -304,6 +313,12 @@ export async function POST(
     .select('id, keyword, keyword_type, source, search_volume, status, operation_type, final_keyword, page_url, claimed_date, created_at')
     .single()
 
+  if (error?.code === '42501' && error.message?.includes('DISTRIBUTED_RECIPIENT')) {
+    return NextResponse.json({ error: '分发对象已变动，这个词仅限指定组员认领，请刷新列表' }, { status: 403 })
+  }
+  if (error?.message?.includes('DISTRIBUTED_WORD_NOT_FOUND')) {
+    return NextResponse.json({ error: '这个分发词已移除，请刷新列表' }, { status: 404 })
+  }
   if (error?.code === '23505') {
     return NextResponse.json({ error: '这个词今天已经被组内其他成员认领了' }, { status: 409 })
   }

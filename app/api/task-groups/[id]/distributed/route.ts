@@ -4,6 +4,7 @@ import { guessBaseKeyword, type VolumeLookupResult } from '@/lib/keyword-base-ma
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
+import { parseDistributedRecipients } from '@/lib/distributed-recipients'
 
 const DEFAULT_COOLDOWN_DAYS = 7
 const LOOKUP_BATCH_SIZE = 100
@@ -68,14 +69,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const rows = await fetchAllRows<{ id: string; keyword: string; volume: number; volume_source: string; matched_keyword: string | null; repeatable: boolean; created_at: string; batch_id: string | null; batch_name: string | null; cooldown_days: number | null; daily_limit: number | null }>((from, to) =>
-    service.from('distributed_keywords')
-      .select('id, keyword, volume, volume_source, matched_keyword, repeatable, created_at, batch_id, batch_name, cooldown_days, daily_limit')
+  const rows = await fetchAllRows<{ id: string; keyword: string; volume: number; volume_source: string; matched_keyword: string | null; repeatable: boolean; created_at: string; batch_id: string | null; batch_name: string | null; cooldown_days: number | null; daily_limit: number | null; recipient_user_ids: string[] | null }>((from, to) => {
+    let query = service.from('distributed_keywords')
+      .select('id, keyword, volume, volume_source, matched_keyword, repeatable, created_at, batch_id, batch_name, cooldown_days, daily_limit, recipient_user_ids')
       .eq('group_id', groupId)
       .order('created_at', { ascending: false })
       .order('id', { ascending: true })
       .range(from, to)
-  )
+    // Filter BEFORE paging/serialization; a member must never receive another
+    // recipient's keywords and simply rely on the browser to hide them.
+    if (!canSeeAll) query = query.or(`recipient_user_ids.is.null,recipient_user_ids.cs.{${user.id}}`)
+    return query
+  })
 
   const keywords = rows.map(r => r.keyword)
   // Latest non-dismissed claim per keyword — repeatable words cycle back to
@@ -124,7 +129,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return { ...r, claimedBy: null, cooldownDaysLeft: null } // cooldown 已过，重新可认领
   })
 
-  return NextResponse.json({ keywords: out })
+  return NextResponse.json({ keywords: out }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -133,10 +138,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: groupId } = await params
-  const { keywords, repeatable, cooldownDays, dailyLimit, batchName } = await req.json() as {
-    keywords?: string; repeatable?: boolean; cooldownDays?: number; dailyLimit?: number | null; batchName?: string
+  const { keywords, repeatable, cooldownDays, dailyLimit, batchName, recipientUserIds } = await req.json() as {
+    keywords?: string; repeatable?: boolean; cooldownDays?: number; dailyLimit?: number | null; batchName?: string; recipientUserIds?: unknown
   }
-  if (!keywords || !keywords.trim()) return NextResponse.json({ error: '没有输入关键词' }, { status: 400 })
+  if (typeof keywords !== 'string' || !keywords.trim()) return NextResponse.json({ error: '没有输入关键词' }, { status: 400 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
@@ -149,6 +154,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (role !== 'super' && role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (!await canAccessTaskGroup(service, user.id, role, groupId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  let recipients: string[] | null
+  try { recipients = parseDistributedRecipients(recipientUserIds) } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 400 })
+  }
+  if (recipients) {
+    const [members, profiles] = await Promise.all([
+      service.from('task_group_members').select('user_id').eq('group_id', groupId).in('user_id', recipients),
+      service.from('user_profiles').select('id').in('id', recipients).eq('is_active', true),
+    ])
+    if (members.error || profiles.error) return NextResponse.json({ error: '组员信息读取失败，请重试' }, { status: 503 })
+    const memberIds = new Set((members.data ?? []).map((row: { user_id: string }) => row.user_id))
+    const activeIds = new Set((profiles.data ?? []).map((row: { id: string }) => row.id))
+    if (recipients.some(id => !memberIds.has(id) || !activeIds.has(id))) {
+      return NextResponse.json({ error: '只能指定当前分组内的有效组员，请刷新后重新选择' }, { status: 400 })
+    }
   }
 
   const list = Array.from(new Set(
@@ -171,13 +193,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       group_id: groupId, keyword, volume, volume_source: source, matched_keyword: matchedKeyword,
       repeatable: !!repeatable, added_by: user.id,
       batch_id: batchId, batch_name: effectiveBatchName, cooldown_days: effectiveCooldownDays, daily_limit: effectiveDailyLimit,
+      recipient_user_ids: recipients,
     }
   })
 
   const { data: inserted, error } = await service
     .from('distributed_keywords')
     .upsert(rows, { onConflict: 'group_id,keyword' })
-    .select('id, keyword, volume, volume_source, matched_keyword, repeatable, batch_name, cooldown_days, daily_limit')
+    .select('id, keyword, volume, volume_source, matched_keyword, repeatable, batch_name, cooldown_days, daily_limit, recipient_user_ids')
+  if (error?.message?.includes('DISTRIBUTED_RECIPIENT_INVALID')) return NextResponse.json({ error: '所选组员已变动，请刷新后重新选择' }, { status: 400 })
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({ keywords: inserted })

@@ -11,6 +11,9 @@ import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { isIncrementalOperation } from '@/lib/submission-operation'
 import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
+import AppDialog from '@/components/app-dialog'
+import DistributedRecipientPicker from '@/components/distributed-recipient-picker'
+import { canClaimDistributedKeyword, distributedRecipientLabel } from '@/lib/distributed-recipients'
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -727,6 +730,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     id: string; keyword: string; volume: number; volume_source: 'exact' | 'base_match' | 'unknown'
     matched_keyword: string | null; repeatable: boolean; claimedBy: string | null; cooldownDaysLeft: number | null
     batch_name: string | null; daily_limit: number | null
+    recipient_user_ids: string[] | null
   }
   const [distributedWords, setDistributedWords] = useState<DistributedWord[]>([])
   const [distributedLoading, setDistributedLoading] = useState(false)
@@ -736,6 +740,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeCooldownDays, setDistributeCooldownDays] = useState('7')
   const [distributeDailyLimit, setDistributeDailyLimit] = useState('')
   const [distributeBatchName, setDistributeBatchName] = useState('')
+  const [distributeRecipients, setDistributeRecipients] = useState<string[] | null>(null)
   const [distributeSaving, setDistributeSaving] = useState(false)
   const [distributeMsg, setDistributeMsg] = useState('')
   const [distributeClearing, setDistributeClearing] = useState(false)
@@ -1450,6 +1455,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   async function submitDistributeWords() {
     if (!activeGroupId || !distributeText.trim() || distributeSaving) return
+    if (distributeRecipients !== null && distributeRecipients.length === 0) {
+      setDistributeMsg('请至少选择一名组员'); return
+    }
     setDistributeSaving(true); setDistributeMsg('')
     try {
       const res = await fetch(`/api/task-groups/${activeGroupId}/distributed`, {
@@ -1459,11 +1467,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           cooldownDays: Number(distributeCooldownDays) || 7,
           dailyLimit: distributeDailyLimit ? Number(distributeDailyLimit) : null,
           batchName: distributeBatchName,
+          recipientUserIds: distributeRecipients,
         }),
       })
       if (res.ok) {
         setDistributeText(''); setDistributeRepeatable(false); setDistributeCooldownDays('7')
         setDistributeDailyLimit(''); setDistributeBatchName(''); setShowDistributeModal(false)
+        setDistributeRecipients(null)
         loadDistributed()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -2053,6 +2063,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId)
   }, [isWorkspaceRoute,rightTab,activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setDistributeRecipients(null); setShowDistributeModal(false) }, [activeGroupId])
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'rankdown') loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadRecommendationPage() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId, currentUserId, tabPage.recommend, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
@@ -2276,10 +2287,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             <div className="text-center py-10 text-gray-400 text-sm">暂无分发词{canManage ? '，点右上角添加' : ''}</div>
           ) : (
             <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
-              <colgroup>{canManage && <col className="w-6" />}<col /><col className="w-24" /><col className="w-32" /></colgroup>
+              <colgroup>{canManage && <col className="w-6" />}<col />{canManage && <col className="w-32" />}<col className="w-24" /><col className="w-32" /></colgroup>
               <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
                 {canManage && <th className="w-6" />}
                 <th className="px-3 py-2 text-left font-medium">关键词</th>
+                {canManage && <th className="px-2 py-2 text-left font-medium">领取对象</th>}
                 <th className="px-2 py-2 text-center font-medium">搜索量</th>
                 <th className="px-2 py-2 text-center font-medium">状态</th>
               </tr></thead>
@@ -2287,10 +2299,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 {distributedWords.map(w => {
                   const claimed = !!w.claimedBy
                   const inCooldown = claimed && w.cooldownDaysLeft != null
+                  const canReceive = canClaimDistributedKeyword(w.recipient_user_ids, effectiveViewingId)
+                  const recipientsLabel = distributedRecipientLabel(w.recipient_user_ids, activeGroup?.members ?? [])
                   return (
-                    <tr key={w.id} onDoubleClick={() => !claimed && claimKeyword(w.keyword, '分发词', w.volume)}
-                      className={`border-b border-gray-50 last:border-0 transition-colors ${claimed ? 'opacity-50' : 'cursor-pointer select-none hover:bg-gray-50'}`}
-                      title={claimed ? (inCooldown ? `${w.claimedBy} 认领过，还剩${w.cooldownDaysLeft}天冷却` : `已被 ${w.claimedBy} 认领`) : '点击认领按钮，或双击此行快捷认领'}>
+                    <tr key={w.id} onDoubleClick={() => !claimed && canReceive && claimKeyword(w.keyword, '分发词', w.volume)}
+                      className={`border-b border-gray-50 last:border-0 transition-colors ${claimed ? 'opacity-50' : canReceive ? 'cursor-pointer select-none hover:bg-gray-50' : ''}`}
+                      title={claimed ? (inCooldown ? `${w.claimedBy} 认领过，还剩${w.cooldownDaysLeft}天冷却` : `已被 ${w.claimedBy} 认领`) : canReceive ? '点击认领按钮，或双击此行快捷认领' : effectiveViewingId ? `仅限 ${recipientsLabel} 认领` : '请先在上方选择组员'}>
                       {canManage && (
                         <td className="px-1 py-2">
                           <button onClick={e => { e.stopPropagation(); deleteDistributed(w.id) }}
@@ -2303,6 +2317,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         {w.repeatable && <span className="ml-1.5 text-[10px] text-blue-400 align-middle">可重复</span>}
                         {w.daily_limit != null && <span className="ml-1.5 text-[10px] text-orange-400 align-middle">限{w.daily_limit}/日</span>}
                       </td>
+                      {canManage && <td className="px-2 py-2 text-xs text-gray-600"><span className="block truncate" title={recipientsLabel}>{recipientsLabel}</span></td>}
                       <td className="px-2 py-2 text-center text-xs text-gray-500">
                         {w.volume > 0 ? w.volume.toLocaleString() : '—'}
                         {w.volume_source === 'base_match' && w.matched_keyword && (
@@ -2313,8 +2328,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         <div className="flex items-center justify-center gap-2">
                           {inCooldown
                             ? <span className="text-amber-600">冷却中 · {w.cooldownDaysLeft}天后可认领</span>
-                            : claimed ? <span className="text-gray-500">{w.claimedBy} 已认领</span> : <span className="text-green-700">可认领</span>}
-                          <ClaimAction keyword={w.keyword} claimed={claimed} onClaim={() => claimKeyword(w.keyword, '分发词', w.volume)} compact />
+                            : claimed ? <span className="text-gray-500">{w.claimedBy} 已认领</span> : canReceive ? <span className="text-green-700">可认领</span> : null}
+                          {canReceive
+                            ? <ClaimAction keyword={w.keyword} claimed={claimed} onClaim={() => claimKeyword(w.keyword, '分发词', w.volume)} compact />
+                            : <span className="text-gray-500" title={`领取对象：${recipientsLabel}`}>{effectiveViewingId ? '仅指定组员' : '先选择组员'}</span>}
                         </div>
                       </td>
                     </tr>
@@ -3784,27 +3801,28 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       )}
 
       {showDistributeModal && (
-        <div role="dialog" aria-modal="true" aria-label="添加分发词" className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDistributeModal(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div>
-                <h3 className="font-semibold text-gray-900">添加分发词</h3>
-                <p className="text-xs text-gray-400 mt-0.5">一行一个词，添加后会自动查搜索量（查不到精确值时会尝试按原词估一个）</p>
-              </div>
-              <button onClick={() => setShowDistributeModal(false)} className="text-gray-400 hover:text-gray-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+        <AppDialog title="添加分发词" description="一行一个词，添加后自动匹配搜索量；可选择只分给指定组员。"
+          width="max-w-lg" bodyClassName="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6 space-y-3"
+          onClose={() => { if (!distributeSaving) setShowDistributeModal(false) }} closeOnBackdrop={!distributeSaving}
+          footer={<div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setShowDistributeModal(false)} disabled={distributeSaving}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40">取消</button>
+            <button type="button" onClick={submitDistributeWords} disabled={distributeSaving || !distributeText.trim() || distributeRecipients?.length === 0}
+              className="rounded-lg border border-green-600 bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-40">
+              {distributeSaving ? '添加中…' : '添加'}
+            </button>
+          </div>}>
+              <label htmlFor="distributed-keywords" className="block text-xs font-medium text-gray-700">关键词</label>
               <textarea aria-label="输入详细内容"
+                id="distributed-keywords" disabled={distributeSaving}
                 value={distributeText}
                 onChange={e => { setDistributeText(e.target.value); setDistributeMsg('') }}
                 placeholder={'Lo研社官方正版\nTokimeki ai\n超自然卡头插件免费版\nreWASD安卓汉化版\n小呆阅读安卓版\n小书阁纯净版'}
-                rows={10}
+                rows={6}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-400 font-mono resize-none"
               />
+              <DistributedRecipientPicker members={activeGroup?.members ?? []} value={distributeRecipients}
+                onChange={value => { setDistributeRecipients(value); setDistributeMsg('') }} disabled={distributeSaving} />
               <div>
                 <label className="block text-xs text-gray-600 mb-1">这批词属于什么（可选）</label>
                 <input aria-label="输入内容" type="text" value={distributeBatchName} onChange={e => setDistributeBatchName(e.target.value)}
@@ -3837,20 +3855,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   className="w-24 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400" />
                 <p className="text-[10px] text-gray-400 mt-0.5">这批词当天整组总共最多能被认领几个，先到先得，留空不限制</p>
               </div>
-              {distributeMsg && <p className="text-xs text-red-500">{distributeMsg}</p>}
-            </div>
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
-              <button onClick={() => setShowDistributeModal(false)}
-                className="flex-1 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50">
-                取消
-              </button>
-              <button onClick={submitDistributeWords} disabled={distributeSaving || !distributeText.trim()}
-                className="flex-1 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-40">
-                {distributeSaving ? '添加中…' : '添加'}
-              </button>
-            </div>
-          </div>
-        </div>
+              {distributeMsg && <p role="alert" className="text-xs text-red-600">{distributeMsg}</p>}
+        </AppDialog>
       )}
 
       {showCreate && (
