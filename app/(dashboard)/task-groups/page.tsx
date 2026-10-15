@@ -384,6 +384,10 @@ interface MemberModalProps {
   onClose: () => void
   userOptions: UserOption[]
   allSites: SiteInfo[]
+  filterSites: SiteInfo[]
+  sitesLoading: boolean
+  sitesError: string
+  onRetrySites: () => void
   name: string
   onNameChange: (v: string) => void
   siteDomains: Set<string>
@@ -399,7 +403,7 @@ interface MemberModalProps {
 }
 
 function MemberModal({
-  mode, onClose, userOptions, allSites,
+  mode, onClose, userOptions, allSites, filterSites, sitesLoading, sitesError, onRetrySites,
   name, onNameChange,
   siteDomains, onSiteDomainsChange,
   selUsers, onSelUsersChange,
@@ -557,10 +561,17 @@ function MemberModal({
                 <span className="text-xs text-gray-500 text-center">排名</span>
                 <span className="text-xs text-gray-500 text-center">新增</span>
               </div>
-              {allSites.length === 0
-                ? <div className="px-3 py-3 text-sm text-gray-400">加载中...</div>
+              {sitesLoading
+                ? <div role="status" className="px-3 py-3 text-sm text-gray-500">加载中...</div>
+                : sitesError
+                ? <div role="alert" className="flex items-center justify-between gap-2 px-3 py-3 text-sm text-red-600">
+                    <span>{sitesError}</span>
+                    <button type="button" onClick={onRetrySites} className="btn-ghost flex-shrink-0">重试</button>
+                  </div>
+                : filterSites.length === 0
+                ? <div className="px-3 py-3 text-sm text-gray-500">暂无可筛选站点</div>
                 : cats.map(cat => {
-                  const catSites = allSites.filter(s => s.category === cat)
+                  const catSites = filterSites.filter(s => s.category === cat)
                   if (catSites.length === 0) return null
                   const rankable = catSites.filter(s => s.has_rank_data)
                   const newable = catSites.filter(s => s.is_enabled)
@@ -643,7 +654,7 @@ function MemberModal({
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="btn-ghost">取消</button>
-          <button onClick={onSubmit} disabled={busy || selUsers.size === 0} className="btn-primary disabled:opacity-50">
+          <button onClick={onSubmit} disabled={busy || sitesLoading || !!sitesError || selUsers.size === 0} className="btn-primary disabled:opacity-50">
             {busy ? (isCreate ? '创建中...' : '保存中...') : (isCreate ? '创建分组' : '保存')}
           </button>
         </div>
@@ -810,6 +821,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [editSelectedUsers, setEditSelectedUsers] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [allSites, setAllSites] = useState<SiteInfo[]>([])
+  const [filterSites, setFilterSites] = useState<SiteInfo[]>([])
+  const [groupSitesLoading, setGroupSitesLoading] = useState(false)
+  const [groupSitesError, setGroupSitesError] = useState('')
   const [domainWeightMap, setDomainWeightMap] = useState<Map<string, { pc: number; mobile: number }>>(new Map())
   const [domainColorMap, setDomainColorMap] = useState<Map<string, string>>(new Map())
   const [selectedRankDomains, setSelectedRankDomains] = useState<Set<string>>(new Set())
@@ -2096,11 +2110,20 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // ── Group management ────────────────────────────────────────────────────────
 
   async function loadAllSites() {
-    if (allSites.length > 0) return
-    const response = await fetch('/api/sites')
-    const data = response.ok ? await response.json() as { sites?: SiteInfo[] } : { sites: [] }
-    const CAT_ORDER: Record<string, number> = { large: 0, medium: 1, small: 2 }
-    setAllSites((data.sites || []).sort((a, b) => (CAT_ORDER[a.category] ?? 9) - (CAT_ORDER[b.category] ?? 9) || a.domain.localeCompare(b.domain)))
+    setGroupSitesLoading(true)
+    setGroupSitesError('')
+    try {
+      const response = await fetch('/api/task-groups/site-options', { cache: 'no-store' })
+      if (!response.ok) throw new Error(await apiError(response, '站点列表加载失败，请重试'))
+      const data = await response.json() as { ownedSites: SiteInfo[]; filterSites: SiteInfo[] }
+      if (!Array.isArray(data.ownedSites) || !Array.isArray(data.filterSites)) throw new Error('站点列表加载失败，请重试')
+      setAllSites(data.ownedSites)
+      setFilterSites(data.filterSites)
+    } catch {
+      setGroupSitesError('站点列表加载失败，请重试')
+    } finally {
+      setGroupSitesLoading(false)
+    }
   }
 
   async function loadDomainInfo() {
@@ -3863,6 +3886,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         <MemberModal
           mode="create" onClose={() => setShowCreate(false)}
           userOptions={userOptions} allSites={allSites}
+          filterSites={filterSites} sitesLoading={groupSitesLoading} sitesError={groupSitesError} onRetrySites={() => void loadAllSites()}
           name={createName} onNameChange={setCreateName}
           siteDomains={selectedSiteDomains} onSiteDomainsChange={setSelectedSiteDomains}
           selUsers={selectedUsers} onSelUsersChange={setSelectedUsers}
@@ -3875,6 +3899,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         <MemberModal
           mode="edit" onClose={() => setShowEdit(false)}
           userOptions={userOptions} allSites={allSites}
+          filterSites={filterSites} sitesLoading={groupSitesLoading} sitesError={groupSitesError} onRetrySites={() => void loadAllSites()}
           name={editName} onNameChange={setEditName}
           siteDomains={editSelectedSiteDomains} onSiteDomainsChange={setEditSelectedSiteDomains}
           selUsers={editSelectedUsers} onSelUsersChange={setEditSelectedUsers}
