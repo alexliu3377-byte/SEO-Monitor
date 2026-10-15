@@ -1,0 +1,62 @@
+export const TRANSCRIPT_SOURCES = ['bilibili', 'xiaohongshu'] as const
+export const TRANSCRIPT_RESULT_STATES = ['completed', 'blocked', 'failed', 'not_video', 'no_speech'] as const
+export const TRANSCRIPT_TEXT_SOURCES = ['platform_manual', 'platform_auto', 'local_asr'] as const
+export type TranscriptStatus = 'queued' | 'processing' | typeof TRANSCRIPT_RESULT_STATES[number]
+export type TranscriptSegment = { start: number; end: number; text: string }
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function transcriptSourceLabel(source: string | null | undefined) {
+  return source === 'platform_manual' ? '平台字幕'
+    : source === 'platform_auto' ? '平台自动字幕' : '本地语音识别'
+}
+
+export function isTranscriptSource(source: string) {
+  return (TRANSCRIPT_SOURCES as readonly string[]).includes(source)
+}
+
+export function transcriptStatusLabel(status: string | null | undefined) {
+  const labels: Record<string, string> = {
+    queued: '等待自动转写', processing: '正在转写', completed: '已转写',
+    blocked: '转写暂受限', failed: '转写失败', not_video: '不是视频', no_speech: '未识别到语音',
+  }
+  return labels[status ?? ''] ?? '转写尚未启用'
+}
+
+// Validate without silently truncating a transcript or manufacturing text.
+export function parseTranscriptResult(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  if (typeof row.itemId !== 'string' || !UUID_PATTERN.test(row.itemId)
+    || typeof row.leaseToken !== 'string' || !UUID_PATTERN.test(row.leaseToken)
+    || !(TRANSCRIPT_RESULT_STATES as readonly unknown[]).includes(row.status)) return null
+  const text = typeof row.text === 'string' ? row.text.trim() : ''
+  const message = typeof row.message === 'string' ? row.message.trim() : ''
+  const originalText = typeof row.originalText === 'string' ? row.originalText.trim() : text
+  const textSource = row.textSource ?? 'local_asr'
+  if (!(TRANSCRIPT_TEXT_SOURCES as readonly unknown[]).includes(textSource) || originalText.length > 120_000) return null
+  const segments = row.segments ?? []
+  if (text.length > 120_000 || message.length > 500 || !Array.isArray(segments) || segments.length > 5000) return null
+  let previousStart = -1
+  for (const part of segments) {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return null
+    const segment = part as Record<string, unknown>
+    if (typeof segment.start !== 'number' || !Number.isFinite(segment.start) || segment.start < previousStart
+      || segment.start < 0 || typeof segment.end !== 'number' || !Number.isFinite(segment.end)
+      || segment.end < segment.start || segment.end > 86_400
+      || typeof segment.text !== 'string' || !segment.text.trim() || segment.text.length > 4000) return null
+    previousStart = segment.start
+  }
+  if (row.status === 'completed' ? !text || !segments.length : text.length > 0 || segments.length > 0 || !message) return null
+  if (row.status === 'completed' && (!originalText || text !== segments.map(part => part.text.trim()).join('\n'))) return null
+  if (row.status !== 'completed' && originalText) return null
+  const language = typeof row.language === 'string' ? row.language.trim() : null
+  const model = typeof row.model === 'string' ? row.model.trim() : null
+  if ((language?.length ?? 0) > 32 || (model?.length ?? 0) > 120) return null
+  const duration = row.durationSeconds ?? null
+  if (duration !== null && (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0 || duration > 86_400)) return null
+  return {
+    itemId: row.itemId, leaseToken: row.leaseToken, status: row.status as typeof TRANSCRIPT_RESULT_STATES[number],
+    text, segments: segments as TranscriptSegment[], message, language, model, durationSeconds: duration,
+    originalText, textSource: textSource as typeof TRANSCRIPT_TEXT_SOURCES[number],
+  }
+}

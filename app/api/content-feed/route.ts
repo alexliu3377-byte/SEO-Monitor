@@ -67,6 +67,16 @@ export async function GET(request: Request) {
   if (error) return databaseError(error)
   if (typeResult.error) return databaseError(typeResult.error)
   const total = count ?? 0
+  // Read only tiny status metadata for the current page, never full transcripts.
+  const transcriptStates = new Map<string, string>()
+  let transcriptStatusUnavailable = false
+  const transcriptIds = (data ?? []).filter((row: { source: string }) => ['bilibili', 'xiaohongshu'].includes(row.source))
+    .map((row: { id: string }) => row.id)
+  if (transcriptIds.length) {
+    const transcriptResult = await service.from('content_feed_transcripts').select('item_id,status').in('item_id', transcriptIds)
+    transcriptStatusUnavailable = Boolean(transcriptResult.error)
+    if (!transcriptResult.error) for (const row of transcriptResult.data ?? []) transcriptStates.set(row.item_id, row.status)
+  }
   const items = (data ?? []).map((row: Record<string, unknown>) => ({
     id: row.id,
     source: row.source,
@@ -79,6 +89,7 @@ export async function GET(request: Request) {
     summary: row.summary,
     publishedAt: row.published_at,
     firstSeenAt: row.first_seen_at,
+    transcriptStatus: transcriptStates.get(String(row.id)) ?? null,
   }))
 
   return NextResponse.json({
@@ -87,6 +98,7 @@ export async function GET(request: Request) {
     page,
     pageSize,
     totalPages: Math.ceil(total / pageSize),
+    transcriptStatusUnavailable,
     types: [...new Set<string>(((typeResult.data ?? []) as Array<{ summary?: unknown }>)
       .map((row: { summary?: unknown }) => typeof row.summary === 'string' ? row.summary.trim() : '')
       .filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN')),

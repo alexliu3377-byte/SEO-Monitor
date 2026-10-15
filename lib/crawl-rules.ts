@@ -79,13 +79,14 @@ export const CRAWL_RULES: RuleSection[] = [
   {
     key: 'content-feed',
     title: '内容动态缓存',
-    badge: 'content-feed-refresh.yml · 每6小时 · 三个来源独立刷新',
+    badge: 'trend-collector-worker · 分来源任务 · 本地视频转写',
     items: [
-      { label: '触发方式', text: '独立 GitHub Actions workflow 每6小时执行一次（UTC 每6小时的第17分钟），也可在 Actions 页面手动运行；调用 POST /api/content-feed/refresh，并使用 Bearer CRON_SECRET 鉴权。' },
+      { label: '触发方式', text: '公开来源在独立采集仓库的GitHub runner执行：00:05吾爱破解、00:35 4399、01:00虫虫助手（MYT）；电脑来源保留原有独立任务。旧content-feed-refresh只作手动恢复，不再定时重复抓取。' },
       { label: '第一批来源', text: '吾爱破解精品软件区官方 RSS（fid=16，GBK）、4399 最新游戏静态列表、虫虫助手资讯/活动/评测/攻略四个静态栏目；吾爱破解取最新20条，其余每个栏目每次最多读取3页。' },
       { label: '采集范围', text: '只保存公开元数据：标题、原文链接、封面、作者、简短摘要、来源发布时间及来源分类；不进入详情页，不复制全文，也不采集任何下载链接。' },
       { label: '页面性能', text: '外站抓取结果统一写入 content_feed_items；内容动态页面只分页读取数据库缓存（默认20条、最多50条），打开页面时不会请求外部网站。' },
       { label: '去重与保留', text: '以 source+source_id 唯一键 upsert，同一来源的相同URL也受唯一约束；再次抓到旧条目只更新公开元数据和 last_seen_at，首次发现时间 first_seen_at 不重置。数据暂不自动清理。' },
+      { label: '视频文字', text: 'B站、小红书资料入库后建立去重队列。采集电脑优先读取平台中文字幕，无字幕时可使用本地CPU语音备用；默认关闭当前电脑不兼容的VAD，画面字幕OCR尚未启用。原始文字与时间段保留，展示为简体纯文字，标明平台字幕/平台自动字幕/本地语音识别。列表只读状态，打开查看文字才加载正文。采集结束自动处理；可在电脑明确安装05:30的B站补处理任务，小红书只在早上人工登录后处理。最多3次重试；遇登录、验证或浏览器占用停止本轮该来源，不绕过限制。' },
       { label: '失败隔离', text: '三个来源并行且分别捕获抓取、解析和入库错误；某一来源失败不会阻止另外两个来源保存。只在三个来源全部失败时使 workflow 失败，部分失败会在 Actions 日志中明确告警。每个页面请求超时12秒并重试1次。' },
     ],
   },

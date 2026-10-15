@@ -1,0 +1,41 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { parseTranscriptResult, transcriptStatusLabel, transcriptSourceLabel, isTranscriptSource } from '../lib/content-transcript'
+import { allowsServiceAuthPath } from '../lib/service-api-access'
+
+const result = { itemId: '11111111-1111-4111-8111-111111111111', leaseToken: '22222222-2222-4222-8222-222222222222',
+  status: 'completed', text: '测试语音', segments: [{ start: 0, end: 2, text: '测试语音' }], model: 'small', language: 'zh', durationSeconds: 3 }
+test('valid transcription retains literal text and timestamps', () => {
+  assert.equal(parseTranscriptResult(result)?.text, '测试语音')
+  assert.equal(parseTranscriptResult(result)?.segments[0].end, 2)
+})
+test('empty, unbounded and invalid timestamps cannot be marked successful', () => {
+  for (const invalid of [ { ...result, text: '' }, { ...result, text: '长'.repeat(120001) },
+    { ...result, leaseToken: 'wrong' }, { ...result, segments: [{ start: 4, end: 1, text: '测试' }] },
+    { ...result, segments: [{ start: 0, end: NaN, text: '测试' }] }, { ...result, durationSeconds: Infinity } ]) {
+    assert.equal(parseTranscriptResult(invalid), null)
+  }
+})
+test('image-only, blocked and no speech are different from successful empty text', () => {
+  for (const status of ['not_video', 'blocked', 'no_speech', 'failed']) {
+    assert.ok(parseTranscriptResult({ ...result, status, text: '', segments: [], message: '处理原因' }))
+  }
+  assert.equal(parseTranscriptResult({ ...result, status: 'failed' }), null)
+  assert.notEqual(transcriptStatusLabel('not_video'), transcriptStatusLabel('failed'))
+  assert.equal(isTranscriptSource('52pojie'), false)
+})
+test('only authenticated collector operations bypass browser login, not text viewing', () => {
+  assert.equal(allowsServiceAuthPath('/api/content-feed/transcripts/claim'), true)
+  assert.equal(allowsServiceAuthPath('/api/content-feed/transcripts/result'), true)
+  assert.equal(allowsServiceAuthPath('/api/content-feed/11111111-1111-4111-8111-111111111111/transcript'), false)
+})
+
+test('subtitle provenance and pre-conversion text are retained without mislabelling automatic captions', () => {
+  const value = parseTranscriptResult({ ...result, textSource: 'platform_auto', originalText: '測試語音' })
+  assert.equal(value?.originalText, '測試語音')
+  assert.equal(value?.textSource, 'platform_auto')
+  assert.equal(transcriptSourceLabel(value?.textSource), '平台自动字幕')
+  assert.equal(transcriptSourceLabel('platform_manual'), '平台字幕')
+  assert.equal(parseTranscriptResult({ ...result, textSource: 'ocr' }), null)
+  assert.equal(parseTranscriptResult({ ...result, text: '与段落不符' }), null)
+})

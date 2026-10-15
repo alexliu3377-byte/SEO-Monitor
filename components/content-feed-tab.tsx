@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { SimplePagination } from '@/components/simple-pagination'
+import dynamic from 'next/dynamic'
+import { isTranscriptSource, transcriptStatusLabel } from '@/lib/content-transcript'
+
+const ContentTranscriptDialog = dynamic(() => import('@/components/content-transcript-dialog'), { ssr: false })
 
 type ContentFeedItem = {
   id: string
@@ -15,6 +19,7 @@ type ContentFeedItem = {
   summary: string | null
   publishedAt: string | null
   firstSeenAt: string
+  transcriptStatus?: string | null
 }
 
 type ContentFeedResponse = {
@@ -23,6 +28,7 @@ type ContentFeedResponse = {
   page: number
   pageSize: number
   totalPages: number
+  transcriptStatusUnavailable?: boolean
 }
 
 const PAGE_SIZE = 20
@@ -112,6 +118,8 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
+  const [transcriptItem, setTranscriptItem] = useState<ContentFeedItem | null>(null)
+  const [transcriptStatusUnavailable, setTranscriptStatusUnavailable] = useState(false)
   const showCategory = kind === 'all'
   const tableColumnCount = showCategory ? 6 : 5
 
@@ -149,6 +157,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
       }
 
       setItems(data.items)
+      setTranscriptStatusUnavailable(Boolean(data.transcriptStatusUnavailable))
       setTotal(Number(data.total) || 0)
       setTotalPages(nextTotalPages)
     } catch (loadError) {
@@ -168,11 +177,12 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
   }, [loadItems, retryToken])
 
   return (
-    <section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <><section aria-busy={loading} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
         <div>
           <h2 className="text-sm font-semibold text-slate-900">{kind === 'game' ? '游戏资讯动态' : kind === 'app' ? '应用内容动态' : '内容动态'}</h2>
           <p className="mt-1 text-xs text-slate-400">每次只读取当前筛选的 20 条缓存资料，翻页时再读取下一页。</p>
+          {transcriptStatusUnavailable && <p role="status" className="mt-1 text-xs text-amber-700">转写状态暂不可用，原文资料仍可查看。</p>}
         </div>
         {kind === 'all' && <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="tablist" aria-label="内容来源">
@@ -215,7 +225,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
               {showCategory && <th className="w-24 px-3 py-2.5">类型</th>}
               <th className="w-32 px-3 py-2.5">作者</th>
               <th className="w-48 px-3 py-2.5">发布时间</th>
-              <th className="w-24 px-4 py-2.5 text-right sm:px-5">操作</th>
+              <th className={`${kind === 'all' ? 'w-48' : 'w-24'} px-4 py-2.5 text-right sm:px-5`}>操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -279,14 +289,19 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
                     {!dateIsPublished && <span className="mr-1 text-slate-400">发现</span>}{formatDate(item.publishedAt || item.firstSeenAt)}
                   </td>
                   <td className="px-4 py-2.5 text-right sm:px-5">
+                    <div className="flex items-center justify-end gap-2">
                     <a
                       href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                      className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [@media(pointer:coarse)]:min-h-11"
                     >
                       查看原文
                     </a>
+                    {isTranscriptSource(item.source) && <button type="button" onClick={() => setTranscriptItem(item)}
+                      title={transcriptStatusLabel(item.transcriptStatus)} aria-label={`查看文字：${item.title}（${transcriptStatusLabel(item.transcriptStatus)}）`}
+                      className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [@media(pointer:coarse)]:min-h-11">查看文字</button>}
+                    </div>
                   </td>
                 </tr>
               )
@@ -296,6 +311,6 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
       </div>
 
       {!loading && !error && <SimplePagination page={page - 1} total={total} disabled={loading} onChange={nextPage => setPage(nextPage + 1)} />}
-    </section>
+    </section>{transcriptItem && <ContentTranscriptDialog item={transcriptItem} onClose={() => setTranscriptItem(null)} />}</>
   )
 }

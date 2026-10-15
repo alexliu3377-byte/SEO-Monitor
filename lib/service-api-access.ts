@@ -5,6 +5,8 @@ const SERVICE_AUTH_PATHS = [
   '/api/charts/monthly-trend',
   '/api/content-feed/ingest',
   '/api/content-feed/refresh',
+  '/api/content-feed/transcripts/claim',
+  '/api/content-feed/transcripts/result',
   '/api/tracking-cache/refresh',
   '/api/trend-discovery/ingest',
   '/api/trend-discovery/collector-config',
