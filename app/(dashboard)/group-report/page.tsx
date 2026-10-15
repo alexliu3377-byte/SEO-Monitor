@@ -477,11 +477,11 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
             <p className="mt-1.5 text-sm text-gray-500">{groupId ? '成效追踪与追踪总汇' : '集中查看所有可见分组及成员的提交情况'}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {activeGroup && <button type="button" className="btn-secondary whitespace-nowrap" onClick={() => setShowOverwrite(true)}>覆盖名称</button>}
+            {activeGroup && <button type="button" className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500" onClick={() => setShowOverwrite(true)}>覆盖名称</button>}
             {groupId && groups.length > 0 && (
               <select aria-label="切换成效报告分组" value={activeTabId}
                 onChange={event => router.push(`/content/group-report/${encodeURIComponent(event.target.value)}?view=${reportTab === 'trackingSummary' ? 'summary' : 'outcomes'}`)}
-                className="min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+                className="h-9 min-w-40 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
                 {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
             )}

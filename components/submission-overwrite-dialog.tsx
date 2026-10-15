@@ -10,6 +10,12 @@ type Saved = {
   volume: number; volumeMatched: boolean; cacheReady: boolean; message: string
 }
 
+// Match the report's adjacent controls on desktop. Global coarse-pointer
+// rules still enlarge touch targets; no product-wide button style is changed.
+const buttonBase = 'inline-flex items-center justify-center whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50'
+const secondaryButton = `${buttonBase} border-gray-200 bg-white text-gray-700 hover:bg-gray-50`
+const primaryButton = `${buttonBase} border-green-600 bg-green-600 text-white hover:border-green-700 hover:bg-green-700`
+
 function localDate(value: string | null) {
   if (!value) return '—'
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value.replaceAll('-', '/')
@@ -120,8 +126,8 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
     <AppDialog title="覆盖已提交内容" description={`${groupName} · 只查当前分组全部成员的已提交记录，不改变普通报告的查看权限。`}
       onClose={close} closeOnBackdrop={!saving} width="max-w-3xl" bodyClassName="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6"
       footer={<div className="flex flex-wrap justify-end gap-2">
-        <button type="button" className="btn-secondary" disabled={saving} onClick={close}>{saved ? '完成' : '取消'}</button>
-        {!saved && <button type="button" className="btn-primary" disabled={saving || loading || !selected || !keyword.trim() || keyword.trim().length > 200 || !confirmed}
+        <button type="button" className={secondaryButton} disabled={saving} onClick={close}>{saved ? '完成' : '取消'}</button>
+        {!saved && <button type="button" className={primaryButton} disabled={saving || loading || !selected || !keyword.trim() || keyword.trim().length > 200 || !confirmed}
           onClick={() => void overwrite()}>{saving ? '覆盖并同步中…' : '确认覆盖'}</button>}
       </div>}>
       <form onSubmit={event => { event.preventDefault(); void lookup() }} className="space-y-2">
@@ -130,7 +136,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
           <input id={`${id}-url`} type="text" inputMode="url" autoComplete="off" value={url} maxLength={2048} disabled={loading || saving}
             placeholder="粘贴已提交的完整 URL" onChange={event => setUrl(event.target.value)}
             className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          <button type="submit" className="btn-secondary whitespace-nowrap" disabled={loading || saving || !url.trim()}>{loading ? '查找中…' : '查找'}</button>
+          <button type="submit" className={secondaryButton} disabled={loading || saving || !url.trim()}>{loading ? '查找中…' : '查找'}</button>
         </div>
         <p className="text-xs leading-5 text-gray-500">同一链接可能有多条提交，请选中要覆盖的一条；其它记录不会自动覆盖。</p>
       </form>
@@ -140,7 +146,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
         <p className="mt-2 break-words">{saved.keyword} · {saved.username} · {localDate(saved.submitDate)}</p>
         <p className="mt-1">搜索量：{saved.volumeMatched ? saved.volume.toLocaleString() : '未匹配到，已清除旧词搜索量'}</p>
         <p className="mt-1 break-all">{saved.pageUrl}</p>
-        {!saved.cacheReady && <button type="button" className="btn-secondary mt-3" onClick={() => { onSaved(); onClose() }}>刷新报告</button>}
+        {!saved.cacheReady && <button type="button" className={`${secondaryButton} mt-3`} onClick={() => { onSaved(); onClose() }}>刷新报告</button>}
       </div> : <>
         {loading && <p role="status" className="py-6 text-center text-sm text-gray-500">正在查找已提交的记录…</p>}
         {!loading && searched && rows.length === 0 && !error && <p role="status" className="py-6 text-center text-sm text-gray-500">当前分组没有这个链接的已提交记录，请核对链接。</p>}
@@ -158,9 +164,9 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
             </label>)}
           </div>
           {pages > 1 && <div className="mt-3 flex items-center justify-end gap-3 text-xs text-gray-600">
-            <button type="button" className="btn-secondary" disabled={loading || page === 0} onClick={() => void lookup(page - 1, lookupUrl)}>上一页</button>
+            <button type="button" className={secondaryButton} disabled={loading || page === 0} onClick={() => void lookup(page - 1, lookupUrl)}>上一页</button>
             <span>{page + 1} / {pages}</span>
-            <button type="button" className="btn-secondary" disabled={loading || page + 1 >= pages} onClick={() => void lookup(page + 1, lookupUrl)}>下一页</button>
+            <button type="button" className={secondaryButton} disabled={loading || page + 1 >= pages} onClick={() => void lookup(page + 1, lookupUrl)}>下一页</button>
           </div>}
         </fieldset>}
         {selected && <div className="mt-5 space-y-3 border-t border-gray-100 pt-4">
@@ -177,7 +183,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
             <input type="checkbox" checked={confirmed} disabled={saving || !keyword.trim()} onChange={event => setConfirmed(event.target.checked)} className="mt-1 accent-green-600" />
             <span>确认把选中记录覆盖为“{keyword.trim() || '覆盖词'}”，并将提交归到我的名下和今天日期。</span>
           </label>
-          <button type="button" className="btn-secondary" disabled={saving} onClick={() => setShowHistory(value => !value)} aria-expanded={showHistory}>覆盖历史</button>
+          <button type="button" className={secondaryButton} disabled={saving} onClick={() => setShowHistory(value => !value)} aria-expanded={showHistory}>覆盖历史</button>
           {showHistory && <div className="text-xs leading-5 text-gray-600">
             {historyLoading ? <p role="status">历史加载中…</p> : historyError ? <p role="alert" className="text-red-700">{historyError}</p> : history.length === 0 ? <p>暂无覆盖历史。</p> : <ol className="space-y-3">
               {history.map(row => <li key={row.id} className="border-l-2 border-gray-200 pl-3">
@@ -188,9 +194,9 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
               </li>)}
             </ol>}
             {historyPages > 1 && <div className="mt-3 flex items-center gap-3">
-              <button type="button" className="btn-secondary" disabled={historyLoading || historyPage === 0} onClick={() => setHistoryPage(value => value - 1)}>上一页</button>
+              <button type="button" className={secondaryButton} disabled={historyLoading || historyPage === 0} onClick={() => setHistoryPage(value => value - 1)}>上一页</button>
               <span>{historyPage + 1} / {historyPages}</span>
-              <button type="button" className="btn-secondary" disabled={historyLoading || historyPage + 1 >= historyPages} onClick={() => setHistoryPage(value => value + 1)}>下一页</button>
+              <button type="button" className={secondaryButton} disabled={historyLoading || historyPage + 1 >= historyPages} onClick={() => setHistoryPage(value => value + 1)}>下一页</button>
             </div>}
           </div>}
         </div>}
