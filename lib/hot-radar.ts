@@ -1,4 +1,5 @@
 import { fetchAllRows } from './supabase-paginate'
+import { normalizeVolumeRiseDate } from './keyword-volume-date'
 
 function getMY(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
@@ -8,7 +9,7 @@ export interface HotRadarPayload {
   newWords: { keyword: string; count: number; siteCount: number; sites: string[]; last_date: string; first_date: string }[]
   rankWords: { keyword: string; siteCount: number; volume: number; sites: string[]; last_date: string; first_date: string; rankDays: number }[]
   streakWords: { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }[]
-  volumeRisingWords: { keyword: string; volume: number; prevVolume: number | null; change: number; baselineVolume: number; baselineDate: string; netChange: number; last_date: string; sites: string[]; rankTrend: 'up' | 'down' | 'both' | null }[]
+  volumeRisingWords: { keyword: string; volume: number; prevVolume: number | null; change: number; baselineVolume: number; baselineDate: string; netChange: number; last_date: string; riseDate?: string | null; volumeDate?: string | null; sites: string[]; rankTrend: 'up' | 'down' | 'both' | null }[]
 }
 
 export interface HotRadarComputeResult {
@@ -26,7 +27,8 @@ export function hotRadarSections(value: string | null): readonly (keyof HotRadar
 }
 
 export function selectHotRadarSections(payload: HotRadarPayload, sections: readonly (keyof HotRadarPayload)[]) {
-  return Object.fromEntries(sections.map(section => [section, payload[section]]))
+  return Object.fromEntries(sections.map(section => [section, section === 'volumeRisingWords'
+    ? (payload[section] ?? []).map(normalizeVolumeRiseDate) : payload[section] ?? []]))
 }
 
 // Aggregate within the requested site scope before selecting the ranked list.
@@ -38,7 +40,7 @@ export async function computeHotRadarPayload(db: any): Promise<HotRadarComputeRe
   const [scoped, volumes] = await Promise.all([
     db.rpc('compute_scoped_hot_radar', { p_since: getMY(-30), p_limit: 2000 }),
     db.from('keyword_volume')
-      .select('keyword, volume, prev_volume, volume_change, baseline_volume, baseline_date, net_volume_change, stat_date')
+      .select('keyword, volume, prev_volume, volume_change, baseline_volume, baseline_date, net_volume_change, stat_date, last_volume_increase_date')
       .gt('net_volume_change', 0).gte('stat_date', getMY(-14))
       .order('net_volume_change', { ascending: false }).order('keyword')
       .limit(500),
@@ -93,7 +95,9 @@ export async function computeHotRadarPayload(db: any): Promise<HotRadarComputeRe
           prevVolume: row.prev_volume == null ? null : Number(row.prev_volume),
           change: Number(row.volume_change), baselineVolume: Number(row.baseline_volume),
           baselineDate: String(row.baseline_date ?? '').slice(0,10), netChange: Number(row.net_volume_change),
-          last_date: String(row.stat_date).slice(0,10), sites: trend ? [...trend.sites].sort() : [],
+          riseDate: row.last_volume_increase_date ?? null,
+          volumeDate: row.stat_date == null ? null : String(row.stat_date).slice(0,10),
+          last_date: row.last_volume_increase_date ?? '', sites: trend ? [...trend.sites].sort() : [],
           rankTrend: trend ? trend.up && trend.down ? 'both' : trend.up ? 'up' : trend.down ? 'down' : null : null,
         }
       })

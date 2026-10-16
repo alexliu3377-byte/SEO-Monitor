@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { hotRadarSections, selectHotRadarSections } from '@/lib/hot-radar'
+import { hotRadarSections, selectHotRadarSections, type HotRadarPayload } from '@/lib/hot-radar'
 import { groupHotRadarFilterHash, refreshGroupHotRadarCache } from '@/lib/group-hot-radar-cache'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import type { UserRole } from '@/lib/user-context'
@@ -44,7 +44,7 @@ export async function GET(req: Request) {
       if (error) throw error
       if (cached && cached.filter_hash === filterHash) {
         return NextResponse.json({
-          ...Object.fromEntries(sections.map(section => [section,cached[section] ?? []])),
+          ...selectHotRadarSections(cached as HotRadarPayload, sections),
           cache: { ...sourceMeta,computedAt: cached.computed_at, stale: cached.source_computed_at !== global.computed_at,
             sectionUpdatedAt: cached.section_updated_at, failedSections: (global.failed_sections ?? []).filter((section: string) => !(group.rank_domains?.length || group.new_domains?.length) || section === 'volumeRisingWords') },
         })
@@ -58,7 +58,7 @@ export async function GET(req: Request) {
     const { data: cached, error } = await db.from('hot_radar_cache').select(payloadColumns).eq('id','latest').single()
     if (error) throw error
     return NextResponse.json({
-      ...Object.fromEntries(sections.map(section => [section,cached[section] ?? []])),
+      ...selectHotRadarSections(cached as HotRadarPayload, sections),
       cache: { ...sourceMeta,computedAt: global.computed_at, sectionUpdatedAt: global.section_updated_at, failedSections: global.failed_sections ?? [] },
     })
   } catch (error) {

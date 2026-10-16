@@ -1,5 +1,8 @@
 'use client'
 
+import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
+import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
+
 import Link from 'next/link'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
@@ -31,6 +34,7 @@ interface VolumeRisingWord {
   keyword: string; volume: number; prevVolume: number | null; change: number
   baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
+  riseDate?: string | null; volumeDate?: string | null
 }
 
 interface ClaimedKeyword {
@@ -2825,7 +2829,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         <>
           <table aria-label="数据表格" className="w-full min-w-[780px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-              <th className="px-3 py-2 text-left font-medium w-24"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
+              <th className="px-3 py-2 text-left font-medium w-28" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">发现上涨{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-28" title="当前搜索量减去系统追踪起点搜索量"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">累计上涨{sortIcons('netChange')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-24" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">本次变化{sortIcons('change')}</span></th>
@@ -2839,7 +2843,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ) : slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge="updated"
-                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />}
+                  dateCell={<VolumeRiseDateCell date={w.last_date} today={today} yesterday={yesterday} className="px-3 py-2" />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '搜索上涨', w.volume)}
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
@@ -3240,7 +3244,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="text-right">
                 <p className="text-xs text-gray-400">现在</p>
                 <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVol(volumeEntry.volume)}</p>
-                <p className="mt-0.5 text-[11px] text-gray-400">{volumeEntry.last_date?.replaceAll('-', '/') || '最新记录'}</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">采集：{volumeEntry.volumeDate?.replaceAll('-', '/') || '未记录'}</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">发现上涨：{formatVolumeRiseDate(volumeEntry.last_date)}</p>
               </div>
             </div>
           )}

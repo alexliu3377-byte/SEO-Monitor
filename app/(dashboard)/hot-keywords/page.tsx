@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
+import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
+import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -32,6 +34,7 @@ interface VolumeRisingEntry {
   keyword: string; volume: number; prevVolume: number | null; change: number
   baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
+  riseDate?: string | null; volumeDate?: string | null
 }
 interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[] }
 interface WeightInfo { pc: number; mobile: number; pcChg: number; mobileChg: number }
@@ -955,7 +958,7 @@ export default function HotRadarPage() {
               {activeTab === 'volumeRising' && (
                 <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
-                    <col className="w-24" />
+                    <col className="w-28" />
                     <col className="w-48" />
                     <col className="w-28" />
                     <col className="w-24" />
@@ -966,7 +969,7 @@ export default function HotRadarPage() {
                   </colgroup>
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="table-th"><span className="inline-flex items-center gap-0.5">日期{sortIcons('date')}</span></th>
+                      <th className="table-th" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">发现上涨{sortIcons('date')}</span></th>
                       <th className="table-th">关键词</th>
                       <th className="table-th text-center whitespace-nowrap" title="当前搜索量减去系统追踪起点搜索量"><span className="inline-flex items-center justify-center gap-0.5">累计上涨{sortIcons('netChange')}</span></th>
                       <th className="table-th text-center whitespace-nowrap" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5">本次变化{sortIcons('change')}</span></th>
@@ -982,7 +985,7 @@ export default function HotRadarPage() {
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
                         <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
-                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge="updated" />
+                          <VolumeRiseDateCell date={w.last_date} today={today} yesterday={yesterday} />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
                           </td>
@@ -1223,7 +1226,8 @@ export default function HotRadarPage() {
                       <div className="text-right">
                         <p className="text-xs text-gray-400">现在</p>
                         <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVolume(detailVolumeEntry.volume)}</p>
-                        <p className="mt-0.5 text-[11px] text-gray-400">{detailVolumeEntry.last_date?.replaceAll('-', '/') || '最新记录'}</p>
+                        <p className="mt-0.5 text-[11px] text-gray-400">采集：{detailVolumeEntry.volumeDate?.replaceAll('-', '/') || '未记录'}</p>
+                        <p className="mt-0.5 text-[11px] text-gray-400">发现上涨：{formatVolumeRiseDate(detailVolumeEntry.last_date)}</p>
                       </div>
                     </div>
                   )}
