@@ -915,51 +915,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   // ── Derived radar data ──────────────────────────────────────────────────────
 
+  // These are complete server-selected pages, already filtered and sorted.
   const crossWords = radarData?.cross ?? []
-
-  const rankWordsSorted = useMemo(() => {
-    if (!radarData) return []
-    return sortByDate(radarData.rankWords, yesterday, (a, b) => b.volume - a.volume || b.rankDays - a.rankDays)
-  }, [radarData, yesterday])
-
-  // Group streak words by keyword (same as hot-radar): streak>=2, single-domain only
-  const streakWords = useMemo(() => {
-    if (!radarData) return []
-    const grouped = new Map<string, { keyword: string; streak: number; domains: string[]; volume: number; first_date: string; last_date: string }>()
-    for (const w of radarData.streakWords) {
-      if (w.streak < 2) continue
-      const g = grouped.get(w.keyword)
-      if (!g) {
-        grouped.set(w.keyword, { keyword: w.keyword, streak: w.streak, domains: [w.domain], volume: w.volume, first_date: w.first_date, last_date: w.last_date })
-      } else {
-        if (!g.domains.includes(w.domain)) g.domains.push(w.domain)
-        if (w.streak > g.streak) g.streak = w.streak
-        if (w.volume > g.volume) g.volume = w.volume
-        if (w.last_date > g.last_date) g.last_date = w.last_date
-        if (!g.first_date || w.first_date < g.first_date) g.first_date = w.first_date
-      }
-    }
-    const single = Array.from(grouped.values()).filter(g => g.domains.length === 1)
-    return [...single].sort((a, b) => {
-      if (a.last_date !== b.last_date) return b.last_date.localeCompare(a.last_date)
-      const pa = getStreakBadge(a.streak, a.last_date, yesterday) === 'new' ? 0 : getStreakBadge(a.streak, a.last_date, yesterday) === 'updated' ? 1 : 2
-      const pb = getStreakBadge(b.streak, b.last_date, yesterday) === 'new' ? 0 : getStreakBadge(b.streak, b.last_date, yesterday) === 'updated' ? 1 : 2
-      if (pa !== pb) return pa - pb
-      return b.streak - a.streak || b.volume - a.volume
-    })
-  }, [radarData, yesterday])
-
-  // 搜索量上涨：keyword_volume 没有站点归属，跟其他几类不一样不按分组的
-  // 站点域名过滤，全组共享同一份全局列表。
-  const volumeRisingWordsSorted = useMemo(() => {
-    if (!radarData) return []
-    return [...radarData.volumeRisingWords].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date))
-  }, [radarData])
-
-  const allNewWords = useMemo(() => {
-    if (!radarData) return []
-    return sortByDate(radarData.newWords, yesterday, (a, b) => b.count - a.count || b.siteCount - a.siteCount)
-  }, [radarData, yesterday])
+  const rankWordsSorted = radarData?.rankWords ?? []
+  const streakWords = (radarData?.streakWords ?? []).map(row => ({ ...row,domains: [row.domain] }))
+  const volumeRisingWordsSorted = radarData?.volumeRisingWords ?? []
+  const allNewWords = radarData?.newWords ?? []
 
   const radarAvailableDates = radarDates()
 
@@ -2734,15 +2695,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (isDailyRadarTab && dailyPage.error && !radarLoaded) return <div className="py-10 text-center text-sm text-gray-500">该日期资料读取失败，请点击上方重试或切换日期。</div>
 
     if (rightTab === 'volumeRising') {
-      const base_vr = volumeRisingWordsSorted
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(a) : sortCol === 'change' ? (a.change??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(b) : sortCol === 'change' ? (b.change??0) : 0
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : base_vr
-      const slice = sorted_vr
+      const slice = volumeRisingWordsSorted
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[780px] table-fixed">
@@ -2789,17 +2742,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'cross') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const base_cross = crossWords
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sorted_cross = sortCol && sortDir ? [...base_cross].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : 0
-        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
-          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
-          || (b.volume ?? 0) - (a.volume ?? 0)
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : base_cross
-      const slice = sorted_cross
+      const slice = crossWords
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2836,17 +2779,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'rank') {
-      const base_rank = rankWordsSorted
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sorted_rank = sortCol && sortDir ? [...base_rank].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'rankDays' ? (a.rankDays??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'rankDays' ? (b.rankDays??0) : 0
-        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
-          || badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
-          || (b.volume ?? 0) - (a.volume ?? 0)
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : base_rank
-      const slice = sorted_rank
+      const slice = rankWordsSorted
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2878,18 +2811,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'streak') {
-      const base_streak = streakWords
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sorted_streak = sortCol && sortDir ? [...base_streak].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'streak' ? (a.streak??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'volume' ? (b.volume??0) : sortCol === 'streak' ? (b.streak??0) : 0
-        if (typeof va === 'string') return (sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va))
-          || (getStreakBadge(a.streak, a.last_date, yesterday) === 'new' ? 0 : 1)
-            - (getStreakBadge(b.streak, b.last_date, yesterday) === 'new' ? 0 : 1)
-          || (b.streak ?? 0) - (a.streak ?? 0)
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : base_streak
-      const slice = sorted_streak
+      const slice = streakWords
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2921,24 +2843,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'newWords') {
-      const base_new = allNewWords
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sorted_new = sortCol && sortDir ? [...base_new].sort((a: any, b: any) => {
-        const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.count??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0
-        const vb: any = sortCol === 'date' ? (b.last_date||'') : sortCol === 'count' ? (b.count??0) : sortCol === 'siteCount' ? (b.siteCount??0) : 0
-        if (typeof va === 'string') {
-          const dateOrder = sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
-          if (dateOrder !== 0) return dateOrder
-          const badgeOrder = badgePriority(a.first_date, a.last_date, yesterday) - badgePriority(b.first_date, b.last_date, yesterday)
-          if (badgeOrder !== 0) return badgeOrder
-          return (b.count ?? 0) - (a.count ?? 0) || (b.siteCount ?? 0) - (a.siteCount ?? 0)
-        }
-        return sortDir === 'asc' ? va - vb : vb - va
-      }) : base_new
-      // 切换分组后保留了上一个分组的页码时，新分组资料较少会被切到空页；
-      // 将页码收敛到当前结果范围，确保“近30天全部”有资料时一定能看到。
-      const safePage = Math.min(pg, Math.max(0, Math.ceil(radarTotal / PAGE_SIZE) - 1))
-      const slice = sorted_new
+      const slice = allNewWords
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2964,7 +2869,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={safePage} total={radarTotal} onPage={p => setPage('newWords', p)} />
+          <Pager page={pg} total={radarTotal} onPage={p => setPage('newWords', p)} />
         </>
       )
     }

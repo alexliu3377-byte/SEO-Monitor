@@ -201,7 +201,8 @@ with source as materialized (
 ), filtered as materialized (
   select item,case when item->>'first_date'=p_date::text or (p_tab='streak' and (item->>'streak')::int=2) then 'new' else 'updated' end as badge
   from rows where (p_keyword='' or strpos(lower(item->>'keyword'),lower(p_keyword))>0)
-    and (p_site='' or exists(select 1 from jsonb_array_elements_text(coalesce(item->'sites','[]'::jsonb)) d where strpos(lower(d),lower(p_site))>0))
+    and (p_site='' or strpos(lower(coalesce(item->>'domain','')),lower(p_site))>0
+      or exists(select 1 from jsonb_array_elements_text(coalesce(item->'sites','[]'::jsonb)) d where strpos(lower(d),lower(p_site))>0))
     and coalesce((item->>'siteCount')::int,(item->>'site_count')::int,1)>=p_min_sites
     and (p_tab<>'streak' or (item->>'streak')::int>=p_min_streak)
     and (p_group_id is null or p_tab='wordLib' or not exists(

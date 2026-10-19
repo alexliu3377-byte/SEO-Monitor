@@ -25,7 +25,7 @@ try {
   await db.exec(normalization.slice(0, normalization.indexOf('create index')) + '\ncommit;')
   const recommendation = await readFile(new URL('../supabase/migrations/20261013_paged_recommendations.sql', import.meta.url), 'utf8')
   await db.exec(recommendation.slice(0,recommendation.indexOf('create or replace function public.get_task_group_recommendations_page'))+'\ncommit;')
-  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql']) {
+  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   }
   const today = (await db.query("select (now() at time zone 'Asia/Kuala_Lumpur')::date::text as d")).rows[0].d
@@ -38,6 +38,8 @@ try {
       ($1,'软件甲',$2::date-10),($1,'软件甲官方版',$2),($1,'软件甲免费版',$2),($1,'未来预约',$2::date+20)`, [id,date])
   }
   await db.query(`insert into rank_changes values($1,'软件甲官方版',$2,'rankup',100),($1,'真正连续',$2,'rankup',30),($1,'不连续',$2,'rankup',20)`,[site,date])
+  await db.query(`insert into rank_changes values($1,'分页筛选甲',$2,'rankup',300),($1,'分页筛选乙',$2,'rankup',200),
+    ($1,'分页筛选丙',$2,'rankup',100),($1,'分页筛选他日',$2::date-1,'rankup',400)`,[site,date])
   await db.query(`insert into keyword_signal_rollup(site_id,keyword,type,recent_dates) values
     ($1,'真正连续','rankup',array[$2::date-2,$2::date-1,$2::date,$2::date+1]),
     ($1,'不连续','rankup',array[$2::date-4,$2::date-2,$2::date])`,[site,date])
@@ -63,6 +65,13 @@ try {
   assert.equal(streak.total,1)
   assert.equal(streak.data[0].keyword,'真正连续')
   assert.equal(streak.data[0].streak,3) // tomorrow's date is excluded
+  const secondFilteredPage=(await db.query(`select get_daily_radar_page(p_date=>$1,p_scope=>'global',p_tab=>'rank',
+    p_keyword=>'分页筛选',p_page=>1,p_size=>1,p_sort=>'volume') as result`,[date])).rows[0].result
+  assert.equal(secondFilteredPage.total,3) // date/search are applied BEFORE paging
+  assert.deepEqual(secondFilteredPage.data.map(row=>row.keyword),['分页筛选乙'])
+  const siteStreak=async siteFilter=>(await db.query(`select get_daily_radar_page(p_date=>$1,p_scope=>'global',p_tab=>'streak',p_site=>$2) as result`,[date,siteFilter])).rows[0].result
+  assert.equal((await siteStreak('a.com')).total,1)
+  assert.equal((await siteStreak('b.com')).total,0)
   assert.equal((await page('wordLib')).data[0].keyword,'软件甲')
   const legacyVolume = (await page('volumeRising')).data[0]
   assert.equal(legacyVolume.historicalValuesKnown,false)

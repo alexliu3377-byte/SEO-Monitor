@@ -477,128 +477,14 @@ export default function HotRadarPage() {
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
-  const filtered = useMemo(() => {
-    if (!data) return null
-    const nw = data.newWords.filter(w => w.siteCount >= minSites)
-    const rw = data.rankWords.filter(w => w.siteCount >= minSites)
-
-    const nwMap = new Map(nw.map(w => [w.keyword, w]))
-    const rwMap = new Map(rw.map(w => [w.keyword, w]))
-    const allKws = new Set([...Array.from(nwMap.keys()), ...Array.from(rwMap.keys())])
-
-    const cw: CrossEntry[] = Array.from(allKws).map(keyword => {
-      const dims: string[] = []
-      const sites = new Set<string>()
-      let last_date = '', first_date = ''
-
-      const nwe = nwMap.get(keyword)
-      if (nwe) {
-        dims.push('new')
-        nwe.sites.forEach(s => sites.add(s))
-        if (nwe.last_date > last_date) last_date = nwe.last_date
-        if (!first_date || nwe.first_date < first_date) first_date = nwe.first_date
-      }
-      const rwe = rwMap.get(keyword)
-      if (rwe) {
-        dims.push('rank')
-        rwe.sites.forEach(s => sites.add(s))
-        if (rwe.last_date > last_date) last_date = rwe.last_date
-        if (!first_date || rwe.first_date < first_date) first_date = rwe.first_date
-      }
-      return { keyword, dims, volume: rwe?.volume ?? null, newSites: nwe?.sites || [], rankSites: rwe?.sites || [], sites: Array.from(sites), last_date, first_date }
-    }).filter(w => w.dims.length >= 2)
-
-    return {
-      newWords:    sortByDate(nw, yesterday, (a, b) => b.count - a.count || b.siteCount - a.siteCount),
-      rankWords:   sortByDate(rw, yesterday, (a, b) => b.volume - a.volume || b.siteCount - a.siteCount),
-      crossWords:  data.cross ?? sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
-      streakWords: data.streakWords || [],
-      // 搜索量趋势按相对追踪起点的累计增加量排序；本次变化只用来
-      // 判断最近是否适合更新，不再把回落但仍净增的词丢掉。
-      volumeRisingWords: [...(data.volumeRisingWords || [])].sort((a, b) => getNetVolumeChange(b) - getNetVolumeChange(a) || b.last_date.localeCompare(a.last_date)),
-    }
-  }, [data, minSites, yesterday])
-
-  const filteredStreakWords = useMemo((): StreakGrouped[] => {
-    if (!filtered) return []
-    const raw = filtered.streakWords.filter(w => w.streak >= minStreak)
-    const grouped = new Map<string, StreakGrouped>()
-    for (const w of raw) {
-      const g = grouped.get(w.keyword)
-      if (!g) {
-        grouped.set(w.keyword, { keyword: w.keyword, streak: w.streak, domains: [w.domain], volume: w.volume, first_date: w.first_date, last_date: w.last_date })
-      } else {
-        if (!g.domains.includes(w.domain)) g.domains.push(w.domain)
-        if (w.streak > g.streak) g.streak = w.streak
-        if (w.volume > g.volume) g.volume = w.volume
-        if (w.last_date > g.last_date) g.last_date = w.last_date
-        if (!g.first_date || w.first_date < g.first_date) g.first_date = w.first_date
-      }
-    }
-    // 只保留单站点（多站点归竞品涨排名）
-    const single = Array.from(grouped.values()).filter(g => g.domains.length === 1)
-    return [...single].sort((a, b) => {
-      if (a.last_date !== b.last_date) return b.last_date.localeCompare(a.last_date)
-      const pa = getStreakBadge(a.streak, a.last_date, yesterday) === 'new' ? 0 : getStreakBadge(a.streak, a.last_date, yesterday) === 'updated' ? 1 : 2
-      const pb = getStreakBadge(b.streak, b.last_date, yesterday) === 'new' ? 0 : getStreakBadge(b.streak, b.last_date, yesterday) === 'updated' ? 1 : 2
-      if (pa !== pb) return pa - pb
-      return b.streak - a.streak || b.volume - a.volume
-    })
-  }, [filtered, minStreak, yesterday])
-
-  const baseList = useMemo(() => !filtered ? [] :
-    activeTab === 'cross'        ? filtered.crossWords        :
-    activeTab === 'volumeRising' ? filtered.volumeRisingWords :
-    activeTab === 'new'          ? filtered.newWords          :
-    activeTab === 'rank'         ? filtered.rankWords         :
-    activeTab === 'wordLib'      ? wordLibData                :
-    filteredStreakWords,
-  [filtered, activeTab, wordLibData, filteredStreakWords])
-
+  // SQL filters and orders the complete selected date before paging.
+  // Only adapt wire fields here: never filter, regroup or re-sort this page.
+  const pagedList: (DailyRadarRow | StreakGrouped)[] = activeTab === 'wordLib' ? wordLibData : activeTab === 'streak'
+    ? ((dailyPage.data ?? []) as StreakEntry[]).map(row => ({ ...row,domains: [row.domain] }))
+    : dailyPage.data ?? []
+  const activeList = pagedList
   const availableDates = radarDates()
-
-  const activeList = useMemo(() => {
-    // Search, date, site count and sorting are applied to the whole cache in
-    // SQL. This response already contains exactly the requested page.
-    if (activeTab === 'wordLib') return wordLibData
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let list = [...(baseList as any[])]
-    if (filterSite.trim()) {
-      const fs = filterSite.trim().toLowerCase()
-      list = list.filter((w: any) => {
-        if ('domains' in w) return w.domains.some((d: string) => d.toLowerCase().includes(fs))
-        return w.sites ? w.sites.some((s: string) => s.toLowerCase().includes(fs)) : true
-      })
-    }
-    if (filterKeyword.trim()) {
-      const kw = filterKeyword.trim().toLowerCase()
-      list = list.filter((w: any) => w.keyword.toLowerCase().includes(kw))
-    }
-    if (filterDate) list = list.filter((w: any) => w.last_date === filterDate)
-    if (sortCol && sortDir) {
-      list.sort((a: any, b: any) => {
-        let va: string | number = 0, vb: string | number = 0
-        switch (sortCol) {
-          case 'date':          va = a.last_date || ''; vb = b.last_date || ''; break
-          case 'volume':        va = a.volume ?? 0;     vb = b.volume ?? 0;     break
-          case 'count':         va = a.count ?? 0;      vb = b.count ?? 0;      break
-          case 'rankDays':      va = a.rankDays ?? 0;   vb = b.rankDays ?? 0;   break
-          case 'streak':        va = a.streak ?? 0;     vb = b.streak ?? 0;     break
-          case 'change':        va = a.change ?? 0;     vb = b.change ?? 0;     break
-          case 'netChange':     va = getNetVolumeChange(a); vb = getNetVolumeChange(b); break
-          case 'longTailCount': va = a.longTailCount ?? 0; vb = b.longTailCount ?? 0; break
-          case 'siteCount':     va = a.siteCount ?? 0;  vb = b.siteCount ?? 0;  break
-        }
-        if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb as string) : (vb as string).localeCompare(va)
-        return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number)
-      })
-    }
-    return list
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseList, filterSite, filterKeyword, filterDate, sortCol, sortDir, activeTab, wordLibData])
-
-  const pagedList = activeList
-  const activeTotal = activeTab === 'wordLib' ? wordLibTotal : radarTotal
+  const activeTotal = dailyPage.total
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
