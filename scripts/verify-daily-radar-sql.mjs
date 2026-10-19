@@ -96,6 +96,11 @@ try {
   await db.query(`insert into radar_daily_cache(data_date,scope_key,payload) values($1::date-8,'global','{}')`,[today])
   assert.equal((await db.query('select prune_daily_radar_cache() as removed')).rows[0].removed,1)
   assert.equal((await db.query('select count(*)::int as n from keyword_volume_observations')).rows[0].n,4)
+  await db.exec("insert into keyword_volume(keyword,volume,stat_date) values('基线缺失',1,current_date); update keyword_volume set volume=4 where keyword='基线缺失'")
+  await build(today)
+  const noBaseline=(await page('volumeRising',0,20,null,today)).data.find(row=>row.keyword==='基线缺失')
+  assert.equal(noBaseline.change,3)
+  assert.equal(noBaseline.netChange,null) // unknown baseline is not zero
   assert.equal((await db.query("select has_function_privilege('authenticated','public.refresh_daily_radar_cache(date,text,text[],text[])','execute') as allowed")).rows[0].allowed,false)
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
   console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,

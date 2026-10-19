@@ -125,7 +125,7 @@ begin
     group by b.base having count(distinct b.keyword)>=2 and bool_or(h.content_date=p_date)
   ), volume_events as (
     select distinct on(keyword) keyword,volume,previous_volume,volume-previous_volume as change,
-      baseline_volume,baseline_date,volume-coalesce(baseline_volume,0) as net_change,stat_date,true as historical_values_known
+      baseline_volume,baseline_date,volume-baseline_volume as net_change,stat_date,true as historical_values_known
     from keyword_volume_observations where observed_date=p_date and previous_volume is not null
       and volume>previous_volume order by keyword,observed_at desc,id desc
   ), volume_words as (
@@ -163,7 +163,7 @@ begin
     'volumeRisingWords',coalesce((select jsonb_agg(jsonb_build_object('keyword',v.keyword,'volume',volume,'prevVolume',previous_volume,'change',change,
       'baselineVolume',baseline_volume,'baselineDate',baseline_date,'netChange',net_change,'last_date',p_date,'riseDate',p_date,
       'volumeDate',stat_date,'sites',coalesce(r.sites,'{}'::text[]),'rankTrend',r.trend,'historicalValuesKnown',historical_values_known)
-      order by net_change desc,v.keyword) from volume_words v left join volume_ranks r using(keyword)),'[]'::jsonb)
+      order by net_change desc nulls last,v.keyword) from volume_words v left join volume_ranks r using(keyword)),'[]'::jsonb)
   ) into result;
   insert into radar_daily_cache(data_date,scope_key,rank_domains,new_domains,payload,computed_at)
     values(p_date,p_scope,p_rank_domains,p_new_domains,result,now())
