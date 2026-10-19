@@ -10,7 +10,8 @@ import { useUser } from '@/lib/user-context'
 import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
 import { fetchAllRows } from '@/lib/supabase-paginate'
-import { radarCacheNotice } from '@/lib/radar-cache-notice'
+import { useRadarPage } from '@/lib/use-radar-page'
+import { radarTabDate, radarTabScope } from '@/lib/radar-tab-state'
 import { isIncrementalOperation } from '@/lib/submission-operation'
 import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
 import { taskClaimIdentity, isUpdateTask } from '@/lib/task-claim-identity'
@@ -32,6 +33,9 @@ interface WordLibEntry extends NewWord { longTailCount: number }
 interface RankWord { keyword: string; siteCount: number; volume: number; sites: string[]; last_date: string; first_date: string; rankDays: number }
 interface StreakWord { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }
 interface CrossWord { keyword: string; volume: number; last_date: string; first_date: string; newSites: string[]; rankSites: string[] }
+interface WordLibWire { keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string }
+interface RadarPayload { newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[]; cross?: CrossWord[] }
+type DailyRadarRow = NewWord | RankWord | StreakWord | VolumeRisingWord | CrossWord | WordLibWire
 interface VolumeRisingWord {
   keyword: string; volume: number; prevVolume: number | null; change: number | null
   baselineVolume: number; baselineDate: string; netChange: number; last_date: string
@@ -251,9 +255,6 @@ function getStreakBadge(streak: number, last_date: string, _yesterday: string): 
   return streak <= 2 ? 'new' : 'updated'
 }
 
-function filterByRadarDate<T extends { last_date: string }>(rows: T[], date: string): T[] {
-  return date ? rows.filter(row => row.last_date === date) : rows
-}
 function badgePriority(first_date: string, last_date: string, _yesterday: string): number {
   if (!last_date) return 2
   return first_date && first_date === last_date ? 0 : 1
@@ -757,16 +758,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeMsg, setDistributeMsg] = useState('')
   const [distributeClearing, setDistributeClearing] = useState(false)
 
-  const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[]; cross?: CrossWord[] } | null>(null)
-  const [radarTotal, setRadarTotal] = useState(0)
   const [radarVersion, setRadarVersion] = useState(0)
-  const [radarNotice, setRadarNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
-  const [radarLoadedGroupId, setRadarLoadedGroupId] = useState<string | null>(null)
-  const [radarLoadingGroupId, setRadarLoadingGroupId] = useState<string | null>(null)
-  const radarAbortRef = useRef<AbortController | null>(null)
-  const radarSectionsRef = useRef(new Set<string>())
-  const radarLoaded = radarLoadedGroupId === activeGroupId
-  const radarLoading = radarLoadingGroupId === activeGroupId
 
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -785,19 +777,16 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [detailUrlSiblings, setDetailUrlSiblings] = useState<{ keyword: string; rank_position: number | null; volume: number }[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
-  const [wordLibData, setWordLibData] = useState<WordLibEntry[]>([])
-  const [wordLibLoading, setWordLibLoading] = useState(false)
-  const [wordLibTotal, setWordLibTotal] = useState(0)
-  const wordLibGroupRef = useRef<string | null>(null)
-  const [wordLibDataGroupId, setWordLibDataGroupId] = useState<string | null>(null)
-  const wordLibAbortRef = useRef<AbortController | null>(null)
   const domainInfoLoadedRef = useRef(false)
   const domainInfoPromiseRef = useRef<Promise<void> | null>(null)
   const [wordLibSearch, setWordLibSearch] = useState('')
   const [wordLibQuery, setWordLibQuery] = useState('')
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
-  const [radarDate, setRadarDate]       = useState('')
+  const [radarDatesByTab, setRadarDatesByTab] = useState<Record<string, string>>({})
+  const radarDateScope = radarTabScope(rightTab, activeGroupId ?? '')
+  const radarDate = radarDatesByTab[radarDateScope] ?? ''
+  const setRadarDate = (value: string) => setRadarDatesByTab(previous => ({ ...previous, [radarDateScope]: value }))
   const [badgeFilter, setBadgeFilter] = useState<BadgeFilter>('all')
 
   useEffect(() => {
@@ -856,6 +845,43 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const detailCacheRef = useRef<Map<string, { newRows: DetailRow[]; rankRows: DetailRow[]; wordLibSiteKws: { domain: string; keywords: string[] }[]; volumeRisingRows: VolumeRisingDetailRow[] }>>(new Map())
 
   const activeGroup = groups.find(g => g.id === activeGroupId) ?? null
+  const effectiveRadarDate = radarTabDate(rightTab, radarDate)
+  const isDailyRadarTab = ['volumeRising','cross','rank','streak','newWords','wordLib'].includes(rightTab)
+  const dailyParams = new URLSearchParams({ groupId: activeGroupId ?? '', tab: rightTab, date: effectiveRadarDate,
+    page: String(tabPage[rightTab]), pageSize: String(PAGE_SIZE),
+    ...(rightTab === 'wordLib' ? { q: wordLibQuery,
+      sort: sortCol === 'count' ? 'longTailCount' : ['date','siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
+      direction: sortDir || 'desc' } : { badge: badgeFilter,sort: sortCol || 'date',direction: sortDir || 'desc' }) })
+  const dailyQuery = isWorkspaceRoute && activeGroup && isDailyRadarTab ? dailyParams.toString() : null
+  const dailyPage = useRadarPage<DailyRadarRow>(dailyQuery, radarVersion)
+  const radarTotal = dailyPage.total
+  const radarLoaded = dailyPage.data !== null
+  const radarLoading = dailyPage.loading
+  const wordLibTotal = dailyPage.total
+  const wordLibLoading = dailyPage.loading && !radarLoaded
+  const radarData = useMemo((): RadarPayload | null => {
+    if (!dailyPage.data || rightTab === 'wordLib') return null
+    const result: RadarPayload = { newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [] }
+    if (rightTab === 'rank') result.rankWords = dailyPage.data as RankWord[]
+    else if (rightTab === 'streak') result.streakWords = dailyPage.data as StreakWord[]
+    else if (rightTab === 'volumeRising') result.volumeRisingWords = dailyPage.data as VolumeRisingWord[]
+    else if (rightTab === 'newWords') result.newWords = dailyPage.data as NewWord[]
+    else if (rightTab === 'cross') result.cross = dailyPage.data as CrossWord[]
+    return result
+  }, [dailyPage.data,rightTab])
+  const wordLibWords = useMemo((): WordLibEntry[] => rightTab === 'wordLib' ? ((dailyPage.data ?? []) as WordLibWire[]).map(row => ({
+    keyword: row.keyword,longTailCount: row.long_tail_count,count: row.long_tail_count,
+    siteCount: row.site_count,sites: row.sites ?? [],last_date: row.last_date,first_date: '',
+  })) : [], [dailyPage.data,rightTab])
+  useEffect(() => {
+    if (dailyPage.error) setLoadError({ scope: rightTab === 'wordLib' ? 'wordlib' : 'radar',message: dailyPage.error })
+    else setLoadError(previous => previous && ['radar','wordlib'].includes(previous.scope) ? null : previous)
+  }, [dailyPage.error,dailyQuery,rightTab])
+  useEffect(() => {
+    if (!dailyQuery || !radarLoaded) return
+    const lastPage = Math.max(0,Math.ceil(radarTotal / PAGE_SIZE)-1)
+    if (tabPage[rightTab] > lastPage) setTabPage(previous => ({ ...previous,[rightTab]: lastPage }))
+  }, [dailyQuery,radarLoaded,radarTotal,rightTab,tabPage])
   const currentUserIsMember = !!currentUserId && !!activeGroup?.members.some(member => member.user_id === currentUserId)
   const viewingMemberIsValid = !!viewingMemberId && !!activeGroup?.members.some(member => member.user_id === viewingMemberId)
   const effectiveViewingId = viewingMemberIsValid ? viewingMemberId! : currentUserIsMember ? currentUserId! : ''
@@ -868,7 +894,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       : '你还未加入这个分组，不能提交。'
 
   const claimedSet = useMemo(() => new Set(claimedKeywords.map(k => k.keyword)), [claimedKeywords])
-  const submittedSet = useMemo(() => new Set(claimedKeywords.filter(k => k.status === 'submitted').map(k => k.keyword)), [claimedKeywords])
   // Dedup by keyword — DB race condition can create duplicates; show only one per keyword
   const displayedClaims = useMemo(() => {
     const seen = new Set<string>()
@@ -887,38 +912,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const bulkTaskRows = useMemo(() => parseBulkTaskRows(bulkAddText), [bulkAddText])
   const validBulkTaskRows = bulkTaskRows.filter(row => !row.error).slice(0, 200)
 
-  const groupRankDomains = useMemo(() => new Set(activeGroup?.rank_domains || []), [activeGroup])
-  const groupNewDomains = useMemo(() => new Set(activeGroup?.new_domains || []), [activeGroup])
 
   // ── Derived radar data ──────────────────────────────────────────────────────
 
-  const crossWords = useMemo((): CrossWord[] => {
-    if (!radarData) return []
-    if (radarData.cross) return radarData.cross
-    const nwMap = new Map(radarData.newWords.map(w => [w.keyword, w]))
-    const rwMap = new Map(radarData.rankWords.map(w => [w.keyword, w]))
-    const allKws = new Set([...Array.from(nwMap.keys()), ...Array.from(rwMap.keys())])
-    const cw = Array.from(allKws).map(keyword => {
-      const nwe = nwMap.get(keyword)
-      const rwe = rwMap.get(keyword)
-      if (!nwe || !rwe) return null
-      const last_date = [nwe.last_date, rwe.last_date].filter(Boolean).sort().reverse()[0] ?? ''
-      const first_date = [nwe.first_date, rwe.first_date].filter(Boolean).sort()[0] ?? ''
-      return { keyword, volume: rwe.volume ?? 0, last_date, first_date, newSites: nwe.sites, rankSites: rwe.sites }
-    }).filter((w): w is CrossWord => w !== null)
-    const sorted = sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0))
-    return sorted.filter(w =>
-      (!groupRankDomains.size || w.rankSites.some(s => groupRankDomains.has(s))) &&
-      (!groupNewDomains.size || w.newSites.some(s => groupNewDomains.has(s)))
-    )
-  }, [radarData, yesterday, groupRankDomains, groupNewDomains])
+  const crossWords = radarData?.cross ?? []
 
   const rankWordsSorted = useMemo(() => {
     if (!radarData) return []
-    const sorted = sortByDate(radarData.rankWords, yesterday, (a, b) => b.volume - a.volume || b.rankDays - a.rankDays)
-    if (!groupRankDomains.size) return sorted
-    return sorted.filter(w => w.sites.some(s => groupRankDomains.has(s)))
-  }, [radarData, yesterday, groupRankDomains])
+    return sortByDate(radarData.rankWords, yesterday, (a, b) => b.volume - a.volume || b.rankDays - a.rankDays)
+  }, [radarData, yesterday])
 
   // Group streak words by keyword (same as hot-radar): streak>=2, single-domain only
   const streakWords = useMemo(() => {
@@ -937,8 +939,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         if (!g.first_date || w.first_date < g.first_date) g.first_date = w.first_date
       }
     }
-    let single = Array.from(grouped.values()).filter(g => g.domains.length === 1)
-    if (groupRankDomains.size) single = single.filter(g => g.domains.some(d => groupRankDomains.has(d)))
+    const single = Array.from(grouped.values()).filter(g => g.domains.length === 1)
     return [...single].sort((a, b) => {
       if (a.last_date !== b.last_date) return b.last_date.localeCompare(a.last_date)
       const pa = getStreakBadge(a.streak, a.last_date, yesterday) === 'new' ? 0 : getStreakBadge(a.streak, a.last_date, yesterday) === 'updated' ? 1 : 2
@@ -946,7 +947,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       if (pa !== pb) return pa - pb
       return b.streak - a.streak || b.volume - a.volume
     })
-  }, [radarData, yesterday, groupRankDomains])
+  }, [radarData, yesterday])
 
   // 搜索量上涨：keyword_volume 没有站点归属，跟其他几类不一样不按分组的
   // 站点域名过滤，全组共享同一份全局列表。
@@ -957,19 +958,13 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   const allNewWords = useMemo(() => {
     if (!radarData) return []
-    const sorted = sortByDate(radarData.newWords, yesterday, (a, b) => b.count - a.count || b.siteCount - a.siteCount)
-    if (!groupNewDomains.size) return sorted
-    return sorted.filter(w => w.sites.some(s => groupNewDomains.has(s)))
-  }, [radarData, yesterday, groupNewDomains])
-
-  // The API scopes the whole cache to this group's sites before paging.
-  const wordLibWords = useMemo(() => wordLibDataGroupId === activeGroupId ? wordLibData : [], [wordLibDataGroupId, activeGroupId, wordLibData])
+    return sortByDate(radarData.newWords, yesterday, (a, b) => b.count - a.count || b.siteCount - a.siteCount)
+  }, [radarData, yesterday])
 
   const radarAvailableDates = radarDates()
 
   // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
   // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
-  const effectiveRadarDate = radarDate || (rightTab === 'newWords' || rightTab === 'wordLib' ? yesterday : today)
   const showRadarDateFilter = (['volumeRising', 'cross', 'rank', 'streak', 'newWords', 'wordLib'] as RightTab[]).includes(rightTab)
   const showRadarTypeFilter = (['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
 
@@ -1377,80 +1372,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     } finally { setClaimedLoading(false) }
   }
 
-  async function loadRadar(groupId = activeGroupId, force = false) {
-    if (!groupId) return
-    const params = new URLSearchParams({ groupId, tab: rightTab, date: effectiveRadarDate,
-      page: String(tabPage[rightTab]), pageSize: String(PAGE_SIZE), badge: badgeFilter,
-      sort: sortCol || 'date', direction: sortDir || 'desc' })
-    const keys = [params.toString()]
-    if (!force && keys.every(key => radarSectionsRef.current.has(key))) return
-    radarAbortRef.current?.abort()
-    const controller = new AbortController()
-    radarAbortRef.current = controller
-    setRadarLoadingGroupId(groupId)
-    try {
-      const res = await fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
-      if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
-      const rd = await res.json()
-      if (controller.signal.aborted) return
-      setRadarNotice(null)
-      for (const key of keys) radarSectionsRef.current.add(key)
-      setRadarData({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
-        [rightTab === 'rank' ? 'rankWords' : rightTab === 'streak' ? 'streakWords' : rightTab === 'volumeRising' ? 'volumeRisingWords' : rightTab]: rd.data })
-      setRadarTotal(rd.total)
-      setRadarLoadedGroupId(groupId)
-      setLoadError(current => current?.scope === 'radar' ? null : current)
-    } catch (error) {
-      if (controller.signal.aborted) return
-      setLoadError({ scope: 'radar', message: error instanceof Error ? error.message : '推荐数据加载失败' })
-    } finally {
-      if (radarAbortRef.current === controller) {
-        radarAbortRef.current = null
-        setRadarLoadingGroupId(null)
-      }
-    }
-  }
-
-  async function loadWordLib(force = false) {
-    const groupId = activeGroupId
-    if (!groupId) return
-    const params = new URLSearchParams({
-      groupId, tab: 'wordLib', date: effectiveRadarDate, page: String(tabPage.wordLib), pageSize: String(PAGE_SIZE), q: wordLibQuery,
-      sort: sortCol === 'count' ? 'longTailCount' : ['date', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
-      direction: sortDir || 'desc', minLongTail: '2',
-    })
-    if (radarDate) params.set('date', radarDate)
-    const queryKey = params.toString()
-    if (!force && wordLibGroupRef.current === queryKey) return
-    wordLibAbortRef.current?.abort()
-    const controller = new AbortController()
-    wordLibAbortRef.current = controller
-    setWordLibLoading(true)
-    try {
-      const response = await fetch(`/api/radar-daily?${queryKey}`, { signal: controller.signal, cache: 'no-store' })
-      if (!response.ok) throw new Error(await apiError(response,'词库资料读取失败'))
-      const body = await response.json()
-      if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('词库返回资料格式无效')
-      if (controller.signal.aborted) return
-      setWordLibDataGroupId(groupId)
-      setWordLibData(body.data.map((row: { keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string }) => ({
-        keyword: row.keyword,longTailCount: row.long_tail_count,count: row.long_tail_count,
-        siteCount: row.site_count,sites: row.sites ?? [],last_date: String(row.last_date ?? '').slice(0,10),first_date: '',
-      })))
-      setWordLibTotal(body.total)
-      const lastPage = Math.max(0, Math.ceil(body.total / PAGE_SIZE) - 1)
-      if (tabPage.wordLib > lastPage) setTabPage(current => ({ ...current, wordLib: lastPage }))
-      wordLibGroupRef.current = queryKey
-      setLoadError(current => current?.scope === 'wordlib' ? null : current)
-    } catch (error) {
-      if (!controller.signal.aborted) setLoadError({ scope: 'wordlib',message: error instanceof Error ? error.message : '词库读取失败' })
-    } finally {
-      if (wordLibAbortRef.current === controller) {
-        wordLibAbortRef.current = null
-        setWordLibLoading(false)
-      }
-    }
-  }
+  function loadRadar(..._args: unknown[]) { dailyPage.reload() }
+  function loadWordLib(..._args: unknown[]) { dailyPage.reload() }
 
   async function loadDistributed() {
     if (!activeGroupId) return
@@ -2072,14 +1995,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       return activeGroup.members.some(member => member.user_id === currentUserId) ? currentUserId : null
     })
   }, [currentUserId, activeGroup])
-  useEffect(() => {
-    if (!isWorkspaceRoute || !activeGroupId) return
-    if (radarLoadedGroupId !== activeGroupId) {
-      radarSectionsRef.current.clear()
-      setRadarData(null)
-    }
-    if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId, true)
-  }, [isWorkspaceRoute,rightTab,activeGroupId,radarDate,tabPage[rightTab],badgeFilter,sortCol,sortDir,radarVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setDistributeRecipients(null); setShowDistributeModal(false) }, [activeGroupId])
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'rankdown') loadSiteRankdown(true) }, [isWorkspaceRoute, rightTab, activeGroupId, rankdownDate,radarVersion]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -2089,11 +2004,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (claimedListRef.current) claimedListRef.current.scrollTop = claimedListRef.current.scrollHeight
   }, [displayedClaims.length])
 
-  useEffect(() => {
-    if (isWorkspaceRoute && rightTab === 'wordLib') void loadWordLib()
-    return () => wordLibAbortRef.current?.abort()
-  }, [isWorkspaceRoute,rightTab,activeGroupId,tabPage.wordLib,wordLibQuery,sortCol,sortDir,radarDate]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => { radarAbortRef.current?.abort(); wordLibAbortRef.current?.abort() }, [])
 
   useEffect(() => {
     if (!isWorkspaceRoute || !activeGroupId || selectedDate !== today) return
@@ -2218,10 +2128,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       })
       if (res.ok) {
         setShowEdit(false)
-        setRadarData(null)
-        setRadarLoadedGroupId(null)
-        radarSectionsRef.current.clear()
-        wordLibGroupRef.current = null
         await loadGroups()
         if (rightTab === 'wordLib') void loadWordLib(true)
         else if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId,true)
@@ -2824,10 +2730,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       )
     }
 
-    if (!radarLoaded || radarLoading) return <Spinner />
+    if (isDailyRadarTab && !radarLoaded && radarLoading) return <Spinner />
+    if (isDailyRadarTab && dailyPage.error) return <div className="py-10 text-center text-sm text-gray-500">该日期资料读取失败，请点击上方重试或切换日期。</div>
 
     if (rightTab === 'volumeRising') {
-      const base_vr = filterByRadarDate(volumeRisingWordsSorted.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
+      const base_vr = volumeRisingWordsSorted
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_vr = sortCol && sortDir ? [...base_vr].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'netChange' ? getNetVolumeChange(a) : sortCol === 'change' ? (a.change??0) : 0
@@ -2882,8 +2789,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
     if (rightTab === 'cross') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const base_cross = filterByRadarDate(crossWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
-        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
+      const base_cross = crossWords
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_cross = sortCol && sortDir ? [...base_cross].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : 0
@@ -2930,8 +2836,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'rank') {
-      const base_rank = filterByRadarDate(rankWordsSorted.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
-        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
+      const base_rank = rankWordsSorted
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_rank = sortCol && sortDir ? [...base_rank].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'rankDays' ? (a.rankDays??0) : 0
@@ -2973,8 +2878,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'streak') {
-      const base_streak = filterByRadarDate(streakWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
-        .filter(w => badgeFilter === 'all' || getStreakBadge(w.streak, w.last_date, yesterday) === badgeFilter)
+      const base_streak = streakWords
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_streak = sortCol && sortDir ? [...base_streak].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'volume' ? (a.volume??0) : sortCol === 'streak' ? (a.streak??0) : 0
@@ -3017,8 +2921,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (rightTab === 'newWords') {
-      const base_new = filterByRadarDate(allNewWords.filter(w => !submittedSet.has(w.keyword)), effectiveRadarDate)
-        .filter(w => badgeFilter === 'all' || getBadge(w.first_date, w.last_date, yesterday) === badgeFilter)
+      const base_new = allNewWords
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted_new = sortCol && sortDir ? [...base_new].sort((a: any, b: any) => {
         const va: any = sortCol === 'date' ? (a.last_date||'') : sortCol === 'count' ? (a.count??0) : sortCol === 'siteCount' ? (a.siteCount??0) : 0
@@ -3096,7 +2999,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={wordLibDataGroupId === activeGroupId ? wordLibTotal : 0} onPage={p => setPage('wordLib', p)} />
+          <Pager page={pg} total={wordLibTotal} onPage={p => setPage('wordLib', p)} />
         </>
       )
     }
@@ -3448,9 +3351,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           </button>
         </div>
       )}
-      {isWorkspaceRoute && radarLoadedGroupId === activeGroupId && radarNotice && ['cross','rank','streak','newWords','volumeRising'].includes(rightTab) && (
-        <div role="status" className={`mb-3 rounded-lg border px-4 py-2 text-xs ${radarNotice.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>{radarNotice.message}</div>
-      )}
 
       {loading ? <Spinner /> : groups.length === 0 ? (
         <div className="card flex flex-col items-center justify-center py-20 text-gray-400">
@@ -3708,7 +3608,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setRadarDate(tab === 'newWords' ? yesterday : ''); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}

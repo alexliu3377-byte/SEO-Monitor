@@ -1,12 +1,14 @@
 'use client'
 
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 import { radarDates } from '@/lib/radar-dates'
+import { useRadarPage } from '@/lib/use-radar-page'
+import { radarTabDate, radarTabScope } from '@/lib/radar-tab-state'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,8 @@ interface VolumeRisingEntry {
   riseDate?: string | null; volumeDate?: string | null; historicalValuesKnown?: boolean
 }
 interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[]; cross?: CrossEntry[] }
+interface WordLibWire { keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string }
+type DailyRadarRow = WordEntry | RankEntry | StreakEntry | VolumeRisingEntry | CrossEntry | WordLibWire
 interface WeightInfo { pc: number; mobile: number; pcChg: number; mobileChg: number }
 interface DetailRow  { date: string; domain: string }
 interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
@@ -247,18 +251,15 @@ const TAB_CONFIG: { key: Tab; label: string }[] = [
 ]
 
 export default function HotRadarPage() {
-  const [data, setData]           = useState<RadarData | null>(null)
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState<string | null>(null)
-  const [radarNotice, setRadarNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
   const [weightNotice, setWeightNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
   const [activeTab, setActiveTab] = useState<Tab>('volumeRising')
   const [minSites, setMinSites]   = useState(1)
   const [minStreak, setMinStreak] = useState(2)
   const [filterSite, setFilterSite]       = useState('')
   const [filterKeyword, setFilterKeyword] = useState('')
-  const [filterDate, setFilterDate]       = useState(() => getMYDate())
-  const [radarTotal, setRadarTotal] = useState(0)
+  const [datesByTab, setDatesByTab] = useState<Record<string,string>>({})
+  const filterDate = radarTabDate(activeTab,datesByTab[radarTabScope(activeTab)])
+  const setFilterDate = (value: string) => setDatesByTab(previous => ({ ...previous,[radarTabScope(activeTab)]: value }))
   const [page, setPage]         = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(50)
   const [weightMap, setWeightMap]     = useState<Map<string, WeightInfo>>(new Map())
@@ -272,14 +273,7 @@ export default function HotRadarPage() {
   const [detailVolumeRisingRows, setDetailVolumeRisingRows] = useState<VolumeRisingDetailRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
-  const [wordLibData, setWordLibData] = useState<(WordEntry & { longTailCount: number })[]>([])
-  const [wordLibLoading, setWordLibLoading] = useState(false)
-  const [wordLibRetry, setWordLibRetry] = useState(0)
-  const [wordLibTotal, setWordLibTotal] = useState(0)
-  const [wordLibDates, setWordLibDates] = useState<string[]>([])
   const [wordLibQuery, setWordLibQuery] = useState({ keyword: '', site: '' })
-  const wordLibAbortRef = useRef<AbortController | null>(null)
-  const [wordLibError, setWordLibError] = useState<string | null>(null)
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [wordLibMinSites, setWordLibMinSites] = useState(1)
@@ -287,6 +281,35 @@ export default function HotRadarPage() {
   const today     = useMemo(() => getMYDate(),    [])
   const yesterday = useMemo(() => getMYDate(-1),  [])
   const effectivePageSize: PageSize = activeTab === 'wordLib' ? 20 : pageSize
+  const pageParams = new URLSearchParams({ tab: activeTab === 'new' ? 'newWords' : activeTab,date: filterDate,
+    page: String(page),pageSize: String(effectivePageSize),q: wordLibQuery.keyword,site: wordLibQuery.site,
+    minSites: String(activeTab === 'wordLib' ? wordLibMinSites : minSites),minStreak: String(minStreak),
+    sort: sortCol || 'date',direction: sortDir || 'desc' })
+  const dailyPage = useRadarPage<DailyRadarRow>(pageParams.toString())
+  const loading = dailyPage.loading && dailyPage.data === null
+  const error = dailyPage.error
+  const radarTotal = dailyPage.total
+  const wordLibTotal = dailyPage.total
+  const wordLibLoading = loading
+  const wordLibError = error
+  const data = useMemo((): RadarData => {
+    const result: RadarData = { newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [] }
+    if (activeTab === 'rank') result.rankWords = (dailyPage.data ?? []) as RankEntry[]
+    else if (activeTab === 'streak') result.streakWords = (dailyPage.data ?? []) as StreakEntry[]
+    else if (activeTab === 'volumeRising') result.volumeRisingWords = (dailyPage.data ?? []) as VolumeRisingEntry[]
+    else if (activeTab === 'new') result.newWords = (dailyPage.data ?? []) as WordEntry[]
+    else if (activeTab === 'cross') result.cross = (dailyPage.data ?? []) as CrossEntry[]
+    return result
+  }, [dailyPage.data,activeTab])
+  const wordLibData = useMemo(() => activeTab === 'wordLib' ? ((dailyPage.data ?? []) as WordLibWire[]).map(row => ({
+    keyword: row.keyword,longTailCount: row.long_tail_count,count: row.long_tail_count,
+    siteCount: row.site_count,sites: row.sites ?? [],last_date: row.last_date,first_date: '',
+  })) : [], [dailyPage.data,activeTab])
+  useEffect(() => {
+    if (dailyPage.data === null) return
+    const lastPage = Math.max(0,Math.ceil(dailyPage.total / effectivePageSize)-1)
+    if (page > lastPage) setPage(lastPage)
+  }, [dailyPage.data,dailyPage.total,effectivePageSize,page])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -449,88 +472,8 @@ export default function HotRadarPage() {
   }
 
   useEffect(() => {
-    if (activeTab === 'wordLib') return
-    const controller = new AbortController()
-    setLoading(true)
-    setError(null)
-    const params = new URLSearchParams({ tab: activeTab === 'new' ? 'newWords' : activeTab,
-      date: filterDate || (activeTab === 'new' ? yesterday : today), page: String(page), pageSize: String(pageSize),
-      q: wordLibQuery.keyword, site: wordLibQuery.site, minSites: String(minSites), minStreak: String(minStreak),
-      sort: sortCol || 'date', direction: sortDir || 'desc' })
-    fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        const body = await r.json()
-        if (!r.ok) throw new Error(body.error || '热词资料读取失败')
-        if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('热词资料格式无效')
-        return body
-      })
-      .then(d => {
-        if (controller.signal.aborted) return
-        setData({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
-          [activeTab === 'rank' ? 'rankWords' : activeTab === 'streak' ? 'streakWords' : activeTab === 'volumeRising' ? 'volumeRisingWords' : activeTab === 'new' ? 'newWords' : activeTab]: d.data })
-        setRadarTotal(d.total)
-        setRadarNotice(null)
-      })
-      .catch(e => { if (!controller.signal.aborted) setError(e.message || '加载失败') })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [activeTab,filterDate,page,pageSize,wordLibQuery,minSites,minStreak,sortCol,sortDir,today,yesterday])
-
-  useEffect(() => {
     void fetchWeights().catch(e => setWeightNotice({ tone: 'warning', message: e instanceof Error ? e.message : '站点权重读取失败，已取得的词仍可查看' }))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (activeTab !== 'wordLib') return
-    wordLibAbortRef.current?.abort()
-    const controller = new AbortController()
-    wordLibAbortRef.current = controller
-    setWordLibLoading(true)
-    setWordLibError(null)
-    const params = new URLSearchParams({
-      tab: 'wordLib',
-      page: String(page), pageSize: '20', q: wordLibQuery.keyword, site: wordLibQuery.site,
-      minSites: String(wordLibMinSites), minLongTail: '2',
-      sort: ['date', 'longTailCount', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
-      direction: sortDir || 'desc',
-    })
-    if (filterDate) params.set('date', filterDate)
-    fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
-      .then(async r => {
-        const body = await r.json()
-        if (!r.ok) throw new Error(body.error || '词库资料读取失败')
-        if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('词库资料格式无效')
-        return body
-      })
-      .then(({ data, total, availableDates }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null; total: number; availableDates: string[] }) => {
-        if (controller.signal.aborted) return
-        setWordLibData((data || []).map(r => {
-          const last_date = r.last_date
-          return {
-            keyword: r.keyword,
-            longTailCount: r.long_tail_count,
-            count: r.long_tail_count,
-            siteCount: r.site_count,
-            sites: r.sites || [],
-            last_date,
-            // “更新词库”本身就是旧词扩出新长尾后的更新线索，不把抓取日
-            // 伪装成首次出现日；列表统一显示“更新”。
-            first_date: '',
-          }
-        }))
-        setWordLibTotal(total)
-        setWordLibDates(availableDates ?? [])
-        const lastPage = Math.max(0, Math.ceil(total / 20) - 1)
-        if (page > lastPage) setPage(lastPage)
-        setWordLibError(null)
-      })
-      .catch(error => {
-        if (controller.signal.aborted) return
-        setWordLibError(error instanceof Error ? error.message : '词库读取失败')
-      })
-      .finally(() => { if (!controller.signal.aborted) setWordLibLoading(false) })
-    return () => controller.abort()
-  }, [activeTab, page, wordLibQuery, wordLibMinSites, filterDate, sortCol, sortDir, wordLibRetry, today, yesterday])
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -660,7 +603,6 @@ export default function HotRadarPage() {
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
     setPage(0)
-    setFilterDate(tab === 'new' || tab === 'wordLib' ? yesterday : today)
     setSortCol(tab === 'volumeRising' ? 'netChange' : 'date')
     setSortDir('desc')
   }
@@ -744,25 +686,12 @@ export default function HotRadarPage() {
         ))}
       </div>
 
-      {(weightNotice || radarNotice) && activeTab !== 'wordLib' && (
-        <div role="status" className={`mb-3 rounded-lg border px-4 py-2 text-xs ${weightNotice || radarNotice?.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-100 bg-slate-50 text-slate-500'}`}>
-          {weightNotice ? [radarNotice?.tone === 'warning' ? radarNotice.message : null, weightNotice.message].filter(Boolean).join(' ') : radarNotice?.message}
+      {weightNotice && activeTab !== 'wordLib' && (
+        <div role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          {weightNotice.message}
         </div>
       )}
       <div className="card">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-3">
-            <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            聚合中...
-          </div>
-        ) : error ? (
-          <div className="p-6">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-600 text-sm">{error}</div>
-          </div>
-        ) : (
           <>
             {/* Filter bar */}
             <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
@@ -841,6 +770,10 @@ export default function HotRadarPage() {
             </div>
 
             {/* Tables — 统一列宽：日期 w-24 | 关键词 w-52 | 数字列 w-24 each | 站点 auto | 操作 w-16 */}
+            {loading ? <div role="status" className="py-16 text-center text-sm text-gray-400">加载中...</div>
+              : error ? <div role="alert" className="flex items-center justify-between gap-3 p-4 text-sm text-red-600">
+                <span>{error}</span><button type="button" className="btn-secondary" onClick={dailyPage.reload}>重试</button>
+              </div> : <>
             <div className="overflow-x-auto [&_td]:py-2 [&_th]:py-2">
 
               {/* 交叉词：7列 */}
@@ -1133,7 +1066,7 @@ export default function HotRadarPage() {
               {activeTab === 'wordLib' && wordLibError && (
                 <div role="alert" className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   <span>{wordLibError}，已有资料会保留。</span>
-                  <button className="btn-secondary whitespace-nowrap" disabled={wordLibLoading} onClick={() => setWordLibRetry(value => value + 1)}>重试</button>
+                  <button className="btn-secondary whitespace-nowrap" disabled={wordLibLoading} onClick={dailyPage.reload}>重试</button>
                 </div>
               )}
               {activeTab === 'wordLib' && wordLibLoading && (
@@ -1198,8 +1131,8 @@ export default function HotRadarPage() {
 
             </div>
             <PaginationBar page={page} total={activeTotal} pageSize={effectivePageSize} onPageChange={setPage} />
+            </>}
           </>
-        )}
       </div>
 
       {/* 查看 Detail Modal */}
