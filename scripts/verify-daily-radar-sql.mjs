@@ -264,7 +264,37 @@ try {
   assert.equal(noBaseline.netChange,null) // unknown baseline is not zero
   assert.equal((await db.query("select has_function_privilege('authenticated','public.refresh_daily_radar_cache(date,text,text[],text[])','execute') as allowed")).rows[0].allowed,false)
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
-  console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
+  // Upgrade the existing function, preserving its ACL and pagination semantics.
+  await db.exec(await readFile(new URL('../supabase/migrations/20261019_radar_yesterday_all.sql', import.meta.url),'utf8'))
+  for (const tab of ['cross','wordLib']) {
+    const first=await windowPage(tab), ungrouped=await windowPage(tab,'all',null)
+    assert.equal(first.cachedDates.length,6)
+    assert.ok(first.cachedDates.every(day=>day<today))
+    assert.equal(first.total,tab==='wordLib'?18:14)
+    assert.equal(ungrouped.total,18)
+    const datedRows=[]
+    for(let pg=0;pg<5;pg++)datedRows.push(...(await windowPage(tab,'all',null,pg)).data)
+    assert.equal(datedRows.length,18)
+    assert.ok(datedRows.every(row=>row.last_date<today))
+    assert.equal(new Set(datedRows.map(row=>row.keyword+'|'+row.last_date)).size,18)
+  }
+  const yesterdayNew=[]
+  for(let pg=0;pg<3;pg++)yesterdayNew.push(...(await displayPage('newWords',pg)).data.map(row=>row.keyword))
+  assert.deepEqual(yesterdayNew,['older-new-big','older-new-small','older-update-big'])
+  assert.equal((await displayPage('newWords',0,'date','desc',null,'updated')).total,1)
+  assert.equal((await displayPage('newWords',0,'date','desc',older)).total,3)
+  assert.equal((await displayPage('newWords',0,'date','desc',today)).total,4) // explicit diagnostic date unchanged
+  assert.equal((await windowPage('rank')).cachedDates.length,7)
+  assert.equal((await windowPage('streak')).cachedDates.length,7)
+  assert.deepEqual((await displayPage('volumeRising')).data.map(row=>row.keyword),['today-volume-big','today-volume-small'])
+  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload)
+    select data_date,'today-only',payload from radar_daily_cache where scope_key='all-regression' and data_date=$1::date`,[today])
+  assert.equal((await db.query("select get_daily_radar_page(null,'today-only','cross') as result")).rows[0].result.cacheReady,false)
+  for(const role of ['anon','authenticated']) {
+    assert.equal((await db.query(`select has_function_privilege($1,
+      'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
+  }
+  console.log(JSON.stringify({dailyRadarSql:true,yesterdayAllExcludesToday:true,todayAllIncludesToday:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
     liveCompletionFiltering:true,legacyKeywordGuardReproduced:true,legacyKeywordGuardRetired:true,existingTasksPreserved:true,
     groupedCandidates:30000,allSevenDates:true,dateThenBadgeOrder:true,dateThenVolumeOrder:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
     legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))

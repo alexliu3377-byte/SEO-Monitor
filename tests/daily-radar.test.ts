@@ -20,10 +20,25 @@ test('all is a seven-day read selection, not a valid cache-build date', () => {
   assert.equal(validRadarDate('all',now),false)
   assert.equal(validRadarDateSelection('2026-10-13',now),true)
   assert.deepEqual(radarDateOptions(now),[
-    {value:'all',label:'今天（全部）'},
+    {value:'all',label:'今日（全部）'},
     ...['2026-10-18','2026-10-17','2026-10-16','2026-10-15','2026-10-14','2026-10-13'].map(date=>({value:date,label:date}))
   ])
   for(const value of ['', 'ALL', '2026-10-12', '2026-10-20']) assert.equal(validRadarDateSelection(value,now),false)
+})
+
+test('publication-based tabs label the retained-date aggregate as yesterday, not a single-day selection', () => {
+  const now = Date.parse('2026-10-18T16:00:00Z')
+  for (const tab of ['cross','newWords','new','wordLib']) {
+    const options = radarDateOptions(now,tab)
+    assert.deepEqual(options[0],{value:'all',label:'昨日（全部）'})
+    assert.equal(options.length,7)
+    assert.equal(options[1].value,'2026-10-18')
+    assert.equal(options.at(-1)?.value,'2026-10-13')
+    assert.ok(!options.some(option=>option.value==='2026-10-19'))
+  }
+  for (const tab of ['volumeRising','rank','streak']) {
+    assert.deepEqual(radarDateOptions(now,tab)[0],{value:'all',label:'今日（全部）'})
+  }
 })
 
 test('update claims match pages, not another page with the same keyword', () => {

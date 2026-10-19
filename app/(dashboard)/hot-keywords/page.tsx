@@ -1,6 +1,7 @@
 'use client'
 
 import { PageNumberInput } from '@/components/page-number-input'
+import { RadarDateFilter } from '@/components/radar-date-filter'
 
 import { useEffect, useState, useMemo } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
@@ -245,10 +246,10 @@ function SiteBadges({ sites, weightMap, idMap, colorMap }: {
 const TAB_CONFIG: { key: Tab; label: string }[] = [
   { key: 'volumeRising', label: '搜索量上涨' },
   { key: 'cross',   label: '交叉词' },
-  { key: 'rank',    label: '竞品涨排名' },
-  { key: 'streak',  label: '连续上涨词' },
   { key: 'new',     label: '共新增词' },
   { key: 'wordLib', label: '更新词库' },
+  { key: 'rank',    label: '竞品涨排名' },
+  { key: 'streak',  label: '连续上涨词' },
 ]
 
 export default function HotRadarPage() {
@@ -487,7 +488,7 @@ export default function HotRadarPage() {
     ? ((dailyPage.data ?? []) as StreakEntry[]).map(row => ({ ...row,domains: [row.domain] }))
     : dailyPage.data ?? []
   const activeList = pagedList
-  const availableDates = radarDateOptions()
+  const availableDates = radarDateOptions(Date.now(), activeTab)
   const activeTotal = dailyPage.total
 
   function handleTabChange(tab: Tab) {
@@ -603,13 +604,8 @@ export default function HotRadarPage() {
                   placeholder="搜索..."
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none w-32" />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-400">资料日期</span>
-                <select aria-label="筛选资料日期" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0) }}
-                  className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
-                  {availableDates.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </div>
+              <RadarDateFilter value={filterDate} options={availableDates}
+                onChange={value => { setFilterDate(value); setPage(0) }} />
               <div className="flex items-center gap-1.5">
                 {activeTab === 'wordLib' ? (
                   <>

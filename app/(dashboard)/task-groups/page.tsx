@@ -1,6 +1,7 @@
 'use client'
 
 import { PageNumberInput } from '@/components/page-number-input'
+import { RadarDateFilter } from '@/components/radar-date-filter'
 
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 
@@ -926,10 +927,10 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const volumeRisingWordsSorted = radarData?.volumeRisingWords ?? []
   const allNewWords = radarData?.newWords ?? []
 
-  const radarAvailableDates = radarDateOptions()
+  const radarAvailableDates = radarDateOptions(Date.now(), rightTab)
 
-  // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
-  // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
+  // Publication-based tabs aggregate only through yesterday; other signals include today.
+  // Exact dates and each tab's selection stay independent of cache freshness.
   const showRadarDateFilter = (['volumeRising', 'cross', 'rank', 'streak', 'newWords', 'wordLib'] as RightTab[]).includes(rightTab)
   const showRadarTypeFilter = (['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
 
@@ -2924,18 +2925,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       ).sort((a, b) => b.volume - a.volume)
       return (
         <div>
-          {/* Date picker */}
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-xs text-gray-400 flex-shrink-0">日期</span>
-            <input aria-label="选择日期" type="date" value={selectedDate}
-              min={availableDates[availableDates.length - 1] || ''}
-              max={availableDates[0] || today}
-              onChange={e => { setRankdownDate(e.target.value); setTabPage(prev => ({ ...prev, rankdown: 0 })) }}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-green-400 text-gray-700 cursor-pointer" />
-            {dateRows.length > 0 && (
-              <span className="text-[10px] text-gray-300">m端下跌词 {dateRows.length} 条</span>
-            )}
-          </div>
+          {dateRows.length > 0 && <p className="mb-2 text-[10px] text-gray-400">m端下跌词 {dateRows.length} 条</p>}
           {availableDates.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">该日期没有可显示的m端下跌词</div>
           ) : dateRows.length === 0 ? (
@@ -3009,8 +2999,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const RIGHT_TABS: [RightTab, string][] = [
     ['distribute', '分发词'],
     ['recommend', '今日推荐'],
-    ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'], ['rank', '竞品涨排名'],
-    ['streak', '连续上涨词'], ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rankdown', '跌词更新'],
+    ['search', '搜索量查询'], ['volumeRising', '搜索量上涨'], ['cross', '交叉词'],
+    ['newWords', '共新增词'], ['wordLib', '更新词库'], ['rank', '竞品涨排名'],
+    ['streak', '连续上涨词'], ['rankdown', '跌词更新'],
   ]
   function SourceTag({ s }: { s: string }) {
     const map: Record<string, string> = { '竞品涨排名': '竞品', '连续上涨词': '连涨', '共新增词': '新增', '搜索量查询': '搜索', '交叉词': '交叉', '更新词库': '词库', '手动添加': '手动', '批量添加': '批量', '更新推荐': '更新推荐', '规则推荐': '规则推荐', '竞品规则推荐': '竞品规则', '跌词更新': '跌词', '跌排更新': '跌排', '涨排更新': '涨排', '搜索上涨': '搜涨', '分发词': '分发' }
@@ -3524,17 +3515,16 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                     </button>
                   ))}
                 </div>
-                {(showRadarDateFilter || rightTab === 'wordLib') && (
+                {(showRadarDateFilter || rightTab === 'rankdown') && (
                   <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-gray-50/60 px-4 py-2.5">
                     {showRadarDateFilter && (
-                      <label className="flex items-center gap-1.5 text-xs text-gray-400">
-                        资料日期
-                        <select aria-label="筛选资料日期" value={effectiveRadarDate}
-                          onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
-                          className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-                          {radarAvailableDates.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                        </select>
-                      </label>
+                      <RadarDateFilter value={effectiveRadarDate} options={radarAvailableDates}
+                        onChange={value => { setRadarDate(value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }} />
+                    )}
+                    {rightTab === 'rankdown' && (
+                      <RadarDateFilter kind="calendar" value={rankdownDate || today}
+                        min={radarDates().at(-1) || today} max={today}
+                        onChange={value => { setRankdownDate(value); setTabPage(current => ({ ...current, rankdown: 0 })) }} />
                     )}
                     {showRadarTypeFilter && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-400">

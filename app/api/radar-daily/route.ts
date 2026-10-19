@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import type { UserRole } from '@/lib/user-context'
-import { DAILY_RADAR_TABS, radarDate, radarDates, radarScope } from '@/lib/radar-daily'
+import { DAILY_RADAR_TABS, radarDates, radarScope } from '@/lib/radar-daily'
 import { validRadarDateSelection } from '@/lib/radar-dates'
+import { radarTabDate } from '@/lib/radar-tab-state'
 
 export const maxDuration = 60
 export async function GET(request: Request) {
@@ -11,7 +12,7 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const params = new URL(request.url).searchParams
   const tab = params.get('tab') || 'volumeRising'
-  const date = params.get('date') || (tab === 'newWords' || tab === 'wordLib' ? radarDate(-1) : 'all')
+  const date = params.get('date') || radarTabDate(tab)
   if (!(DAILY_RADAR_TABS as readonly string[]).includes(tab) || !validRadarDateSelection(date)) {
     return NextResponse.json({ error: '请选择含今天在内最近7天的有效资料日期' }, { status: 400 })
   }
