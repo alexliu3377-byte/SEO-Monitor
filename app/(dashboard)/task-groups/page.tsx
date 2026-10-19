@@ -2731,7 +2731,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
 
     if (isDailyRadarTab && !radarLoaded && radarLoading) return <Spinner />
-    if (isDailyRadarTab && dailyPage.error) return <div className="py-10 text-center text-sm text-gray-500">该日期资料读取失败，请点击上方重试或切换日期。</div>
+    if (isDailyRadarTab && dailyPage.error && !radarLoaded) return <div className="py-10 text-center text-sm text-gray-500">该日期资料读取失败，请点击上方重试或切换日期。</div>
 
     if (rightTab === 'volumeRising') {
       const base_vr = volumeRisingWordsSorted

@@ -25,8 +25,9 @@ export function useRadarPage<T>(query: string | null, refreshVersion = 0) {
         if (!controller.signal.aborted) setState({ key: query, ...body, loading: false, error: null })
       })
       .catch(error => {
-        if (!controller.signal.aborted) setState({ key: query, data: null, total: 0, loading: false,
-          error: error instanceof Error ? error.message : '该日期资料读取失败，请重试' })
+        if (!controller.signal.aborted) setState(previous => ({ key: query,
+          data: previous.key === query ? previous.data : null,total: previous.key === query ? previous.total : 0,loading: false,
+          error: error instanceof Error ? error.message : '该日期资料读取失败，请重试' }))
       })
     return () => controller.abort()
   }, [query, version, refreshVersion])

@@ -693,6 +693,9 @@ export default function HotRadarPage() {
       )}
       <div className="card">
           <>
+            {error && dailyPage.data !== null && <div role="alert" className="flex items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+              <span>{error}；保留当前已取得的一页资料。</span><button type="button" className="btn-secondary" onClick={dailyPage.reload}>重试</button>
+            </div>}
             {/* Filter bar */}
             <div className="flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-100 bg-gray-50/50">
               <div className="flex items-center gap-1.5">
@@ -771,7 +774,7 @@ export default function HotRadarPage() {
 
             {/* Tables — 统一列宽：日期 w-24 | 关键词 w-52 | 数字列 w-24 each | 站点 auto | 操作 w-16 */}
             {loading ? <div role="status" className="py-16 text-center text-sm text-gray-400">加载中...</div>
-              : error ? <div role="alert" className="flex items-center justify-between gap-3 p-4 text-sm text-red-600">
+              : error && dailyPage.data === null ? <div role="alert" className="flex items-center justify-between gap-3 p-4 text-sm text-red-600">
                 <span>{error}</span><button type="button" className="btn-secondary" onClick={dailyPage.reload}>重试</button>
               </div> : <>
             <div className="overflow-x-auto [&_td]:py-2 [&_th]:py-2">

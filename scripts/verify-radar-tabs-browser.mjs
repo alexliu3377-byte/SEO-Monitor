@@ -71,6 +71,9 @@ try{
   await page.getByLabel('筛选资料日期').selectOption(date(-3));await visible(`rank|${date(-3)}|0`)
   await choose('更新词库');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-2))
   await visible(`wordLib|${date(-2)}|0`);await choose('下一页');await visible(`wordLib|${date(-2)}|20`)
+  failTab='wordLib';await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
+  await page.getByRole('alert').filter({hasText:'测试该来源暂时不可用'}).waitFor({state:'visible'})
+  await visible(`wordLib|${date(-2)}|20`);failTab=''
   await choose('竞品涨排名');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-3));await visible(`rank|${date(-3)}|0`)
   failTab='cross';await choose('交叉词');await visible('该日期资料读取失败，请点击上方重试或切换日期。')
   await choose('更新词库');await visible(`wordLib|${date(-2)}|0`);failTab=''
