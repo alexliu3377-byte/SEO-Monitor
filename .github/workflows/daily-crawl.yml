@@ -309,6 +309,28 @@ jobs:
             npx tsx scripts/crawl.ts --finalize --step="$STEP" --date="$DATA_DATE" --total-groups="$TOTAL" ${SITE:+--site=$SITE}
           fi
 
+  # First usable morning pass; the complete post-index pass rebuilds again.
+  early_radar_refresh:
+    needs: [setup, finalize]
+    if: ${{ always() && needs.finalize.result == 'success' && needs.setup.outputs.site == '' && (needs.setup.outputs.step == 'keywords' || needs.setup.outputs.step == 'all') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: daily-radar-cache-rebuild
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Refresh each recent date after keyword collection
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/refresh-daily-radar-cache.ts --days=7
+
   # Whichever source step actually finishes last can claim the derived work.
   # Missing prerequisites are a normal skip, not an hour-long polling job.
   cache_dependencies:

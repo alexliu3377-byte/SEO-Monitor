@@ -5,6 +5,7 @@ import type { UserRole } from '@/lib/user-context'
 import { normalizeDomains, normalizeTaskGroupMembers } from '@/lib/task-group-data'
 import { canAccessTaskGroup, canAdminUseGroupSites } from '@/lib/task-group-access'
 import { refreshGroupHotRadarCache } from '@/lib/group-hot-radar-cache'
+import { dispatchGitHubWorkflow } from '@/lib/github-actions'
 
 async function getCaller() {
   const supabase = await createClient()
@@ -96,6 +97,13 @@ export async function PUT(
     // Group settings are already saved. Keep the prior cache available and let
     // /api/hot-radar rebuild this group on its next read.
     console.error('Unable to refresh edited group hot radar cache', { groupId: id, error })
+  }
+  if (JSON.stringify(previousGroup.rank_domains) !== JSON.stringify(normalizeDomains(rank_domains))
+    || JSON.stringify(previousGroup.new_domains) !== JSON.stringify(normalizeDomains(new_domains))) {
+    try {
+      const queued = await dispatchGitHubWorkflow('radar-daily-cache.yml', { date: '' })
+      if (!queued.ok) console.warn('Daily radar rebuild dispatch unavailable', { status: queued.status })
+    } catch { console.warn('Daily radar rebuild dispatch failed; scheduled pass will recover it') }
   }
   return NextResponse.json({ success: true })
 }

@@ -6,6 +6,7 @@ import { buildGroupMaps } from '@/lib/company-groups'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
+import { radarDates } from '@/lib/radar-dates'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -31,12 +32,12 @@ interface StreakGrouped {
   last_date: string; first_date: string
 }
 interface VolumeRisingEntry {
-  keyword: string; volume: number; prevVolume: number | null; change: number
+  keyword: string; volume: number; prevVolume: number | null; change: number | null
   baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
-  riseDate?: string | null; volumeDate?: string | null
+  riseDate?: string | null; volumeDate?: string | null; historicalValuesKnown?: boolean
 }
-interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[] }
+interface RadarData { newWords: WordEntry[]; rankWords: RankEntry[]; streakWords: StreakEntry[]; volumeRisingWords: VolumeRisingEntry[]; cross?: CrossEntry[] }
 interface WeightInfo { pc: number; mobile: number; pcChg: number; mobileChg: number }
 interface DetailRow  { date: string; domain: string }
 interface VolumeRisingDetailRow { date: string; domain: string; type: 'rankup' | 'rankdown' }
@@ -51,26 +52,19 @@ function getMYDate(offsetDays = 0): string {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
 
-function formatSignedVolume(value: number): string {
+function formatSignedVolume(value: number | null): string {
   if (!value) return '—'
   return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
 }
 
 function getNetVolumeChange(row: VolumeRisingEntry): number {
-  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
+  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change ?? 0, 0)
 }
 
 function getBaselineVolume(row: VolumeRisingEntry): number {
   return Number.isFinite(row.baselineVolume)
     ? row.baselineVolume
-    : row.prevVolume ?? Math.max(0, row.volume - row.change)
-}
-
-// 更新词库按“哪一天的竞品资料”展示。它的 RPC 历史上用 discovered_at
-// （今天凌晨抓到），而日常抓取实际处理的是昨日资料，因此当天抓取批次应显示为昨日。
-function normalizeWordLibDate(value: unknown, today: string, yesterday: string): string {
-  const date = value ? String(value).slice(0, 10) : ''
-  return date === today ? yesterday : date
+    : row.prevVolume ?? Math.max(0, row.volume - (row.change ?? 0))
 }
 
 type Badge = 'new' | 'updated' | null
@@ -263,7 +257,8 @@ export default function HotRadarPage() {
   const [minStreak, setMinStreak] = useState(2)
   const [filterSite, setFilterSite]       = useState('')
   const [filterKeyword, setFilterKeyword] = useState('')
-  const [filterDate, setFilterDate]       = useState('')
+  const [filterDate, setFilterDate]       = useState(() => getMYDate())
+  const [radarTotal, setRadarTotal] = useState(0)
   const [page, setPage]         = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(50)
   const [weightMap, setWeightMap]     = useState<Map<string, WeightInfo>>(new Map())
@@ -298,7 +293,7 @@ export default function HotRadarPage() {
       const keyword = filterKeyword.trim()
       const site = filterSite.trim()
       setWordLibQuery(current => current.keyword === keyword && current.site === site ? current : { keyword, site })
-      if (activeTab === 'wordLib') setPage(0)
+      setPage(0)
     }, 300)
     return () => window.clearTimeout(timer)
   }, [filterKeyword, filterSite, activeTab])
@@ -454,20 +449,34 @@ export default function HotRadarPage() {
   }
 
   useEffect(() => {
+    if (activeTab === 'wordLib') return
+    const controller = new AbortController()
     setLoading(true)
-    fetch('/api/hot-radar')
+    setError(null)
+    const params = new URLSearchParams({ tab: activeTab === 'new' ? 'newWords' : activeTab,
+      date: filterDate || (activeTab === 'new' ? yesterday : today), page: String(page), pageSize: String(pageSize),
+      q: wordLibQuery.keyword, site: wordLibQuery.site, minSites: String(minSites), minStreak: String(minStreak),
+      sort: sortCol || 'date', direction: sortDir || 'desc' })
+    fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
       .then(async r => {
         const body = await r.json()
         if (!r.ok) throw new Error(body.error || '热词资料读取失败')
-        if (!Array.isArray(body.newWords) || !Array.isArray(body.rankWords) || !Array.isArray(body.streakWords) || !Array.isArray(body.volumeRisingWords)) throw new Error('热词资料格式无效')
+        if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('热词资料格式无效')
         return body
       })
       .then(d => {
-        setData(d)
-        setRadarNotice(radarCacheNotice(d.cache))
+        if (controller.signal.aborted) return
+        setData({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
+          [activeTab === 'rank' ? 'rankWords' : activeTab === 'streak' ? 'streakWords' : activeTab === 'volumeRising' ? 'volumeRisingWords' : activeTab === 'new' ? 'newWords' : activeTab]: d.data })
+        setRadarTotal(d.total)
+        setRadarNotice(null)
       })
-      .catch(e => setError(e.message || '加载失败'))
-      .finally(() => setLoading(false))
+      .catch(e => { if (!controller.signal.aborted) setError(e.message || '加载失败') })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [activeTab,filterDate,page,pageSize,wordLibQuery,minSites,minStreak,sortCol,sortDir,today,yesterday])
+
+  useEffect(() => {
     void fetchWeights().catch(e => setWeightNotice({ tone: 'warning', message: e instanceof Error ? e.message : '站点权重读取失败，已取得的词仍可查看' }))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -479,13 +488,14 @@ export default function HotRadarPage() {
     setWordLibLoading(true)
     setWordLibError(null)
     const params = new URLSearchParams({
+      tab: 'wordLib',
       page: String(page), pageSize: '20', q: wordLibQuery.keyword, site: wordLibQuery.site,
       minSites: String(wordLibMinSites), minLongTail: '2',
       sort: ['date', 'longTailCount', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
       direction: sortDir || 'desc',
     })
     if (filterDate) params.set('date', filterDate)
-    fetch(`/api/wordlib?${params}`, { signal: controller.signal })
+    fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
       .then(async r => {
         const body = await r.json()
         if (!r.ok) throw new Error(body.error || '词库资料读取失败')
@@ -495,7 +505,7 @@ export default function HotRadarPage() {
       .then(({ data, total, availableDates }: { data: Array<{keyword: string; long_tail_count: number; site_count: number; sites: string[]; last_date: string}> | null; total: number; availableDates: string[] }) => {
         if (controller.signal.aborted) return
         setWordLibData((data || []).map(r => {
-          const last_date = normalizeWordLibDate(r.last_date, today, yesterday)
+          const last_date = r.last_date
           return {
             keyword: r.keyword,
             longTailCount: r.long_tail_count,
@@ -512,7 +522,6 @@ export default function HotRadarPage() {
         setWordLibDates(availableDates ?? [])
         const lastPage = Math.max(0, Math.ceil(total / 20) - 1)
         if (page > lastPage) setPage(lastPage)
-        if (filterDate && !availableDates?.includes(filterDate)) { setFilterDate(''); setPage(0) }
         setWordLibError(null)
       })
       .catch(error => {
@@ -559,7 +568,7 @@ export default function HotRadarPage() {
     return {
       newWords:    sortByDate(nw, yesterday, (a, b) => b.count - a.count || b.siteCount - a.siteCount),
       rankWords:   sortByDate(rw, yesterday, (a, b) => b.volume - a.volume || b.siteCount - a.siteCount),
-      crossWords:  sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
+      crossWords:  data.cross ?? sortByDate(cw, yesterday, (a, b) => (b.volume ?? 0) - (a.volume ?? 0)),
       streakWords: data.streakWords || [],
       // 搜索量趋势按相对追踪起点的累计增加量排序；本次变化只用来
       // 判断最近是否适合更新，不再把回落但仍净增的词丢掉。
@@ -603,9 +612,7 @@ export default function HotRadarPage() {
     filteredStreakWords,
   [filtered, activeTab, wordLibData, filteredStreakWords])
 
-  const availableDates = useMemo(() => activeTab === 'wordLib' ? wordLibDates : Array.from(new Set(
-    baseList.map(row => row.last_date).filter(Boolean),
-  )).sort((a, b) => b.localeCompare(a)), [baseList, activeTab, wordLibDates])
+  const availableDates = radarDates()
 
   const activeList = useMemo(() => {
     // Search, date, site count and sorting are applied to the whole cache in
@@ -647,13 +654,13 @@ export default function HotRadarPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseList, filterSite, filterKeyword, filterDate, sortCol, sortDir, activeTab, wordLibData])
 
-  const pagedList = activeTab === 'wordLib' ? activeList : activeList.slice(page * effectivePageSize, (page + 1) * effectivePageSize)
-  const activeTotal = activeTab === 'wordLib' ? wordLibTotal : activeList.length
+  const pagedList = activeList
+  const activeTotal = activeTab === 'wordLib' ? wordLibTotal : radarTotal
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
     setPage(0)
-    setFilterDate(tab === 'new' || tab === 'wordLib' ? yesterday : '')
+    setFilterDate(tab === 'new' || tab === 'wordLib' ? yesterday : today)
     setSortCol(tab === 'volumeRising' ? 'netChange' : 'date')
     setSortDir('desc')
   }
@@ -717,7 +724,7 @@ export default function HotRadarPage() {
     <div className="p-6">
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-gray-900">热词雷达</h1>
-        <p className="text-gray-400 text-sm mt-0.5">近30天多竞品同时关注的词，捕捉趋势机会</p>
+        <p className="text-gray-400 text-sm mt-0.5">按日期查看近7日及今日的竞品信号，捕捉趋势机会</p>
       </div>
 
       {/* Tab bar */}
@@ -777,7 +784,6 @@ export default function HotRadarPage() {
                 <span className="text-xs text-gray-400">资料日期</span>
                 <select aria-label="筛选资料日期" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0) }}
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
-                  <option value="">近30天全部</option>
                   {availableDates.map(date => <option key={date} value={date}>{date}</option>)}
                 </select>
               </div>
@@ -995,7 +1001,7 @@ export default function HotRadarPage() {
                             </span>
                           </td>
                           <td className="table-td text-center">
-                            <span className={`font-semibold ${w.change > 0 ? 'text-green-600' : w.change < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '暂无上次数值' : `上次 ${fmtVolume(w.prevVolume)} → 当前 ${fmtVolume(w.volume)}`}>{formatSignedVolume(w.change)}</span>
+                            <span className={`font-semibold ${(w.change ?? 0) > 0 ? 'text-green-600' : (w.change ?? 0) < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '该次历史数值未保存' : `上次 ${fmtVolume(w.prevVolume)} → 当前 ${fmtVolume(w.volume)}`}>{formatSignedVolume(w.change)}</span>
                           </td>
                           <td className="table-td text-center">
                             <span className="font-semibold text-gray-900">{fmtVolume(w.volume)}</span>
@@ -1228,6 +1234,7 @@ export default function HotRadarPage() {
                         <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVolume(detailVolumeEntry.volume)}</p>
                         <p className="mt-0.5 text-[11px] text-gray-400">采集：{detailVolumeEntry.volumeDate?.replaceAll('-', '/') || '未记录'}</p>
                         <p className="mt-0.5 text-[11px] text-gray-400">发现上涨：{formatVolumeRiseDate(detailVolumeEntry.last_date)}</p>
+                        {detailVolumeEntry.historicalValuesKnown === false && <p className="mt-1 text-[11px] text-gray-500">该次历史数值未保存，以上数值来自标注的采集日期。</p>}
                       </div>
                     </div>
                   )}

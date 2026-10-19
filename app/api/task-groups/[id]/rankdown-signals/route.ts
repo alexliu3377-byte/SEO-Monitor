@@ -4,6 +4,8 @@ import { fetchAllRows } from '@/lib/supabase-paginate'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import { normalizeDomains } from '@/lib/task-group-data'
 import type { UserRole } from '@/lib/user-context'
+import { radarDate, radarDates, validRadarDate } from '@/lib/radar-dates'
+import { normalizeTaskUrl } from '@/lib/task-claim-identity'
 
 interface RankdownSignalRow {
   keyword: string
@@ -15,14 +17,12 @@ interface RankdownSignalRow {
   title: string | null
 }
 
-function malaysiaDate(offsetDays = 0) {
-  return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
-}
-
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authClient = await createClient()
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const date = new URL(req.url).searchParams.get('date') || radarDate()
+  if (!validRadarDate(date)) return NextResponse.json({ error: '请选择近7日或今日的资料日期' }, { status: 400 })
 
   const { id: groupId } = await params
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,23 +60,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (siteIds.length === 0) return NextResponse.json({ rows: [] })
 
   try {
-    const since = malaysiaDate(-30)
     const rows = await fetchAllRows<RankdownSignalRow>((from, to) => service
-      .from('keyword_signal_rollup')
-      .select('keyword, stat_date:last_seen, rank_position:latest_rank_position, prev_rank:latest_prev_rank, volume:max_volume, url:latest_url, title:latest_title')
+      .from('site_keyword_ranks')
+      .select('keyword,stat_date,rank_position,prev_rank,volume,url,title')
       .in('site_id', siteIds)
+      .eq('platform','mobile')
       .eq('type', 'rankdown')
-      .gte('last_seen', since)
-      .order('last_seen', { ascending: false })
-      .order('max_volume', { ascending: false })
+      .eq('stat_date', date)
+      .order('volume', { ascending: false })
       .order('site_id', { ascending: true })
       .order('keyword', { ascending: true })
       .range(from, to))
 
-    return NextResponse.json(
-      { rows },
-      { headers: { 'Cache-Control': 'private, max-age=60' } },
-    )
+    const completed = await fetchAllRows<{ page_url: string | null }>((from,to) => service
+      .from('member_claimed_keywords').select('page_url').eq('group_id',groupId).eq('status','submitted')
+      .gte('submitted_at',`${date}T00:00:00+08:00`).not('page_url','is',null)
+      .order('id').range(from,to))
+    const urls = new Set(completed.map(row=>normalizeTaskUrl(row.page_url)).filter(Boolean))
+    return NextResponse.json({ rows: rows.filter(row=>!urls.has(normalizeTaskUrl(row.url))),date,availableDates:radarDates() },
+      { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('Rankdown signals load failed', { groupId, error })
     return NextResponse.json({ error: 'Unable to load rankdown signals' }, { status: 500 })

@@ -243,14 +243,11 @@ export async function POST(
   // just the caller) — 2026-07-29: previously only checked the caller's own
   // claims, so two different members could unknowingly both claim and work on
   // the same keyword. Same keyword + same day is now reserved group-wide.
-  const { data: existing } = await service
-    .from('member_claimed_keywords')
-    .select('id, user_id')
-    .eq('group_id', groupId)
-    .eq('keyword', keyword)
-    .eq('claimed_date', claimedDate)
-    .neq('status', 'dismissed')
-    .maybeSingle()
+  const { data: existing, error: identityError } = await service.rpc('find_active_task_claim', {
+    p_group: groupId, p_date: claimedDate, p_keyword: keyword, p_url: page_url || '',
+    p_operation: operation_type || '', p_source: storedSource,
+  })
+  if (identityError) return NextResponse.json({ error: '任务认领状态读取失败，请重试' }, { status: 503 })
 
   if (existing) {
     let claimedByName = '其他组员'
@@ -320,7 +317,7 @@ export async function POST(
     return NextResponse.json({ error: '这个分发词已移除，请刷新列表' }, { status: 404 })
   }
   if (error?.code === '23505') {
-    return NextResponse.json({ error: '这个词今天已经被组内其他成员认领了' }, { status: 409 })
+    return NextResponse.json({ error: '这个页面或关键词今天已经被组内成员认领了' }, { status: 409 })
   }
   if (error) {
     console.error('[claimed POST] insert failed', {
@@ -433,6 +430,7 @@ export async function PATCH(
   if (error?.code === '23505' && error.message?.includes('DUPLICATE_NEW_SUBMISSION')) {
     return NextResponse.json({ error: repeatedNewMessage(nextClaim.keyword), claimIds: [claimId] }, { status: 409 })
   }
+  if (error?.code === '23505') return NextResponse.json({ error: '这个页面或关键词今天已经被组内成员认领了' }, { status: 409 })
   if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   if (!updated) return NextResponse.json({ error: 'Claim not found or not editable' }, { status: 404 })
   return NextResponse.json({ success: true })

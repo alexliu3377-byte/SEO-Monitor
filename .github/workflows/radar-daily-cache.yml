@@ -1,0 +1,35 @@
+name: Daily Radar Backfill
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: Optional selected date YYYY-MM-DD; leave empty to rebuild seven previous dates and today
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: daily-radar-cache-rebuild
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Build all sites and every unique group scope, one date at a time
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RADAR_DATE: ${{ inputs.date }}
+        run: |
+          if [ -n "$RADAR_DATE" ]; then
+            npx tsx scripts/refresh-daily-radar-cache.ts --date="$RADAR_DATE"
+          else
+            npx tsx scripts/refresh-daily-radar-cache.ts --days=7
+          fi

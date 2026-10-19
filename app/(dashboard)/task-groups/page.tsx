@@ -13,6 +13,8 @@ import { fetchAllRows } from '@/lib/supabase-paginate'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { isIncrementalOperation } from '@/lib/submission-operation'
 import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
+import { taskClaimIdentity, isUpdateTask } from '@/lib/task-claim-identity'
+import { radarDates } from '@/lib/radar-dates'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 import AppDialog from '@/components/app-dialog'
 import DistributedRecipientPicker from '@/components/distributed-recipient-picker'
@@ -31,10 +33,10 @@ interface RankWord { keyword: string; siteCount: number; volume: number; sites: 
 interface StreakWord { keyword: string; streak: number; domain: string; volume: number; first_date: string; last_date: string }
 interface CrossWord { keyword: string; volume: number; last_date: string; first_date: string; newSites: string[]; rankSites: string[] }
 interface VolumeRisingWord {
-  keyword: string; volume: number; prevVolume: number | null; change: number
+  keyword: string; volume: number; prevVolume: number | null; change: number | null
   baselineVolume: number; baselineDate: string; netChange: number; last_date: string
   sites: string[]; rankTrend: 'up' | 'down' | 'both' | null
-  riseDate?: string | null; volumeDate?: string | null
+  riseDate?: string | null; volumeDate?: string | null; historicalValuesKnown?: boolean
 }
 
 interface ClaimedKeyword {
@@ -84,26 +86,21 @@ function getMYDate(offsetDays = 0) {
   return new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
 }
 
-// 更新词库的 RPC 记录的是凌晨抓取时间；日常批次实际对应昨日竞品资料。
-function normalizeWordLibDate(value: unknown, today: string, yesterday: string): string {
-  const date = value ? String(value).slice(0, 10) : ''
-  return date === today ? yesterday : date
-}
 function fmtVol(v: number) {
   if (!v || v <= 0) return '—'
   return v.toLocaleString()
 }
-function formatSignedVolume(value: number) {
+function formatSignedVolume(value: number | null) {
   if (!value) return '—'
   return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
 }
 function getNetVolumeChange(row: VolumeRisingWord) {
-  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change, 0)
+  return Number.isFinite(row.netChange) ? row.netChange : Math.max(row.change ?? 0, 0)
 }
 function getBaselineVolume(row: VolumeRisingWord) {
   return Number.isFinite(row.baselineVolume)
     ? row.baselineVolume
-    : row.prevVolume ?? Math.max(0, row.volume - row.change)
+    : row.prevVolume ?? Math.max(0, row.volume - (row.change ?? 0))
 }
 function fmtDate(d: string) { return d ? d.slice(5).replace('-', '/') : '—' }
 function normalizeUrl(raw: string): string {
@@ -760,7 +757,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeMsg, setDistributeMsg] = useState('')
   const [distributeClearing, setDistributeClearing] = useState(false)
 
-  const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[] } | null>(null)
+  const [radarData, setRadarData] = useState<{ newWords: NewWord[]; rankWords: RankWord[]; streakWords: StreakWord[]; volumeRisingWords: VolumeRisingWord[]; cross?: CrossWord[] } | null>(null)
+  const [radarTotal, setRadarTotal] = useState(0)
+  const [radarVersion, setRadarVersion] = useState(0)
   const [radarNotice, setRadarNotice] = useState<ReturnType<typeof radarCacheNotice>>(null)
   const [radarLoadedGroupId, setRadarLoadedGroupId] = useState<string | null>(null)
   const [radarLoadingGroupId, setRadarLoadingGroupId] = useState<string | null>(null)
@@ -873,10 +872,18 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // Dedup by keyword — DB race condition can create duplicates; show only one per keyword
   const displayedClaims = useMemo(() => {
     const seen = new Set<string>()
-    return claimedKeywords.filter(k => !seen.has(k.keyword) && !!seen.add(k.keyword))
+    return claimedKeywords.filter(k => {
+      const key = taskClaimIdentity(k.keyword, k.page_url, k.operation_type, k.source)
+      return !seen.has(key) && !!seen.add(key)
+    })
   }, [claimedKeywords])
   const pendingCount = displayedClaims.filter(k => k.status === 'pending').length
   const submittedCount = displayedClaims.filter(k => k.status === 'submitted').length
+  function isPageClaimed(keyword: string, url?: string | null) {
+    if (!url) return false
+    const identity = taskClaimIdentity(keyword, url, '更新')
+    return claimedKeywords.some(k => taskClaimIdentity(k.keyword, k.page_url, k.operation_type, k.source) === identity)
+  }
   const bulkTaskRows = useMemo(() => parseBulkTaskRows(bulkAddText), [bulkAddText])
   const validBulkTaskRows = bulkTaskRows.filter(row => !row.error).slice(0, 200)
 
@@ -887,6 +894,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   const crossWords = useMemo((): CrossWord[] => {
     if (!radarData) return []
+    if (radarData.cross) return radarData.cross
     const nwMap = new Map(radarData.newWords.map(w => [w.keyword, w]))
     const rwMap = new Map(radarData.rankWords.map(w => [w.keyword, w]))
     const allKws = new Set([...Array.from(nwMap.keys()), ...Array.from(rwMap.keys())])
@@ -957,22 +965,12 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // The API scopes the whole cache to this group's sites before paging.
   const wordLibWords = useMemo(() => wordLibDataGroupId === activeGroupId ? wordLibData : [], [wordLibDataGroupId, activeGroupId, wordLibData])
 
-  const radarAvailableDates = useMemo(() => {
-    const rows: { last_date: string }[] =
-      rightTab === 'volumeRising' ? volumeRisingWordsSorted :
-      rightTab === 'cross' ? crossWords :
-      rightTab === 'rank' ? rankWordsSorted :
-      rightTab === 'streak' ? streakWords :
-      rightTab === 'newWords' ? allNewWords :
-      rightTab === 'wordLib' ? wordLibWords : []
-    return Array.from(new Set(rows.map(row => row.last_date).filter(Boolean)))
-      .sort((a, b) => b.localeCompare(a))
-  }, [rightTab, volumeRisingWordsSorted, crossWords, rankWordsSorted, streakWords, allNewWords, wordLibWords])
+  const radarAvailableDates = radarDates()
 
   // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
   // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
-  const effectiveRadarDate = radarDate && radarAvailableDates.includes(radarDate) ? radarDate : ''
-  const showRadarDateFilter = (['volumeRising', 'cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
+  const effectiveRadarDate = radarDate || (rightTab === 'newWords' || rightTab === 'wordLib' ? yesterday : today)
+  const showRadarDateFilter = (['volumeRising', 'cross', 'rank', 'streak', 'newWords', 'wordLib'] as RightTab[]).includes(rightTab)
   const showRadarTypeFilter = (['cross', 'rank', 'streak', 'newWords'] as RightTab[]).includes(rightTab)
 
   // ── 跌排更新 / 涨排更新（自有站m端排名变化，供更新词库展示 + 今日推荐筛选） ──
@@ -1013,7 +1011,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (!activeGroup || (!force && siteRankdownGroupId === activeGroup.id)) return
     const ownDomains = activeGroup.site_domains
     const loadingGroupId = activeGroup.id
-    const groupChanged = siteRankdownGroupId !== loadingGroupId
     const requestId = ++siteRankdownRequestRef.current
     // 之前这里domains为空就直接return，没清空siteRankdownData——切到一个没配
     // 自己站点的分组时，屏幕上会一直留着上一个分组的"跌词更新"数据没消失，
@@ -1027,19 +1024,15 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     }
     setSiteRankdownLoading(true)
     try {
-      const response = await fetch(`/api/task-groups/${loadingGroupId}/rankdown-signals`)
+      const requestedDate = rankdownDate || today
+      const response = await fetch(`/api/task-groups/${loadingGroupId}/rankdown-signals?date=${requestedDate}`, { cache: 'no-store' })
       if (!response.ok) throw new Error(await apiError(response, '跌词更新加载失败'))
       const payload = await response.json() as { rows?: typeof siteRankdownData }
       if (requestId !== siteRankdownRequestRef.current) return
-      const rows = dedupeByKeyword(payload.rows ?? [])
-      const availableDates = Array.from(new Set(
-        rows.filter(row => row.volume > 0).map(row => row.stat_date),
-      )).sort().reverse()
+      const rows = payload.rows ?? []
 
       setSiteRankdownData(rows)
-      setRankdownDate(previous => (
-        groupChanged || !availableDates.includes(previous) ? availableDates[0] ?? '' : previous
-      ))
+      setRankdownDate(requestedDate)
       setSiteRankdownGroupId(loadingGroupId)
       setRdPage(0)
     } catch (error) {
@@ -1385,24 +1378,26 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   }
 
   async function loadRadar(groupId = activeGroupId, force = false) {
-    const sections = rightTab === 'cross' ? ['newWords','rankWords'] :
-      rightTab === 'rank' ? ['rankWords'] : rightTab === 'streak' ? ['streakWords'] :
-      rightTab === 'newWords' ? ['newWords'] : ['volumeRisingWords']
-    const keys = sections.map(section => `${groupId}:${section}`)
-    if (!groupId || (!force && keys.every(key => radarSectionsRef.current.has(key)))) return
+    if (!groupId) return
+    const params = new URLSearchParams({ groupId, tab: rightTab, date: effectiveRadarDate,
+      page: String(tabPage[rightTab]), pageSize: String(PAGE_SIZE), badge: badgeFilter,
+      sort: sortCol || 'date', direction: sortDir || 'desc' })
+    const keys = [params.toString()]
+    if (!force && keys.every(key => radarSectionsRef.current.has(key))) return
     radarAbortRef.current?.abort()
     const controller = new AbortController()
     radarAbortRef.current = controller
     setRadarLoadingGroupId(groupId)
     try {
-      const res = await fetch(`/api/hot-radar?groupId=${encodeURIComponent(groupId)}&sections=${sections.join(',')}`, { signal: controller.signal })
+      const res = await fetch(`/api/radar-daily?${params}`, { signal: controller.signal, cache: 'no-store' })
       if (!res.ok) throw new Error(await apiError(res, '推荐数据加载失败'))
       const rd = await res.json()
       if (controller.signal.aborted) return
-      setRadarNotice(radarCacheNotice(rd.cache, sections, { showSourceStatus: false }))
+      setRadarNotice(null)
       for (const key of keys) radarSectionsRef.current.add(key)
-      setRadarData(previous => ({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
-        ...(radarLoadedGroupId === groupId ? previous : {}), ...rd }))
+      setRadarData({ newWords: [],rankWords: [],streakWords: [],volumeRisingWords: [],
+        [rightTab === 'rank' ? 'rankWords' : rightTab === 'streak' ? 'streakWords' : rightTab === 'volumeRising' ? 'volumeRisingWords' : rightTab]: rd.data })
+      setRadarTotal(rd.total)
       setRadarLoadedGroupId(groupId)
       setLoadError(current => current?.scope === 'radar' ? null : current)
     } catch (error) {
@@ -1420,8 +1415,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     const groupId = activeGroupId
     if (!groupId) return
     const params = new URLSearchParams({
-      groupId, page: String(tabPage.wordLib), pageSize: String(PAGE_SIZE), q: wordLibQuery,
-      sort: ['date', 'count', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
+      groupId, tab: 'wordLib', date: effectiveRadarDate, page: String(tabPage.wordLib), pageSize: String(PAGE_SIZE), q: wordLibQuery,
+      sort: sortCol === 'count' ? 'longTailCount' : ['date', 'siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
       direction: sortDir || 'desc', minLongTail: '2',
     })
     if (radarDate) params.set('date', radarDate)
@@ -1432,7 +1427,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     wordLibAbortRef.current = controller
     setWordLibLoading(true)
     try {
-      const response = await fetch(`/api/wordlib?${queryKey}`, { signal: controller.signal })
+      const response = await fetch(`/api/radar-daily?${queryKey}`, { signal: controller.signal, cache: 'no-store' })
       if (!response.ok) throw new Error(await apiError(response,'词库资料读取失败'))
       const body = await response.json()
       if (!Array.isArray(body.data) || typeof body.total !== 'number') throw new Error('词库返回资料格式无效')
@@ -1541,15 +1536,18 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   // 某个组员的视图后双击认领，认领记录应该算在那个组员头上，不是管理员自己。
   // 合并推荐视图（见下方"今日推荐"渲染）每一行知道自己是哪个组员的，双击时
   // 显式传入那一行的 user_id，不受当前"查看谁"的切换影响。
-  async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string, targetUserId?: string) {
+  async function claimKeyword(keyword: string, source: string, search_volume = 0, source_rule_id?: string, targetUserId?: string, pageUrl?: string | null) {
     const assigneeId = targetUserId ?? effectiveViewingId
     if (!assigneeId) {
       setClaimErrorMsg('请先在左上方选择要代为认领的组员')
       return
     }
     // claimedSet covers "already in state"; claimingRef covers "in-flight request"
-    if (!activeGroupId || claimedSet.has(keyword) || claimingRef.current.has(keyword)) return
-    claimingRef.current.add(keyword)
+    const update = isUpdateTask(null, source)
+    const identity = taskClaimIdentity(keyword, pageUrl, update ? '更新' : '新增', source)
+    if (update && !pageUrl) { setClaimErrorMsg('该更新任务没有可用页面链接，请查看详情确认后再添加'); return }
+    if (!activeGroupId || (update ? isPageClaimed(keyword, pageUrl) : claimedSet.has(keyword)) || claimingRef.current.has(identity)) return
+    claimingRef.current.add(identity)
     try {
       const res = await fetch(`/api/task-groups/${activeGroupId}/claimed`, {
         method: 'POST',
@@ -1558,7 +1556,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           keyword,
           source,
           search_volume,
-          operation_type: '新增',
+          operation_type: update ? '更新' : '新增',
+          final_keyword: update ? keyword : undefined,
+          page_url: update ? pageUrl : undefined,
           source_rule_id: source_rule_id ?? null,
           claimed_date: selectedDate,
           userId: assigneeId,
@@ -1590,7 +1590,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       }
     } catch {
       setClaimErrorMsg('认领失败（网络异常），请重试')
-    } finally { claimingRef.current.delete(keyword) }
+    } finally { claimingRef.current.delete(identity) }
   }
 
   // targetUserId 默认是当前查看的组员——合并推荐视图里每一行知道自己是哪个
@@ -2078,11 +2078,11 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       radarSectionsRef.current.clear()
       setRadarData(null)
     }
-    if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId)
-  }, [isWorkspaceRoute,rightTab,activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+    if ((['volumeRising','cross','rank','streak','newWords'] as RightTab[]).includes(rightTab)) void loadRadar(activeGroupId, true)
+  }, [isWorkspaceRoute,rightTab,activeGroupId,radarDate,tabPage[rightTab],badgeFilter,sortCol,sortDir,radarVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'distribute') loadDistributed() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setDistributeRecipients(null); setShowDistributeModal(false) }, [activeGroupId])
-  useEffect(() => { if (isWorkspaceRoute && rightTab === 'rankdown') loadSiteRankdown() }, [isWorkspaceRoute, rightTab, activeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isWorkspaceRoute && rightTab === 'rankdown') loadSiteRankdown(true) }, [isWorkspaceRoute, rightTab, activeGroupId, rankdownDate,radarVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (isWorkspaceRoute && rightTab === 'recommend') loadRecommendationPage() }, [isWorkspaceRoute, rightTab, recSubTab, activeGroupId, effectiveViewingId, currentUserId, tabPage.recommend, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
   // Scroll today's task list to bottom when a new claim is added
   useEffect(() => {
@@ -2104,10 +2104,19 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         (payload) => {
           const rec = (payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old) as ClaimedKeyword & { user_id: string; claimed_date: string }
           setClaimedKeywords(prev => applyClaimRealtimeEvent(prev, payload.eventType, rec, effectiveViewingId, today))
+          setRadarVersion(version => version + 1)
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [isWorkspaceRoute, activeGroupId, effectiveViewingId, selectedDate, today]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isWorkspaceRoute || !activeGroupId) return
+    const refresh = () => { if (document.visibilityState === 'visible') setRadarVersion(version => version + 1) }
+    const interval = window.setInterval(refresh, 60000)
+    window.addEventListener('focus', refresh)
+    return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh) }
+  }, [isWorkspaceRoute, activeGroupId])
 
   function setPage(tab: RightTab, p: number) { setTabPage(prev => ({ ...prev, [tab]: p })) }
 
@@ -2406,18 +2415,20 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 </tr></thead>
                 <tbody>
                   {recommendationRows.map(row => {
-                    const claimed = row.memberId === effectiveViewingId && claimedSet.has(row.keyword)
+                    const claimed = row.memberId === effectiveViewingId && isPageClaimed(row.keyword, row.ownUrl || row.url)
                     const displayUrl = row.ownUrl || row.url
                     return (
-                      <tr key={`${row.memberId}|${row.keyword}`} onDoubleClick={() => { if (!claimed) claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId) }}
+                      <tr key={`${row.memberId}|${row.keyword}`} onDoubleClick={() => { if (!claimed) claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId, displayUrl) }}
                         className={`cursor-pointer select-none border-b border-gray-50 transition-colors last:border-0 ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}>
                         <td className="py-2 pl-2">
                           <button onClick={event => { event.stopPropagation(); setDismissConfirm({ keyword: row.keyword, targetUserId: row.memberId, memberName: row.memberName }) }}
                             className="flex h-5 w-5 items-center justify-center rounded text-base leading-none text-gray-300 transition-colors hover:bg-red-50 hover:text-red-400" title="移除此词">×</button>
                         </td>
-                        <td className="px-3 py-2">
-                          <span className="text-sm text-gray-800" title={row.keyword}>{row.keyword.length > 16 ? `${row.keyword.slice(0, 16)}…` : row.keyword}</span>
-                          {claimed && <span className="ml-1.5 text-[10px] text-green-500">✓</span>}
+                        <td className="px-3 py-2 whitespace-nowrap overflow-hidden">
+                          <div className="flex min-w-0 items-center gap-1">
+                            <span className="min-w-0 truncate text-sm text-gray-800" title={row.keyword}>{row.keyword}</span>
+                            {claimed && <span className="shrink-0 text-[10px] text-green-500">✓</span>}
+                          </div>
                         </td>
                         <td className="px-2 py-2">
                           {displayUrl ? <a href={displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`}
@@ -2446,7 +2457,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         </td>}
                         <td className="w-28 px-2 py-2 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
-                            <ClaimAction keyword={row.keyword} claimed={claimed} onClaim={() => claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId)} compact />
+                            <ClaimAction keyword={row.keyword} claimed={claimed} onClaim={() => claimKeyword(row.keyword, isRankdown ? '跌排更新' : '涨排更新', row.volume, undefined, row.memberId, displayUrl)} compact />
                             {isRankdown && row.sameUrlCount > 0 && (
                               <button onClick={() => openDetail(row.keyword, '跌排更新', row.url, row.sameUrlKeywords)}
                                 className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500 transition-colors hover:border-blue-200 hover:text-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500">
@@ -2541,9 +2552,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   // 合并视图里只有"当前正在查看的组员"那一行的今日认领状态是
                   // 准确的（claimedSet只装了effectiveViewingId的今天列表）——
                   // 其它组员的行不去猜，双击照样能认领，服务端本来就会拦重复。
-                  const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
+                  const claimed = memberId === effectiveViewingId && isPageClaimed(r.keyword, r.url)
                   return (
-                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
+                    <tr key={`${memberId}|${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId, r.url) }}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                       title={claimed ? '已认领' : `点击认领按钮，或双击代${memberName ?? '该组员'}认领`}>
                       <td className="pl-2 py-2">
@@ -2552,7 +2563,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId) }}
+                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId, r.url) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -2579,7 +2590,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                       <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
-                          <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId)} compact />
+                          <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌排更新', r.volume, undefined, memberId, r.url)} compact />
                           <button onClick={() => openDetail(r.keyword, '跌排更新', r.url)}
                             className="shrink-0 whitespace-nowrap text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
                         </div>
@@ -2659,9 +2670,9 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                   const memberId = r.ownUserId
                   if (!displayUrl || !memberId) return null
                   const memberName = activeGroup?.members.find(m => m.user_id === memberId)?.username ?? '—'
-                  const claimed = memberId === effectiveViewingId && claimedSet.has(r.keyword)
+                  const claimed = memberId === effectiveViewingId && isPageClaimed(r.keyword, displayUrl)
                   return (
-                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
+                    <tr key={`${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId, displayUrl) }}
                       className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                       title={claimed ? '已认领' : (canManage ? `点击认领按钮，或双击代${memberName}认领` : '点击认领按钮，或双击此行快捷认领')}>
                       <td className="pl-2 py-2">
@@ -2670,7 +2681,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-sm text-gray-800 select-text cursor-text"
-                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId) }}
+                          onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId, displayUrl) }}
                           title={r.keyword}>
                           {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                         </span>
@@ -2697,7 +2708,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       </td>
                       <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                       <td className="w-20 px-2 py-2 text-right whitespace-nowrap">
-                        <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId)} compact />
+                        <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '涨排更新', r.volume, undefined, memberId, displayUrl)} compact />
                       </td>
                     </tr>
                   )
@@ -2824,7 +2835,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_vr
-      const slice = sorted_vr.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      const slice = sorted_vr
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[780px] table-fixed">
@@ -2852,7 +2863,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                       <span className="font-medium tabular-nums text-green-600">{formatSignedVolume(getNetVolumeChange(w))}</span>
                     </span>
                   </td>
-                  <td className={`px-2 py-2 text-center text-xs font-medium ${w.change > 0 ? 'text-green-600' : w.change < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '暂无上次数值' : `上次 ${fmtVol(w.prevVolume)} → 当前 ${fmtVol(w.volume)}`}>{formatSignedVolume(w.change)}</td>
+                  <td className={`px-2 py-2 text-center text-xs font-medium ${(w.change ?? 0) > 0 ? 'text-green-600' : (w.change ?? 0) < 0 ? 'text-red-500' : 'text-gray-400'}`} title={w.prevVolume == null ? '该次历史数值未保存' : `上次 ${fmtVol(w.prevVolume)} → 当前 ${fmtVol(w.volume)}`}>{formatSignedVolume(w.change)}</td>
                   <td className="px-2 py-2 text-center text-xs text-gray-500">{w.volume > 0 ? w.volume.toLocaleString() : '—'}</td>
                   <td className="px-2 py-2 text-center text-xs whitespace-nowrap">
                     {w.rankTrend === 'both' ? <span className="inline-flex items-center font-semibold"><span className="text-green-500">↑</span><span className="text-red-500">↓</span></span>
@@ -2864,7 +2875,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={sorted_vr.length} onPage={p => setPage('volumeRising', p)} />
+          <Pager page={pg} total={radarTotal} onPage={p => setPage('volumeRising', p)} />
         </>
       )
     }
@@ -2882,7 +2893,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           || (b.volume ?? 0) - (a.volume ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_cross
-      const slice = sorted_cross.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      const slice = sorted_cross
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2913,7 +2924,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={sorted_cross.length} onPage={p => setPage('cross', p)} />
+          <Pager page={pg} total={radarTotal} onPage={p => setPage('cross', p)} />
         </>
       )
     }
@@ -2930,7 +2941,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           || (b.volume ?? 0) - (a.volume ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_rank
-      const slice = sorted_rank.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      const slice = sorted_rank
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -2956,7 +2967,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={sorted_rank.length} onPage={p => setPage('rank', p)} />
+          <Pager page={pg} total={radarTotal} onPage={p => setPage('rank', p)} />
         </>
       )
     }
@@ -2974,7 +2985,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
           || (b.streak ?? 0) - (a.streak ?? 0)
         return sortDir === 'asc' ? va - vb : vb - va
       }) : base_streak
-      const slice = sorted_streak.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE)
+      const slice = sorted_streak
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -3000,7 +3011,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={pg} total={sorted_streak.length} onPage={p => setPage('streak', p)} />
+          <Pager page={pg} total={radarTotal} onPage={p => setPage('streak', p)} />
         </>
       )
     }
@@ -3023,8 +3034,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
       }) : base_new
       // 切换分组后保留了上一个分组的页码时，新分组资料较少会被切到空页；
       // 将页码收敛到当前结果范围，确保“近30天全部”有资料时一定能看到。
-      const safePage = Math.min(pg, Math.max(0, Math.ceil(sorted_new.length / PAGE_SIZE) - 1))
-      const slice = sorted_new.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+      const safePage = Math.min(pg, Math.max(0, Math.ceil(radarTotal / PAGE_SIZE) - 1))
+      const slice = sorted_new
       return (
         <>
           <table aria-label="数据表格" className="w-full min-w-[680px] table-fixed">
@@ -3050,7 +3061,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ))}
             </tbody>
           </table>
-          <Pager page={safePage} total={sorted_new.length} onPage={p => setPage('newWords', p)} />
+          <Pager page={safePage} total={radarTotal} onPage={p => setPage('newWords', p)} />
         </>
       )
     }
@@ -3093,9 +3104,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
     if (rightTab === 'rankdown') {
       if (siteRankdownLoading) return <Spinner />
       // Available dates in data
-      const availableDates = Array.from(new Set(
-        siteRankdownData.filter(row => row.volume > 0).map(row => row.stat_date),
-      )).sort().reverse()
+      const availableDates = radarDates()
       const selectedDate = rankdownDate || availableDates[0] || ''
       // 按URL合并（同一个URL命中多个词只显示搜索量最高那个），2026-08-20
       const dateRows = dedupeByUrl(
@@ -3116,7 +3125,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
             )}
           </div>
           {availableDates.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 text-sm">近30天没有可显示的m端下跌词</div>
+            <div className="text-center py-10 text-gray-400 text-sm">该日期没有可显示的m端下跌词</div>
           ) : dateRows.length === 0 ? (
             <div className="text-center py-10 text-gray-400 text-sm">该日期暂无下跌词</div>
           ) : (
@@ -3132,14 +3141,14 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 </tr></thead>
                 <tbody>
                   {dateRows.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE).map((r, i) => {
-                    const claimed = claimedSet.has(r.keyword)
+                    const claimed = isPageClaimed(r.keyword, r.url)
                     return (
-                      <tr key={`rd-${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume) }}
+                      <tr key={`rd-${r.keyword}|${i}`} onDoubleClick={() => { if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume, undefined, undefined, r.url) }}
                         className={`border-b border-gray-50 last:border-0 cursor-pointer select-none transition-colors ${claimed ? 'bg-green-50/40' : 'hover:bg-gray-50'}`}
                         title={claimed ? '已认领' : '点击认领按钮，或双击此行快捷认领'}>
                         <td className="px-3 py-2">
                           <span className="text-sm text-gray-800 select-text cursor-text" title={r.keyword}
-                            onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume) }}>
+                            onDoubleClick={e => { e.stopPropagation(); if (!claimed) claimKeyword(r.keyword, '跌词更新', r.volume, undefined, undefined, r.url) }}>
                             {r.keyword.length > 16 ? r.keyword.slice(0, 16) + '…' : r.keyword}
                           </span>
                           {claimed && <span className="ml-1 text-[10px] text-green-500">✓</span>}
@@ -3161,7 +3170,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         <td className="px-2 py-2 text-center text-xs text-gray-500">{r.volume > 0 ? fmtVol(r.volume) : '—'}</td>
                         <td className="w-32 px-2 py-2 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
-                            <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌词更新', r.volume)} compact />
+                            <ClaimAction keyword={r.keyword} claimed={claimed} onClaim={() => claimKeyword(r.keyword, '跌词更新', r.volume, undefined, undefined, r.url)} compact />
                             <button onClick={() => openDetail(r.keyword, '跌词更新', r.url)}
                               className="shrink-0 whitespace-nowrap text-xs border rounded px-1.5 py-0.5 text-gray-500 hover:text-gray-700 border-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500">详情</button>
                           </div>
@@ -3246,6 +3255,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900">{fmtVol(volumeEntry.volume)}</p>
                 <p className="mt-0.5 text-[11px] text-gray-400">采集：{volumeEntry.volumeDate?.replaceAll('-', '/') || '未记录'}</p>
                 <p className="mt-0.5 text-[11px] text-gray-400">发现上涨：{formatVolumeRiseDate(volumeEntry.last_date)}</p>
+                {volumeEntry.historicalValuesKnown === false && <p className="mt-1 text-[11px] text-gray-500">该次历史数值未保存，以上数值来自标注的采集日期。</p>}
               </div>
             </div>
           )}
@@ -3713,7 +3723,6 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         <select aria-label="筛选资料日期" value={effectiveRadarDate}
                           onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
                           className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-                          <option value="">近30天全部</option>
                           {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
                         </select>
                       </label>
