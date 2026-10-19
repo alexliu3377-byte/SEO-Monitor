@@ -6,13 +6,14 @@ import { parseTranscriptResult } from '@/lib/content-transcript'
 export async function POST(request: Request) {
   const authorization = authorizeTrendCollector(request)
   if (!authorization.ok) return NextResponse.json({ error: '转写任务认证失败或密钥未配置' }, { status: authorization.missingConfiguration ? 503 : 401 })
-  if (Number(request.headers.get('content-length')) > 1_500_000) return NextResponse.json({ error: '转写资料过大' }, { status: 413 })
+  if (Number(request.headers.get('content-length')) > 1_500_000) return NextResponse.json({ error: '转写资料过大', code: 'RESULT_BODY_SIZE' }, { status: 413 })
   const raw = await request.text()
-  if (Buffer.byteLength(raw) > 1_500_000) return NextResponse.json({ error: '转写资料过大' }, { status: 413 })
+  if (Buffer.byteLength(raw) > 1_500_000) return NextResponse.json({ error: '转写资料过大', code: 'RESULT_BODY_SIZE' }, { status: 413 })
   let body: unknown
-  try { body = JSON.parse(raw) } catch { return NextResponse.json({ error: '转写资料格式无效' }, { status: 400 }) }
-  const result = parseTranscriptResult(body)
-  if (!result) return NextResponse.json({ error: '转写结果或时间段无效' }, { status: 400 })
+  try { body = JSON.parse(raw) } catch { return NextResponse.json({ error: '转写资料格式无效', code: 'RESULT_JSON' }, { status: 400 }) }
+  let code = 'RESULT_INVALID'
+  const result = parseTranscriptResult(body, reason => { code = reason })
+  if (!result) return NextResponse.json({ error: '转写结果或时间段无效', code }, { status: 400 })
   const service = createServiceClient() as any
   const { data, error } = await service.rpc('finish_content_transcript', {
     p_item_id: result.itemId, p_lease_token: result.leaseToken, p_status: result.status,

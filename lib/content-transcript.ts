@@ -23,12 +23,14 @@ export function transcriptStatusLabel(status: string | null | undefined) {
 }
 
 // Validate without silently truncating a transcript or manufacturing text.
-export function parseTranscriptResult(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+export function parseTranscriptResult(value: unknown, onInvalid?: (code: string) => void) {
+  // Only fixed field codes may leave this validator; never echo text, cookies or URLs.
+  const invalid = (code: string) => { onInvalid?.(code); return null }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid('RESULT_OBJECT')
   const row = value as Record<string, unknown>
   if (typeof row.itemId !== 'string' || !UUID_PATTERN.test(row.itemId)
     || typeof row.leaseToken !== 'string' || !UUID_PATTERN.test(row.leaseToken)
-    || !(TRANSCRIPT_RESULT_STATES as readonly unknown[]).includes(row.status)) return null
+    || !(TRANSCRIPT_RESULT_STATES as readonly unknown[]).includes(row.status)) return invalid('RESULT_IDENTITY')
   const text = typeof row.text === 'string' ? row.text.trim() : ''
   const message = typeof row.message === 'string' ? row.message.trim() : ''
   const originalText = typeof row.originalText === 'string' ? row.originalText.trim() : text
@@ -36,32 +38,34 @@ export function parseTranscriptResult(value: unknown) {
   const articleText = typeof row.articleText === 'string' ? row.articleText.trim() : ''
   const originalArticleText = typeof row.originalArticleText === 'string' ? row.originalArticleText.trim() : articleText
   const videoExpected = row.videoExpected === true
-  if (articleText.length > 120_000 || originalArticleText.length > 120_000 || Boolean(articleText) !== Boolean(originalArticleText)) return null
-  if (row.videoExpected !== undefined && typeof row.videoExpected !== 'boolean') return null
-  if (!(TRANSCRIPT_TEXT_SOURCES as readonly unknown[]).includes(textSource) || originalText.length > 120_000) return null
+  if (articleText.length > 120_000 || originalArticleText.length > 120_000 || Boolean(articleText) !== Boolean(originalArticleText)) return invalid('RESULT_ARTICLE')
+  if (row.videoExpected !== undefined && typeof row.videoExpected !== 'boolean') return invalid('RESULT_VIDEO_EXPECTED')
+  if (!(TRANSCRIPT_TEXT_SOURCES as readonly unknown[]).includes(textSource)) return invalid('RESULT_TEXT_SOURCE')
+  if (originalText.length > 120_000) return invalid('RESULT_ORIGINAL_SIZE')
   const segments = row.segments ?? []
-  if (text.length > 120_000 || message.length > 500 || !Array.isArray(segments) || segments.length > 5000) return null
+  if (text.length > 120_000 || message.length > 500) return invalid('RESULT_TEXT_SIZE')
+  if (!Array.isArray(segments) || segments.length > 5000) return invalid('RESULT_SEGMENTS_SIZE')
   let previousStart = -1
   for (const part of segments) {
-    if (!part || typeof part !== 'object' || Array.isArray(part)) return null
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return invalid('RESULT_SEGMENT_OBJECT')
     const segment = part as Record<string, unknown>
     if (typeof segment.start !== 'number' || !Number.isFinite(segment.start) || segment.start < previousStart
       || segment.start < 0 || typeof segment.end !== 'number' || !Number.isFinite(segment.end)
-      || segment.end < segment.start || segment.end > 86_400
-      || typeof segment.text !== 'string' || !segment.text.trim() || segment.text.length > 4000) return null
+      || segment.end < segment.start || segment.end > 86_400) return invalid('RESULT_TIMESTAMP')
+    if (typeof segment.text !== 'string' || !segment.text.trim() || segment.text.length > 4000) return invalid('RESULT_SEGMENT_TEXT')
     previousStart = segment.start
   }
   const articleOnly = textSource === 'article_body'
   if (row.status === 'completed') {
     if (articleOnly ? !articleText || videoExpected || text || segments.length || originalText
-      : !text || !segments.length || !originalText || text !== segments.map(part => part.text.trim()).join('\n')) return null
-  } else if (text.length > 0 || segments.length > 0 || !message) return null
-  if (row.status !== 'completed' && originalText) return null
+      : !text || !segments.length || !originalText) return invalid('RESULT_COMPLETED_EMPTY')
+    if (!articleOnly && text !== segments.map(part => part.text.trim()).join('\n')) return invalid('RESULT_TEXT_MISMATCH')
+  } else if (text.length > 0 || segments.length > 0 || !message || originalText) return invalid('RESULT_FAILURE_SHAPE')
   const language = typeof row.language === 'string' ? row.language.trim() : null
   const model = typeof row.model === 'string' ? row.model.trim() : null
-  if ((language?.length ?? 0) > 32 || (model?.length ?? 0) > 120) return null
+  if ((language?.length ?? 0) > 32 || (model?.length ?? 0) > 120) return invalid('RESULT_METADATA')
   const duration = row.durationSeconds ?? null
-  if (duration !== null && (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0 || duration > 86_400)) return null
+  if (duration !== null && (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0 || duration > 86_400)) return invalid('RESULT_DURATION')
   return {
     itemId: row.itemId, leaseToken: row.leaseToken, status: row.status as typeof TRANSCRIPT_RESULT_STATES[number],
     text, segments: segments as TranscriptSegment[], message, language, model, durationSeconds: duration,

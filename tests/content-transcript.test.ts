@@ -54,3 +54,26 @@ test('article text is independent from video success and never invents time segm
   assert.equal(partial?.status,'blocked')
   assert.equal(parseTranscriptResult({...result,articleText:'文章',originalArticleText:'文章',videoExpected:true})?.text,'测试语音')
 })
+
+test('rejected payload reports a fixed field code without leaking content', () => {
+  const cases = [
+    [{ ...result, text: 'private-words' }, 'RESULT_TEXT_MISMATCH'],
+    [{ ...result, segments: [{ start: -0.1, end: 1, text: 'private-words' }] }, 'RESULT_TIMESTAMP'],
+    [{ ...result, durationSeconds: -1 }, 'RESULT_DURATION'],
+    [{ ...result, segments: [{ start: 0, end: 1, text: '字'.repeat(4001) }] }, 'RESULT_SEGMENT_TEXT'],
+    [{ ...result, model: 'x'.repeat(121) }, 'RESULT_METADATA'],
+  ] as const
+  for (const [payload, expected] of cases) {
+    let diagnostic = ''
+    assert.equal(parseTranscriptResult(payload, code => { diagnostic = code }), null)
+    assert.equal(diagnostic, expected)
+    assert.ok(!diagnostic.includes('private-words'))
+  }
+})
+
+test('canonical BOM/space trimmed lines retain literal words, but nonmatching content stays invalid', () => {
+  const segments = [{ start: 0, end: 1, text: '\ufeff 夜市摆摊 🎮 \ufeff' }, { start: 1, end: 2, text: '国潮烤冷面' }]
+  const payload = { ...result, segments, text: segments.map(part => part.text.trim()).join('\n') }
+  assert.equal(parseTranscriptResult(payload)?.text, '夜市摆摊 🎮\n国潮烤冷面')
+  assert.equal(parseTranscriptResult({ ...payload, text: '擅自改词' }), null)
+})
