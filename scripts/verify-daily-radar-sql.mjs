@@ -23,11 +23,18 @@ try {
   `)
   const normalization = await readFile(new URL('../supabase/migrations/20260924_prevent_repeated_new_submission.sql', import.meta.url), 'utf8')
   await db.exec(normalization.slice(0, normalization.indexOf('create index')) + '\ncommit;')
+  // Include the real historical trigger, not just a simplified fresh schema.
+  const hardening = await readFile(new URL('../supabase/migrations/20260903_audit_hardening.sql', import.meta.url), 'utf8')
+  const legacyStart = hardening.indexOf('create or replace function public.prevent_duplicate_active_group_claim()')
+  const legacyGuard = hardening.slice(legacyStart,hardening.indexOf('create index',legacyStart))
+  await db.exec(legacyGuard)
+  const retireLegacyGuard = await readFile(new URL('../supabase/migrations/20261019_retire_keyword_only_claim_guard.sql', import.meta.url), 'utf8')
   const recommendation = await readFile(new URL('../supabase/migrations/20261013_paged_recommendations.sql', import.meta.url), 'utf8')
   await db.exec(recommendation.slice(0,recommendation.indexOf('create or replace function public.get_task_group_recommendations_page'))+'\ncommit;')
   for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql','20261019_radar_all_dates_page.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   }
+  assert.equal((await db.query("select count(*)::int as n from pg_trigger where tgrelid='member_claimed_keywords'::regclass and tgname='prevent_duplicate_active_group_claim'")).rows[0].n,0)
   const today = (await db.query("select (now() at time zone 'Asia/Kuala_Lumpur')::date::text as d")).rows[0].d
   const date = (await db.query('select ($1::date-2)::text as d', [today])).rows[0].d
   const site = '11111111-1111-4111-8111-111111111111', site2 = '22222222-2222-4222-8222-222222222222'
@@ -174,11 +181,31 @@ try {
     assert.equal((await db.query(`select has_function_privilege($1,
       'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
   }
-  const insertUpdate = async url => db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,page_url,source,operation_type,status)
-    values($1,$2,$3,'7723游戏盒',$4,'手动添加','更新','pending')`,[group,user,today,url])
-  await insertUpdate('https://www.f71.com/app/1.html')
-  await insertUpdate('f71.com/app/2.html') // same keyword, another page is allowed
-  await assert.rejects(insertUpdate('https://m.f71.com/app/1.html#section'),/already claimed/)
+  const insertUpdate = async (url,source='手动添加',assignee=user,keyword='7723游戏盒') => db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,page_url,source,operation_type,status)
+    values($1,$2,$3,$4,$5,$6,'更新','pending')`,[group,assignee,today,keyword,url,source])
+  await insertUpdate('https://www.f71.com/app/400081.html')
+  // Reproduce the deployed database: identity lookup allowed URL B while the
+  // leftover keyword-only INSERT trigger still rejected it because URL A exists.
+  await db.exec(legacyGuard)
+  const beforeClaims=(await db.query('select * from member_claimed_keywords order by id')).rows
+  assert.equal((await db.query(`select find_active_task_claim($1,$2,'7723游戏盒','http://m.f71.com/app/333858.html','更新','跌词更新') as result`,[group,today])).rows[0].result,null)
+  await assert.rejects(insertUpdate('http://m.f71.com/app/333858.html','跌词更新'),/group, date, and keyword/)
+  // Fail closed if the replacement guard is disabled, leaving the old guard intact.
+  await db.exec('alter table member_claimed_keywords disable trigger guard_member_claim_identity')
+  await assert.rejects(db.exec(retireLegacyGuard),/active task-identity guard/)
+  await db.exec('rollback')
+  assert.equal((await db.query("select count(*)::int as n from pg_trigger where tgrelid='member_claimed_keywords'::regclass and tgname='prevent_duplicate_active_group_claim'")).rows[0].n,1)
+  await db.exec('alter table member_claimed_keywords enable trigger guard_member_claim_identity')
+  await db.exec(retireLegacyGuard)
+  await db.exec(retireLegacyGuard) // safe to reapply
+  assert.deepEqual((await db.query('select * from member_claimed_keywords order by id')).rows,beforeClaims)
+  await insertUpdate('http://m.f71.com/app/333858.html','跌词更新')
+  await assert.rejects(insertUpdate('https://m.f71.com/app/400081.html#section'),/already claimed/)
+  await assert.rejects(insertUpdate('https://www.f71.com/app/333858.html','涨排更新','55555555-5555-4555-8555-555555555555','同页其它词'),/already claimed/)
+  await db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,source,operation_type,status)
+    values($1,$2,$3,'ordinary-new','手动添加','新增','pending')`,[group,user,today])
+  await assert.rejects(db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,source,operation_type,status)
+    values($1,'55555555-5555-4555-8555-555555555555',$2,'ordinary-new','手动添加','新增','pending')`,[group,today]),/already claimed/)
   const saved = (await db.query('select * from member_claimed_keywords order by created_at')).rows
   await db.query('update member_claimed_keywords set final_keyword=\'允许编辑\' where id=$1',[saved.at(-1).id])
   // Decline ownership/cooldown must follow page A even if page B has the same term.
@@ -213,6 +240,7 @@ try {
   assert.equal((await db.query("select has_function_privilege('authenticated','public.refresh_daily_radar_cache(date,text,text[],text[])','execute') as allowed")).rows[0].allowed,false)
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
   console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
-    liveCompletionFiltering:true,groupedCandidates:30000,allSevenDates:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
+    liveCompletionFiltering:true,legacyKeywordGuardReproduced:true,legacyKeywordGuardRetired:true,existingTasksPreserved:true,
+    groupedCandidates:30000,allSevenDates:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
     legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
 } finally { await db.close() }

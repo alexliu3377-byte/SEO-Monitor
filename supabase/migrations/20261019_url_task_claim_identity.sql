@@ -27,6 +27,9 @@ $$;
 drop trigger if exists guard_member_claim_identity on public.member_claimed_keywords;
 create trigger guard_member_claim_identity before insert or update on public.member_claimed_keywords
   for each row execute function public.guard_member_claim_identity();
+-- This older guard keys only on keyword and would still reject different URLs.
+-- Replace it only after the identity-aware guard is installed in this transaction.
+drop trigger if exists prevent_duplicate_active_group_claim on public.member_claimed_keywords;
 drop index if exists public.member_claimed_keywords_unique_active;
 create index if not exists member_claimed_active_identity_idx on public.member_claimed_keywords
   (group_id,claimed_date,public.member_claim_identity(keyword,page_url,operation_type,source)) where status<>'dismissed';
