@@ -25,7 +25,7 @@ try {
   await db.exec(normalization.slice(0, normalization.indexOf('create index')) + '\ncommit;')
   const recommendation = await readFile(new URL('../supabase/migrations/20261013_paged_recommendations.sql', import.meta.url), 'utf8')
   await db.exec(recommendation.slice(0,recommendation.indexOf('create or replace function public.get_task_group_recommendations_page'))+'\ncommit;')
-  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql']) {
+  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   }
   const today = (await db.query("select (now() at time zone 'Asia/Kuala_Lumpur')::date::text as d")).rows[0].d
@@ -82,6 +82,46 @@ try {
     values($1,$2,$3::date-3,'软件甲官方版','共新增词','新增','submitted',now())`,[group,user,date])
   assert.equal((await page('newWords',0,20,group)).total,1)
   assert.equal((await page('wordLib',0,20,group)).total,1)
+  // Reproduce the real grouped query path at production-sized candidate counts.
+  // Global-only probes cannot catch correlated completion scans in the workspace.
+  await db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,final_keyword,status,submitted_at)
+    values($1,$2,$3::date-3,'candidate-1','candidate-2','submitted',now()),
+      ($1,$2,$3::date-4,'another-original','candidate-2','submitted',now()),
+      ($1,$2,$3::date-3,'candidate-3',null,'submitted',$3::timestamp at time zone 'Asia/Kuala_Lumpur'-interval '1 second'),
+      ($1,$2,$3,'candidate-4',null,'submitted',null),
+      ($1,$2,$3::date-1,'candidate-5',null,'submitted',null),
+      ('55555555-5555-4555-8555-555555555555',$2,$3,'candidate-6',null,'submitted',now()),
+      ($1,$2,$3,'candidate-7',null,'pending',null),
+      ($1,$2,$3,'candidate-8',null,'dismissed',now())`,[group,user,date])
+  await db.query(`with fixture as (
+    select jsonb_agg(jsonb_build_object('keyword','candidate-'||n,'volume',30001-n,
+      'streak',3,'domain','a.com','sites',array['a.com','b.com'],'siteCount',2,'last_date',$1::text)) as rows
+    from generate_series(1,30000) n
+  ) insert into radar_daily_cache(data_date,scope_key,payload)
+    select $1::date,'group-regression',jsonb_build_object('rankWords',rows,'streakWords',rows,'cross',rows,'wordLib',rows)
+    from fixture`,[date])
+  const groupedPage=async(tab,extra={})=>(await db.query(`select get_daily_radar_page(
+    p_date=>$1,p_scope=>'group-regression',p_tab=>$2,p_group_id=>$3,p_page=>$4,p_size=>20,
+    p_keyword=>$5,p_sort=>'volume') as result`,[date,tab,extra.group===undefined?group:extra.group,extra.page??0,extra.keyword??''])).rows[0].result
+  for(const tab of ['cross','rank','streak']) {
+    const first=await groupedPage(tab), second=await groupedPage(tab,{page:1})
+    assert.equal(first.total,29997) // original + final + null-submitted date fallback
+    assert.equal(second.total,first.total)
+    assert.equal(first.data.length,20)
+    assert.equal(second.data.length,20)
+    assert.deepEqual(first.data.slice(0,5).map(row=>row.keyword),['candidate-3','candidate-5','candidate-6','candidate-7','candidate-8'])
+    assert.equal(new Set([...first.data,...second.data].map(row=>row.keyword)).size,40)
+    const last=await groupedPage(tab,{page:1499})
+    assert.equal(last.data.length,17)
+    assert.equal(last.data.at(-1).keyword,'candidate-30000')
+    assert.equal((await groupedPage(tab,{group:null})).total,30000)
+    assert.equal((await groupedPage(tab,{keyword:'candidate-1'})).total,11110)
+  }
+  assert.equal((await groupedPage('wordLib')).total,30000)
+  for(const role of ['anon','authenticated']) {
+    assert.equal((await db.query(`select has_function_privilege($1,
+      'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
+  }
   const insertUpdate = async url => db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,page_url,source,operation_type,status)
     values($1,$2,$3,'7723游戏盒',$4,'手动添加','更新','pending')`,[group,user,today,url])
   await insertUpdate('https://www.f71.com/app/1.html')
@@ -121,5 +161,6 @@ try {
   assert.equal((await db.query("select has_function_privilege('authenticated','public.refresh_daily_radar_cache(date,text,text[],text[])','execute') as allowed")).rows[0].allowed,false)
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
   console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
-    liveCompletionFiltering:true,legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
+    liveCompletionFiltering:true,groupedCandidates:30000,completionOriginalAndFinal:true,completionDateBoundary:true,
+    legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
 } finally { await db.close() }
