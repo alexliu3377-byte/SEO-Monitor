@@ -91,10 +91,18 @@ try {
   const recommendations = (await db.query("select get_task_group_recommendations_page($1,array[$2::uuid],'rankdown') as result",[group,user])).rows[0].result
   assert.equal(recommendations.total,1) // page B's recent update must not hide page A
   assert.equal(recommendations.rows[0].url,'https://a.com/page-A')
-  await db.query("update keyword_signal_rollup set last_seen=$1::date-8 where keyword='同名词'",[today])
+  await db.query("update keyword_signal_rollup set last_seen=$1::date-6 where keyword='同名词'",[today])
+  assert.equal((await db.query("select get_task_group_recommendations_page($1,array[$2::uuid],'rankdown') as result",[group,user])).rows[0].result.total,1)
+  await db.query("update keyword_signal_rollup set last_seen=$1::date-7 where keyword='同名词'",[today])
   assert.equal((await db.query("select get_task_group_recommendations_page($1,array[$2::uuid],'rankdown') as result",[group,user])).rows[0].result.total,0)
-  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload) values($1::date-8,'global','{}')`,[today])
-  assert.equal((await db.query('select prune_daily_radar_cache() as removed')).rows[0].removed,1)
+  const oldest=(await db.query('select ($1::date-6)::text as d',[today])).rows[0].d
+  const expired=(await db.query('select ($1::date-7)::text as d',[today])).rows[0].d
+  await build(oldest)
+  assert.equal((await page('rank',0,20,null,oldest)).cacheReady,true)
+  await assert.rejects(build(expired),/Invalid daily radar/)
+  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload) values($1::date-7,'global','{}'),($1::date-8,'global','{}')`,[today])
+  assert.equal((await page('rank',0,20,null,expired)).cacheReady,false)
+  assert.equal((await db.query('select prune_daily_radar_cache() as removed')).rows[0].removed,2)
   assert.equal((await db.query('select count(*)::int as n from keyword_volume_observations')).rows[0].n,4)
   await db.exec("insert into keyword_volume(keyword,volume,stat_date) values('基线缺失',1,current_date); update keyword_volume set volume=4 where keyword='基线缺失'")
   await build(today)

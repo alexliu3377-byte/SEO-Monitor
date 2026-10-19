@@ -19,7 +19,7 @@ export async function refreshDailyRadarCaches(db: any, options: { days?: number;
     const scope = radarScope(group.rank_domains ?? [], group.new_domains ?? [])
     scopes.set(scope.key, scope)
   }
-  const dates = options.date ? [options.date] : radarDates().slice(0, Math.min(8, (options.days ?? 7) + 1)).reverse()
+  const dates = options.date ? [options.date] : radarDates().slice(0, Math.min(7, Math.max(1, options.days ?? 7))).reverse()
   const results = []
   for (const date of dates) {
     if (!validRadarDate(date)) throw new Error('Daily cache date is outside retention')

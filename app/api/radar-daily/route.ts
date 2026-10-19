@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const tab = params.get('tab') || 'volumeRising'
   const date = params.get('date') || radarDate(tab === 'newWords' || tab === 'wordLib' ? -1 : 0)
   if (!(DAILY_RADAR_TABS as readonly string[]).includes(tab) || !validRadarDate(date)) {
-    return NextResponse.json({ error: '请选择近7日或今日的有效资料日期' }, { status: 400 })
+    return NextResponse.json({ error: '请选择含今天在内最近7天的有效资料日期' }, { status: 400 })
   }
   const groupId = params.get('groupId') || null
   if (groupId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(groupId)) {

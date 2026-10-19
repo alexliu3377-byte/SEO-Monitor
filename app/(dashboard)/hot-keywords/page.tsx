@@ -724,7 +724,7 @@ export default function HotRadarPage() {
     <div className="p-6">
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-gray-900">热词雷达</h1>
-        <p className="text-gray-400 text-sm mt-0.5">按日期查看近7日及今日的竞品信号，捕捉趋势机会</p>
+        <p className="text-gray-400 text-sm mt-0.5">按日期查看含今天在内近7日的竞品信号，捕捉趋势机会</p>
       </div>
 
       {/* Tab bar */}

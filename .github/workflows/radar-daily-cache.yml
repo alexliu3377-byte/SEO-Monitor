@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: Optional selected date YYYY-MM-DD; leave empty to rebuild seven previous dates and today
+        description: Optional selected date YYYY-MM-DD; leave empty to rebuild seven dates including today
         type: string
         default: ''
 permissions:

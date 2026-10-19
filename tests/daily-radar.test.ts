@@ -5,12 +5,13 @@ import { radarDate, radarDates, validRadarDate } from '../lib/radar-dates'
 import { radarScope, refreshDailyRadarCaches } from '../lib/radar-daily'
 import { isUpdateTask, normalizeTaskUrl, taskClaimIdentity } from '../lib/task-claim-identity'
 
-test('radar dates use Malaysia midnight, retain seven prior days, and reject future/expired dates', () => {
+test('radar dates retain exactly seven dates including today in Malaysia time', () => {
   const now = Date.parse('2026-10-18T16:00:00Z')
   assert.equal(radarDate(0, now), '2026-10-19')
   assert.equal(radarDate(-1, now), '2026-10-18')
-  assert.deepEqual(radarDates(now), ['2026-10-19','2026-10-18','2026-10-17','2026-10-16','2026-10-15','2026-10-14','2026-10-13','2026-10-12'])
-  for (const date of ['2026-10-20','2026-10-11','2026-02-30','2026-10-19T00:00:00Z','']) assert.equal(validRadarDate(date,now),false)
+  assert.deepEqual(radarDates(now), ['2026-10-19','2026-10-18','2026-10-17','2026-10-16','2026-10-15','2026-10-14','2026-10-13'])
+  assert.equal(validRadarDate('2026-10-13',now),true)
+  for (const date of ['2026-10-20','2026-10-12','2026-10-11','2026-02-30','2026-10-19T00:00:00Z','']) assert.equal(validRadarDate(date,now),false)
 })
 
 test('update claims match pages, not another page with the same keyword', () => {
@@ -38,7 +39,7 @@ test('backfill builds every date and distinct group scope once, then prunes only
     rpc: async (name: string,args?: Record<string,unknown>) => { calls.push({name,args});return {data:name.startsWith('prune')?2:{counts:{}},error:null} },
   }
   const result = await refreshDailyRadarCaches(db,{days:7})
-  assert.deepEqual(result,{dates:8,scopes:2,refreshed:16,removed:2})
+  assert.deepEqual(result,{dates:7,scopes:2,refreshed:14,removed:2})
   assert.equal(calls.at(-1)?.name,'prune_daily_radar_cache')
   assert.deepEqual([...new Set(calls.slice(0,-1).map(c=>c.args?.p_date))],radarDates().reverse())
   assert.equal(radarScope(['B.COM'],['a.com']).key,radarScope(['b.com'],['a.com']).key)

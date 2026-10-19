@@ -58,7 +58,7 @@ create or replace function public.refresh_daily_radar_cache(
 set statement_timeout='120s' set jit='off' set work_mem='16MB' set enable_nestloop='off' as $$
 declare result jsonb;
 begin
-  if p_date < (now() at time zone 'Asia/Kuala_Lumpur')::date-7
+  if p_date < (now() at time zone 'Asia/Kuala_Lumpur')::date-6
     or p_date > (now() at time zone 'Asia/Kuala_Lumpur')::date or coalesce(p_scope,'')='' then
     raise exception 'Invalid daily radar date/scope';
   end if;
@@ -177,7 +177,7 @@ create or replace function public.prune_daily_radar_cache() returns integer
 language plpgsql security definer set search_path=public as $$
 declare removed integer;
 begin
-  delete from radar_daily_cache where data_date<(now() at time zone 'Asia/Kuala_Lumpur')::date-7;
+  delete from radar_daily_cache where data_date<(now() at time zone 'Asia/Kuala_Lumpur')::date-6;
   get diagnostics removed=row_count;
   return removed;
 end;
@@ -190,7 +190,7 @@ create or replace function public.get_daily_radar_page(
 ) returns jsonb language sql stable security definer set search_path=public,pg_temp set statement_timeout='20s' as $$
 with source as materialized (
   select * from radar_daily_cache where data_date=p_date and scope_key=p_scope
-    and data_date between (now() at time zone 'Asia/Kuala_Lumpur')::date-7 and (now() at time zone 'Asia/Kuala_Lumpur')::date
+    and data_date between (now() at time zone 'Asia/Kuala_Lumpur')::date-6 and (now() at time zone 'Asia/Kuala_Lumpur')::date
 ), options as (
   select greatest(0,p_page) as page,greatest(1,least(500,p_size)) as size,
     case p_tab when 'rank' then 'rankWords' when 'streak' then 'streakWords'

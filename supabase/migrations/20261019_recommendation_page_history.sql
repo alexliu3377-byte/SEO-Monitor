@@ -75,7 +75,7 @@ begin
       where r.site_id = s.id and r.type = 'rankdown' and r.latest_url is not null
         and md5(public.task_recommendation_url(r.latest_url)) = md5(u.url_key)
         and public.task_recommendation_url(r.latest_url) = u.url_key
-        and r.last_seen >= p_today - 7
+        and r.last_seen >= p_today - 6
       offset 0
     ) k
     where p_type = 'rankdown'
@@ -90,7 +90,7 @@ begin
     from signal_keys keys cross join lateral (
       select r.* from public.keyword_signal_rollup r
       where lower(r.keyword) = keys.keyword_key and r.type = p_type
-        and r.last_seen >= p_today - 7
+        and r.last_seen >= p_today - 6
         and exists (select 1 from own_sites)
         and ((p_type = 'rankdown' and r.site_id in (select id from own_sites))
           or (p_type = 'rankup' and r.site_id in (select id from competitor_sites)))
@@ -153,7 +153,7 @@ begin
             where r.site_id = s.id and r.type = 'rankdown' and r.latest_url is not null
               and md5(public.task_recommendation_url(r.latest_url)) = md5(p.url_key)
               and public.task_recommendation_url(r.latest_url) = p.url_key
-              and r.last_seen >= p_today - 7
+              and r.last_seen >= p_today - 6
             offset 0
           ) r
         ), same_url as (
@@ -161,7 +161,7 @@ begin
           from url_keys u cross join lateral (
             select r.* from public.keyword_signal_rollup r
             where lower(r.keyword) = u.keyword_key and r.type = 'rankdown'
-              and r.site_id in (select id from own_sites) and r.last_seen >= p_today - 7
+              and r.site_id in (select id from own_sites) and r.last_seen >= p_today - 6
             order by r.last_seen desc,r.max_volume desc nulls last,r.site_id,r.keyword
             limit 1
           ) r

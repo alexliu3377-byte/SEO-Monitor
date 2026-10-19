@@ -22,7 +22,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const date = new URL(req.url).searchParams.get('date') || radarDate()
-  if (!validRadarDate(date)) return NextResponse.json({ error: '请选择近7日或今日的资料日期' }, { status: 400 })
+  if (!validRadarDate(date)) return NextResponse.json({ error: '请选择含今天在内最近7天的资料日期' }, { status: 400 })
 
   const { id: groupId } = await params
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
