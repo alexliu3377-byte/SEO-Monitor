@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useEffect, useRef, useState } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { fetchAllRows } from '@/lib/supabase-paginate'
@@ -82,7 +84,7 @@ function PaginationBar({ page, total, pageSize, onPageChange, onPageSizeChange }
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   return (
-    <div className="flex items-center justify-between px-5 py-2.5 border-t border-gray-100 bg-gray-50/50 flex-shrink-0 text-xs">
+    <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 border-t border-gray-100 bg-gray-50/50 flex-shrink-0 text-xs">
       <div className="flex items-center gap-1.5 text-gray-500">
         每页
         <select aria-label="选择选项"
@@ -97,7 +99,7 @@ function PaginationBar({ page, total, pageSize, onPageChange, onPageSizeChange }
       <div className="flex items-center gap-1">
         <button disabled={page === 0} onClick={() => onPageChange(0)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">«</button>
         <button disabled={page === 0} onClick={() => onPageChange(page - 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">‹</button>
-        <span className="px-2 text-gray-600">{page + 1} / {totalPages}</span>
+        <span className="inline-flex items-center gap-1 px-2 text-gray-600"><PageNumberInput page={page + 1} totalPages={totalPages} onChange={next => onPageChange(next - 1)} /> / {totalPages}</span>
         <button disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">›</button>
         <button disabled={page >= totalPages - 1} onClick={() => onPageChange(totalPages - 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">»</button>
       </div>

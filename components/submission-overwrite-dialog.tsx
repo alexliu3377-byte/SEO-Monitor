@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useEffect, useId, useRef, useState } from 'react'
 import AppDialog from './app-dialog'
 import { OVERWRITE_PAGE_SIZE, validateOverwriteUrl, type OverwriteCandidate, type SubmissionOverwriteHistory } from '@/lib/submission-overwrite'
@@ -165,7 +167,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
           </div>
           {pages > 1 && <div className="mt-3 flex items-center justify-end gap-3 text-xs text-gray-600">
             <button type="button" className={secondaryButton} disabled={loading || page === 0} onClick={() => void lookup(page - 1, lookupUrl)}>上一页</button>
-            <span>{page + 1} / {pages}</span>
+            <span className="inline-flex items-center gap-1"><PageNumberInput page={page + 1} totalPages={pages} disabled={loading} onChange={next => void lookup(next - 1,lookupUrl)} /> / {pages}</span>
             <button type="button" className={secondaryButton} disabled={loading || page + 1 >= pages} onClick={() => void lookup(page + 1, lookupUrl)}>下一页</button>
           </div>}
         </fieldset>}
@@ -195,7 +197,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
             </ol>}
             {historyPages > 1 && <div className="mt-3 flex items-center gap-3">
               <button type="button" className={secondaryButton} disabled={historyLoading || historyPage === 0} onClick={() => setHistoryPage(value => value - 1)}>上一页</button>
-              <span>{historyPage + 1} / {historyPages}</span>
+              <span className="inline-flex items-center gap-1"><PageNumberInput page={historyPage + 1} totalPages={historyPages} disabled={historyLoading} onChange={next => setHistoryPage(next - 1)} /> / {historyPages}</span>
               <button type="button" className={secondaryButton} disabled={historyLoading || historyPage + 1 >= historyPages} onClick={() => setHistoryPage(value => value + 1)}>下一页</button>
             </div>}
           </div>}

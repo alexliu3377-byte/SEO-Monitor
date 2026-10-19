@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -496,7 +498,7 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
                 </div>
               </div>
             )}
-            {!messageLoading && !messageError && messageTotal > 20 && <div className="flex items-center justify-between text-xs text-slate-500"><span>第 {messagePage} / {Math.ceil(messageTotal / 20)} 页，共 {messageTotal} 条</span><div className="flex gap-2"><button type="button" disabled={messagePage >= Math.ceil(messageTotal / 20)} onClick={() => void loadMessages(discussionItem.id, messagePage + 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更早记录</button><button type="button" disabled={messagePage <= 1} onClick={() => void loadMessages(discussionItem.id, messagePage - 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更新记录</button></div></div>}
+            {!messageLoading && !messageError && messageTotal > 20 && <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>第 <PageNumberInput page={messagePage} totalPages={Math.ceil(messageTotal / 20)} disabled={messageLoading} onChange={next => void loadMessages(discussionItem.id,next)} /> / {Math.ceil(messageTotal / 20)} 页，共 {messageTotal} 条</span><div className="flex gap-2"><button type="button" disabled={messagePage >= Math.ceil(messageTotal / 20)} onClick={() => void loadMessages(discussionItem.id, messagePage + 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更早记录</button><button type="button" disabled={messagePage <= 1} onClick={() => void loadMessages(discussionItem.id, messagePage - 1)} className="rounded border border-slate-300 bg-white px-2.5 py-1.5 disabled:opacity-40">更新记录</button></div></div>}
             {canReply ? (
               <form onSubmit={event => void sendMessage(event, 'discussion', messageContent)} className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
                 {sendError && <div className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{sendError}</div>}
@@ -566,5 +568,5 @@ export default function FeedbackClient({ initialRole }: { initialRole: FeedbackR
 function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   if (total <= PAGE_SIZE) return null
-  return <nav aria-label="反馈分页" className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3"><p className="text-sm text-slate-500">第 {page} / {pages} 页 · 共 {total} 条</p><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">上一页</button><button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">下一页</button></div></nav>
+  return <nav aria-label="反馈分页" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"><p className="text-sm text-slate-500">第 <PageNumberInput page={page} totalPages={pages} onChange={onChange} /> / {pages} 页 · 共 {total} 条</p><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">上一页</button><button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-40">下一页</button></div></nav>
 }

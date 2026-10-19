@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import Link from 'next/link'
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
@@ -881,7 +883,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                           })}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/40">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/40">
                         <div className="flex items-center gap-2 text-xs text-gray-400">
                           <span>第 {oPage * oPageSize + 1}–{Math.min((oPage + 1) * oPageSize, displayTotal)} 条，共 {displayTotal} 条</span>
                           <span className="text-gray-200 mx-1">|</span>
@@ -897,7 +899,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                         <div className="flex items-center gap-1">
                           <button disabled={oPage === 0} onClick={() => setOPage(p => p - 1)}
                             className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">上一页</button>
-                          <span className="text-xs text-gray-400 px-2">{oPage + 1} / {oTotalPages}</span>
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-400 px-2"><PageNumberInput page={oPage + 1} totalPages={oTotalPages} onChange={next => setOPage(next - 1)} /> / {oTotalPages}</span>
                           <button disabled={oPage >= oTotalPages - 1} onClick={() => setOPage(p => p + 1)}
                             className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">下一页</button>
                         </div>
@@ -1216,8 +1218,8 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       </div>
                       {/* Pagination */}
                       {totalPages > 1 && (
-                        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/40">
-                          <span className="text-xs text-gray-400">共 {totalRows} 条 · 第 {subPage + 1} / {totalPages} 页</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/40">
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-400">共 {totalRows} 条 · 第 <PageNumberInput page={subPage + 1} totalPages={totalPages} onChange={next => setSubPage(next - 1)} /> / {totalPages} 页</span>
                           <div className="flex items-center gap-1">
                             <button disabled={subPage === 0} onClick={() => setSubPage(p => p - 1)}
                               className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -1476,12 +1478,12 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
               )}
             </div>
             {sourceDetailTotalPages > 1 && (
-              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/40 flex-shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/40 flex-shrink-0">
                 <span className="text-xs text-gray-400">{sourceDetailPage * DETAIL_PAGE_SIZE + 1}–{Math.min((sourceDetailPage + 1) * DETAIL_PAGE_SIZE, sourceDetailTotal)} 条，共 {sourceDetailTotal} 条</span>
                 <div className="flex items-center gap-1">
                   <button disabled={sourceDetailPage === 0} onClick={() => setSourceDetailPage(p => p - 1)}
                     className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">上一页</button>
-                  <span className="text-xs text-gray-400 px-2">{sourceDetailPage + 1} / {sourceDetailTotalPages}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-gray-400 px-2"><PageNumberInput page={sourceDetailPage + 1} totalPages={sourceDetailTotalPages} onChange={next => setSourceDetailPage(next - 1)} /> / {sourceDetailTotalPages}</span>
                   <button disabled={sourceDetailPage >= sourceDetailTotalPages - 1} onClick={() => setSourceDetailPage(p => p + 1)}
                     className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">下一页</button>
                 </div>
@@ -1565,12 +1567,12 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
               )}
             </div>
             {detailTotalPages > 1 && (
-              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 bg-gray-50/40 flex-shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-t border-gray-100 bg-gray-50/40 flex-shrink-0">
                 <span className="text-xs text-gray-400">{detailPage * DETAIL_PAGE_SIZE + 1}–{Math.min((detailPage + 1) * DETAIL_PAGE_SIZE, detailTotal)} 条，共 {detailTotal} 条</span>
                 <div className="flex items-center gap-1">
                   <button disabled={detailPage === 0} onClick={() => setDetailPage(p => p - 1)}
                     className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">上一页</button>
-                  <span className="text-xs text-gray-400 px-2">{detailPage + 1} / {detailTotalPages}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-gray-400 px-2"><PageNumberInput page={detailPage + 1} totalPages={detailTotalPages} onChange={next => setDetailPage(next - 1)} /> / {detailTotalPages}</span>
                   <button disabled={detailPage >= detailTotalPages - 1} onClick={() => setDetailPage(p => p + 1)}
                     className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 transition-colors">下一页</button>
                 </div>

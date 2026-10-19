@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { type ReactNode } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
@@ -1219,7 +1221,7 @@ function KeywordSearchCard() {
               ← 上一页
             </button>
             <span className="text-xs text-gray-400 tabular-nums">
-              {page + 1} / {Math.ceil(total / 50)} 页 · 共 {total} 个
+              <PageNumberInput page={page + 1} totalPages={Math.ceil(total / 50)} disabled={loading} onChange={next => void handleSearch(next - 1)} /> / {Math.ceil(total / 50)} 页 · 共 {total} 个
             </span>
             <button
               onClick={() => handleSearch(page + 1)}

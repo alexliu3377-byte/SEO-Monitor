@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -296,7 +298,7 @@ function Pagination({ page, total, onChange }: { page: number; total: number; on
   if (total <= PAGE_SIZE) return null
   return (
     <nav aria-label="版本记录分页" className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-slate-500">第 <span className="font-semibold text-slate-800">{page}</span> / {pages} 页 · 共 {total} 条</p>
+      <p className="text-sm text-slate-500">第 <PageNumberInput page={page} totalPages={pages} onChange={onChange} /> / {pages} 页 · 共 {total} 条</p>
       <div className="flex gap-2">
         <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none">上一页</button>
         <button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none">下一页</button>

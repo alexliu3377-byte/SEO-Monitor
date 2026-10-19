@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useState, useEffect, useCallback } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { CRAWL_RULES } from '@/lib/crawl-rules'
@@ -838,7 +840,7 @@ export default function CrawlLogPage() {
                     </tbody>
                   </table>
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50">
                       <span className="text-xs text-gray-400">
                         第 {safePage} / {totalPages} 页 · 共 {filteredLogs.length} 条
                       </span>
@@ -860,6 +862,8 @@ export default function CrawlLogPage() {
                           .map((item, i) =>
                             item === '…' ? (
                               <span key={`e${i}`} className="px-1.5 text-xs text-gray-400">…</span>
+                            ) : safePage === item ? (
+                              <PageNumberInput key={item} page={safePage} totalPages={totalPages} onChange={setPage} />
                             ) : (
                               <button
                                 key={item}

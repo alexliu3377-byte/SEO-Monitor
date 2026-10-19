@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useEffect, useState, useCallback } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { useUser } from '@/lib/user-context'
@@ -408,7 +410,7 @@ const [triggering, setTriggering] = useState(false)
 
           {/* Pagination */}
           {total > 0 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <span>每页</span>
                 <select aria-label="选择选项"
@@ -418,7 +420,7 @@ const [triggering, setTriggering] = useState(false)
                 >
                   {[10, 20, 50].map(n => <option key={n} value={n}>{n} 条</option>)}
                 </select>
-                <span>共 {total} 条 · 第 {page + 1}/{totalPages} 页</span>
+                <span className="inline-flex items-center gap-1">共 {total} 条 · 第 <PageNumberInput page={page + 1} totalPages={totalPages} onChange={next => setPage(next - 1)} /> / {totalPages} 页</span>
               </div>
               {totalPages > 1 && (
                 <div className="flex gap-2">

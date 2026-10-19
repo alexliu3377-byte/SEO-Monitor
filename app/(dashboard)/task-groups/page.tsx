@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 
 import Link from 'next/link'
@@ -317,7 +319,7 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
     <div className="flex items-center justify-center gap-3 py-3 border-t border-gray-50 text-sm">
       <button onClick={() => onPage(page - 1)} disabled={page === 0}
         className="px-3 py-1 border border-gray-200 rounded text-gray-500 hover:bg-gray-50 disabled:opacity-30 text-xs">上一页</button>
-      <span className="text-gray-400 text-xs">{page + 1} / {pages}　共 {total} 条</span>
+      <span className="inline-flex items-center gap-1 text-gray-400 text-xs"><PageNumberInput page={page + 1} totalPages={pages} onChange={next => onPage(next - 1)} /> / {pages}　共 {total} 条</span>
       <button onClick={() => onPage(page + 1)} disabled={page >= pages - 1}
         className="px-3 py-1 border border-gray-200 rounded text-gray-500 hover:bg-gray-50 disabled:opacity-30 text-xs">下一页</button>
     </div>
@@ -2682,7 +2684,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                 <div className="flex items-center justify-center gap-3 py-3 border-t border-gray-50">
                   <button onClick={() => doSearch(searchQuery, searchPage - 1)} disabled={searchPage === 0}
                     className="px-3 py-1 border border-gray-200 rounded text-gray-500 hover:bg-gray-50 disabled:opacity-30 text-xs">上一页</button>
-                  <span className="text-gray-400 text-xs">{searchPage + 1} / {totalPages}　共 {searchTotal} 条</span>
+                  <span className="inline-flex items-center gap-1 text-gray-400 text-xs"><PageNumberInput page={searchPage + 1} totalPages={totalPages} onChange={next => void doSearch(searchQuery,next - 1)} /> / {totalPages}　共 {searchTotal} 条</span>
                   <button onClick={() => doSearch(searchQuery, searchPage + 1)} disabled={searchPage >= totalPages - 1}
                     className="px-3 py-1 border border-gray-200 rounded text-gray-500 hover:bg-gray-50 disabled:opacity-30 text-xs">下一页</button>
                 </div>

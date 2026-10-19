@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useEffect, useState, useMemo } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
@@ -171,7 +173,7 @@ function PaginationBar({ page, total, pageSize, onPageChange }: {
     <div className="flex items-center justify-center gap-1 px-4 py-2.5 border-t border-gray-100 text-xs">
       <button disabled={page === 0} onClick={() => onPageChange(0)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">«</button>
       <button disabled={page === 0} onClick={() => onPageChange(page - 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">‹</button>
-      <span className="px-2 text-gray-500">{page + 1} / {totalPages}</span>
+      <span className="inline-flex items-center gap-1 px-2 text-gray-500"><PageNumberInput page={page + 1} totalPages={totalPages} onChange={next => onPageChange(next - 1)} /> / {totalPages}</span>
       <button disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">›</button>
       <button disabled={page >= totalPages - 1} onClick={() => onPageChange(totalPages - 1)} className="px-1.5 py-1 rounded border border-gray-200 disabled:opacity-30 hover:bg-gray-100">»</button>
     </div>

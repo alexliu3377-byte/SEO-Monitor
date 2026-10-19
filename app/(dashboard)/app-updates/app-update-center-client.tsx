@@ -1,5 +1,7 @@
 'use client'
 
+import { PageNumberInput } from '@/components/page-number-input'
+
 import { useCallback, useDeferredValue, useEffect, useState } from 'react'
 
 type AppRow = {
@@ -299,7 +301,7 @@ export default function AppUpdateCenterClient({ canManage }: { canManage: boolea
           ) : (
             <div className="overflow-x-auto"><table className="w-full min-w-[800px]"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-5 py-3">开始时间</th><th className="px-4 py-3">应用</th><th className="px-4 py-3">来源</th><th className="px-4 py-3">结果</th><th className="px-4 py-3">发现版本</th><th className="px-5 py-3">错误</th></tr></thead><tbody className="divide-y divide-slate-100">{runs.length === 0 ? <tr><td colSpan={6} className="py-20 text-center text-sm text-slate-400">没有符合条件的运行记录</td></tr> : runs.map(run => <tr key={run.id}><td className="px-5 py-4 text-sm text-slate-500">{formatTime(run.started_at)}</td><td className="px-4 py-4 text-sm font-medium text-slate-800">{run.app_name}</td><td className="px-4 py-4 text-sm text-slate-600">{run.source_name}</td><td className="px-4 py-4 text-sm text-slate-600">{{ running: '运行中', completed: '发现新版本', no_change: '没有变化', failed: '失败' }[run.status] ?? run.status}</td><td className="px-4 py-4 font-mono text-sm text-slate-700">{run.discovered_version ?? '—'}</td><td className="max-w-sm px-5 py-4 text-sm text-red-600"><p className="truncate" title={run.error_message ?? ''}>{run.error_message ?? '—'}</p></td></tr>)}</tbody></table></div>
           )}
-          {!loading && total > 0 && <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"><p className="text-slate-500">共 {total} {tab === 'updates' ? '个应用' : '条'} · 第 {page} / {totalPages} 页</p><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => setPage(current => Math.max(1, current - 1))} className="h-9 rounded-lg border border-slate-200 px-4 font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">上一页</button><button type="button" disabled={page >= totalPages} onClick={() => setPage(current => Math.min(totalPages, current + 1))} className="h-9 rounded-lg border border-slate-200 px-4 font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div></div>}
+          {!loading && total > 0 && <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"><p className="text-slate-500">共 {total} {tab === 'updates' ? '个应用' : '条'} · 第 <PageNumberInput page={page} totalPages={totalPages} onChange={setPage} /> / {totalPages} 页</p><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => setPage(current => Math.max(1, current - 1))} className="h-9 rounded-lg border border-slate-200 px-4 font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">上一页</button><button type="button" disabled={page >= totalPages} onClick={() => setPage(current => Math.min(totalPages, current + 1))} className="h-9 rounded-lg border border-slate-200 px-4 font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div></div>}
         </section>
       </main>
 

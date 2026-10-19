@@ -27,7 +27,7 @@ const bundle=await build({stdin:{contents:`import React from 'react';import{crea
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:stubs[args.path],loader:'jsx',resolveDir:process.cwd()}))
   if(before)b.onLoad({filter:/app[\\/]\(dashboard\)[\\/]task-groups[\\/]page\.tsx$/},()=>({contents:execFileSync('git',['show',`${beforeRef}:app/(dashboard)/task-groups/page.tsx`],{encoding:'utf8'}),loader:'tsx',resolveDir:resolve('app/(dashboard)/task-groups')}))
 }}]})
-const css=(await postcss([tailwindcss({content:['app/(dashboard)/task-groups/page.tsx','app/(dashboard)/hot-keywords/page.tsx','components/volume-rise-date-cell.tsx']})]).process('@tailwind base;@tailwind utilities;',{from:undefined})).css
+const css=(await postcss([tailwindcss({content:['app/(dashboard)/task-groups/page.tsx','app/(dashboard)/hot-keywords/page.tsx','components/page-number-input.tsx','components/volume-rise-date-cell.tsx']})]).process('@tailwind base;@tailwind utilities;',{from:undefined})).css
 const html=`<style>${css}</style><div id="root"></div><script>${bundle.outputFiles[0].text.replaceAll('</script','<\\/script')}</script>`
 const browser=await chromium.launch({headless:true})
 const requests=[], sortRequests=[], errors=[]
@@ -72,6 +72,14 @@ try{
   delayTab='rank';await choose('竞品涨排名');await choose('更新词库');await visible(`wordLib|${date(-2)}|0`)
   await page.waitForTimeout(850);await visible(`wordLib|${date(-2)}|0`);delayTab=''
   await choose('竞品涨排名');await visible(`rank|all|0`)
+  const taskJump=page.getByLabel('跳转页码',{exact:true})
+  const beforeTaskJump=requests.length
+  await taskJump.fill('101');await page.waitForTimeout(80)
+  assert.equal(requests.length,beforeTaskJump,'Typing must not query intermediate pages')
+  await taskJump.press('Enter');await visible('rank|all|2000')
+  assert.equal(requests.at(-1).page,100)
+  assert.equal(requests.length,beforeTaskJump+1)
+  await taskJump.fill('1');await taskJump.press('Enter');await visible('rank|all|0')
   await page.getByLabel('筛选资料日期').selectOption(date(-3));await visible(`rank|${date(-3)}|0`)
   await choose('更新词库');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-2))
   await visible(`wordLib|${date(-2)}|0`);await choose('下一页');await visible(`wordLib|${date(-2)}|20`)
@@ -106,6 +114,15 @@ try{
   await choose('更新词库');await visible(`wordLib|${date(-1)}|0`)
   await page.getByLabel('筛选资料日期').selectOption(date(-2));await visible(`wordLib|${date(-2)}|0`)
   await choose('竞品涨排名');await visible(`rank|all|0`)
+  const radarJump=page.getByLabel('跳转页码',{exact:true})
+  await radarJump.fill('41');await radarJump.press('Enter');await visible('rank|all|2000')
+  assert.equal(requests.at(-1).page,40)
+  const afterRadarJump=requests.length
+  await radarJump.fill('bad');await radarJump.press('Enter')
+  assert.equal(await radarJump.inputValue(),'41');assert.equal(requests.length,afterRadarJump)
+  await radarJump.fill('99999');await radarJump.press('Enter');await visible('rank|all|2500')
+  assert.equal(await radarJump.inputValue(),'51')
+  await radarJump.fill('1');await radarJump.press('Enter');await visible('rank|all|0')
   await choose('»');await visible(`rank|all|2500`)
   await page.getByLabel('筛选资料日期').selectOption('all');await visible('rank|all|0')
   await choose('新增');await visible('new|rank|all|0')
