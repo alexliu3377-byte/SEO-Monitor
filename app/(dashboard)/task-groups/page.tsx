@@ -15,7 +15,7 @@ import { radarTabDate, radarTabScope } from '@/lib/radar-tab-state'
 import { isIncrementalOperation } from '@/lib/submission-operation'
 import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
 import { taskClaimIdentity, isUpdateTask } from '@/lib/task-claim-identity'
-import { radarDates } from '@/lib/radar-dates'
+import { radarDates, radarDateOptions } from '@/lib/radar-dates'
 import { BaiduCookiePoolManager } from '@/components/baidu-cookie-pool'
 import AppDialog from '@/components/app-dialog'
 import DistributedRecipientPicker from '@/components/distributed-recipient-picker'
@@ -779,23 +779,26 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const domainInfoLoadedRef = useRef(false)
   const domainInfoPromiseRef = useRef<Promise<void> | null>(null)
-  const [wordLibSearch, setWordLibSearch] = useState('')
-  const [wordLibQuery, setWordLibQuery] = useState('')
+  const [radarSearches, setRadarSearches] = useState<Record<string,string>>({})
+  const [radarQueries, setRadarQueries] = useState<Record<string,string>>({})
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
   const [radarDatesByTab, setRadarDatesByTab] = useState<Record<string, string>>({})
   const radarDateScope = radarTabScope(rightTab, activeGroupId ?? '')
+  const radarSearch = radarSearches[radarDateScope] ?? ''
+  const radarKeyword = radarQueries[radarDateScope] ?? ''
   const radarDate = radarDatesByTab[radarDateScope] ?? ''
   const setRadarDate = (value: string) => setRadarDatesByTab(previous => ({ ...previous, [radarDateScope]: value }))
   const [badgeFilter, setBadgeFilter] = useState<BadgeFilter>('all')
 
   useEffect(() => {
+    if (radarSearch.trim() === radarKeyword) return
     const timer = window.setTimeout(() => {
-      setWordLibQuery(wordLibSearch.trim())
-      setTabPage(current => ({ ...current, wordLib: 0 }))
+      setRadarQueries(current => ({ ...current,[radarDateScope]: radarSearch.trim() }))
+      setTabPage(current => ({ ...current,[rightTab]: 0 }))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [wordLibSearch])
+  }, [radarSearch,radarKeyword,radarDateScope,rightTab])
 
   // Group management
   const [showCreate, setShowCreate] = useState(false)
@@ -848,8 +851,8 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const effectiveRadarDate = radarTabDate(rightTab, radarDate)
   const isDailyRadarTab = ['volumeRising','cross','rank','streak','newWords','wordLib'].includes(rightTab)
   const dailyParams = new URLSearchParams({ groupId: activeGroupId ?? '', tab: rightTab, date: effectiveRadarDate,
-    page: String(tabPage[rightTab]), pageSize: String(PAGE_SIZE),
-    ...(rightTab === 'wordLib' ? { q: wordLibQuery,
+    page: String(tabPage[rightTab]), pageSize: String(PAGE_SIZE),q: radarKeyword,
+    ...(rightTab === 'wordLib' ? {
       sort: sortCol === 'count' ? 'longTailCount' : ['date','siteCount'].includes(sortCol) && sortDir ? sortCol : 'date',
       direction: sortDir || 'desc' } : { badge: badgeFilter,sort: sortCol || 'date',direction: sortDir || 'desc' }) })
   const dailyQuery = isWorkspaceRoute && activeGroup && isDailyRadarTab ? dailyParams.toString() : null
@@ -922,7 +925,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const volumeRisingWordsSorted = radarData?.volumeRisingWords ?? []
   const allNewWords = radarData?.newWords ?? []
 
-  const radarAvailableDates = radarDates()
+  const radarAvailableDates = radarDateOptions()
 
   // 缓存尚未更新到“昨天”时，tab 的默认日期可能不在实际选项中。浏览器会把
   // 下拉框显示成“近30天全部”，但旧逻辑仍用那个不存在的日期过滤，造成假空白。
@@ -3528,7 +3531,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         <select aria-label="筛选资料日期" value={effectiveRadarDate}
                           onChange={event => { setRadarDate(event.target.value); setTabPage(current => ({ ...current, [rightTab]: 0 })) }}
                           className="rounded border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-400">
-                          {radarAvailableDates.map(date => <option key={date} value={date}>{date}</option>)}
+                          {radarAvailableDates.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
                       </label>
                     )}
@@ -3547,20 +3550,20 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
                         </div>
                       </div>
                     )}
-                    {rightTab === 'wordLib' && (
+                    {isDailyRadarTab && (
                       <label className="flex items-center gap-1.5 text-xs text-gray-400">
                         关键词
                         <span className="relative">
-                          <input aria-label="搜索更新词库关键词"
+                          <input aria-label={rightTab === 'wordLib' ? '搜索更新词库关键词' : '搜索关键词'}
                             type="text"
-                            value={wordLibSearch}
-                            onChange={event => setWordLibSearch(event.target.value)}
+                            value={radarSearch}
+                            onChange={event => setRadarSearches(current => ({ ...current,[radarDateScope]: event.target.value }))}
                             placeholder="搜索关键词"
                             className="w-40 rounded border border-gray-200 bg-white py-1 pl-2 pr-7 text-sm text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-1 focus:ring-green-400"
                           />
-                          {wordLibSearch && (
+                          {radarSearch && (
                             <button type="button" aria-label="清空关键词搜索"
-                              onClick={() => { setWordLibSearch(''); setWordLibQuery(''); setTabPage(current => ({ ...current, wordLib: 0 })) }}
+                              onClick={() => { setRadarSearches(current => ({ ...current,[radarDateScope]: '' })); setRadarQueries(current => ({ ...current,[radarDateScope]: '' })); setTabPage(current => ({ ...current,[rightTab]: 0 })) }}
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">✕</button>
                           )}
                         </span>

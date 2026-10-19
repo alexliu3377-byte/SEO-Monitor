@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import type { UserRole } from '@/lib/user-context'
-import { DAILY_RADAR_TABS, radarDate, radarDates, radarScope, validRadarDate } from '@/lib/radar-daily'
+import { DAILY_RADAR_TABS, radarDate, radarDates, radarScope } from '@/lib/radar-daily'
+import { validRadarDateSelection } from '@/lib/radar-dates'
 
 export const maxDuration = 60
 export async function GET(request: Request) {
@@ -10,8 +11,8 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const params = new URL(request.url).searchParams
   const tab = params.get('tab') || 'volumeRising'
-  const date = params.get('date') || radarDate(tab === 'newWords' || tab === 'wordLib' ? -1 : 0)
-  if (!(DAILY_RADAR_TABS as readonly string[]).includes(tab) || !validRadarDate(date)) {
+  const date = params.get('date') || (tab === 'newWords' || tab === 'wordLib' ? radarDate(-1) : 'all')
+  if (!(DAILY_RADAR_TABS as readonly string[]).includes(tab) || !validRadarDateSelection(date)) {
     return NextResponse.json({ error: '请选择含今天在内最近7天的有效资料日期' }, { status: 400 })
   }
   const groupId = params.get('groupId') || null
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const sorts = new Set(['date','keyword','volume','count','siteCount','rankDays','streak','change','netChange','long_tail_count','site_count'])
     const sortAliases: Record<string, string> = { longTailCount: 'long_tail_count', ...(tab === 'wordLib' ? { siteCount: 'site_count' } : {}) }
     const sort = sortAliases[params.get('sort') || ''] || params.get('sort') || 'date'
-    const args = { p_date: date, p_scope: scope.key, p_tab: tab, p_group_id: groupId,
+    const args = { p_date: date === 'all' ? null : date, p_scope: scope.key, p_tab: tab, p_group_id: groupId,
       p_page: integer('page', 0), p_size: Math.max(1, integer('pageSize', 20, 500)),
       p_keyword: (params.get('q') || '').trim().slice(0, 200), p_site: (params.get('site') || '').trim().slice(0, 200),
       p_min_sites: ['volumeRising','streak'].includes(tab) ? 1 : Math.max(1, integer('minSites', 1)), p_min_streak: Math.max(2, integer('minStreak', 2)),

@@ -25,7 +25,7 @@ try {
   await db.exec(normalization.slice(0, normalization.indexOf('create index')) + '\ncommit;')
   const recommendation = await readFile(new URL('../supabase/migrations/20261013_paged_recommendations.sql', import.meta.url), 'utf8')
   await db.exec(recommendation.slice(0,recommendation.indexOf('create or replace function public.get_task_group_recommendations_page'))+'\ncommit;')
-  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql']) {
+  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql','20261019_radar_all_dates_page.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   }
   const today = (await db.query("select (now() at time zone 'Asia/Kuala_Lumpur')::date::text as d")).rows[0].d
@@ -118,6 +118,58 @@ try {
     assert.equal((await groupedPage(tab,{keyword:'candidate-1'})).total,11110)
   }
   assert.equal((await groupedPage('wordLib')).total,30000)
+  // All dates must remain one bounded server page, never a 2,000-row client cap.
+  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload)
+    select $1::date-n,'group-regression','{}' from generate_series(0,6) n
+    where $1::date-n<>$2::date`,[today,date])
+  const allLarge=(await db.query(`select get_daily_radar_page(p_date=>null,p_scope=>'group-regression',
+    p_tab=>'rank',p_group_id=>$1,p_page=>100,p_size=>20) as result`,[group])).rows[0].result
+  assert.equal(allLarge.cacheReady,true)
+  assert.equal(allLarge.date,'all')
+  assert.equal(allLarge.total,29997)
+  assert.equal(allLarge.data.length,20)
+  // Repeated terms retain their dated events. A completion hides only events on
+  // or before that completion; subsequent signals remain actionable.
+  await db.query(`insert into member_claimed_keywords(group_id,user_id,claimed_date,keyword,status,submitted_at)
+    values($1,$2,$3::date-5,'done-window','submitted',($3::date-3)::timestamp at time zone 'Asia/Kuala_Lumpur')`,[group,user,today])
+  await db.query(`with days as (select $1::date-n as d,n from generate_series(0,6) n),
+    fixtures as (select d,jsonb_build_array(
+      jsonb_build_object('keyword','repeat','first_date',$1::date-6,'last_date',d,'volume',100,'streak',case when n=6 then 2 else 3 end),
+      jsonb_build_object('keyword','unique-'||n,'first_date',d,'last_date',d,'volume',50,'streak',2),
+      jsonb_build_object('keyword','done-window','first_date',$1::date-6,'last_date',d,'volume',10,'streak',3)
+    ) as rows from days)
+    insert into radar_daily_cache(data_date,scope_key,payload)
+    select d,'all-regression',jsonb_build_object('rankWords',rows,'streakWords',rows,'cross',rows,'wordLib',rows) from fixtures`,[today])
+  const windowPage=async(tab='rank',badge='all',selectedGroup=group,pg=0)=>(await db.query(`select get_daily_radar_page(
+    p_date=>null,p_scope=>'all-regression',p_tab=>$1,p_group_id=>$2,p_page=>$3,p_size=>4,p_badge=>$4) as result`,[tab,selectedGroup,pg,badge])).rows[0].result
+  const completionCutoff=(await db.query('select ($1::date-3)::text as d',[today])).rows[0].d
+  for(const tab of ['cross','rank','streak']){
+    const first=await windowPage(tab),added=await windowPage(tab,'new'),updated=await windowPage(tab,'updated')
+    assert.equal(first.total,17)
+    assert.equal(added.total,8)
+    assert.equal(updated.total,9)
+    assert.equal(first.data.length,4)
+    assert.equal((await windowPage(tab,'all',null)).total,21)
+    const allRows=[]
+    for(let pg=0;pg<5;pg++)allRows.push(...(await windowPage(tab,'all',group,pg)).data)
+    assert.equal(new Set(allRows.map(row=>row.keyword+'|'+row.last_date)).size,17)
+    assert.equal(allRows.filter(row=>row.keyword==='done-window').length,3)
+    assert.ok(allRows.filter(row=>row.keyword==='done-window').every(row=>row.last_date>completionCutoff))
+    const repeated=(await db.query(`select get_daily_radar_page(p_date=>null,p_scope=>'all-regression',p_tab=>$1,
+      p_keyword=>'repeat',p_badge=>'updated',p_size=>2,p_page=>2) as result`,[tab])).rows[0].result
+    assert.equal(repeated.total,6)
+    assert.equal(repeated.data.length,2)
+  }
+  assert.equal((await windowPage('wordLib')).total,21)
+  assert.equal((await windowPage()).cachedDates.length,7)
+  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload)
+    select data_date,'partial-regression',payload from radar_daily_cache where scope_key='all-regression' and data_date=$1::date`,[date])
+  const partial=(await db.query(`select get_daily_radar_page(null,'partial-regression','rank') as result`)).rows[0].result
+  assert.equal(partial.cacheReady,true) // missing today's cache cannot block other dates
+  assert.equal(partial.total,3)
+  assert.deepEqual(partial.cachedDates,[date])
+  const missing=(await db.query(`select get_daily_radar_page(null,'missing-scope','rank') as result`)).rows[0].result
+  assert.equal(missing.cacheReady,false)
   for(const role of ['anon','authenticated']) {
     assert.equal((await db.query(`select has_function_privilege($1,
       'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
@@ -161,6 +213,6 @@ try {
   assert.equal((await db.query("select has_function_privilege('authenticated','public.refresh_daily_radar_cache(date,text,text[],text[])','execute') as allowed")).rows[0].allowed,false)
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
   console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
-    liveCompletionFiltering:true,groupedCandidates:30000,completionOriginalAndFinal:true,completionDateBoundary:true,
+    liveCompletionFiltering:true,groupedCandidates:30000,allSevenDates:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
     legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
 } finally { await db.close() }

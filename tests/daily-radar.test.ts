@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { radarDate, radarDates, validRadarDate } from '../lib/radar-dates'
+import { radarDate, radarDates, radarDateOptions, validRadarDate, validRadarDateSelection } from '../lib/radar-dates'
 import { radarScope, refreshDailyRadarCaches } from '../lib/radar-daily'
 import { isUpdateTask, normalizeTaskUrl, taskClaimIdentity } from '../lib/task-claim-identity'
 
@@ -12,6 +12,18 @@ test('radar dates retain exactly seven dates including today in Malaysia time', 
   assert.deepEqual(radarDates(now), ['2026-10-19','2026-10-18','2026-10-17','2026-10-16','2026-10-15','2026-10-14','2026-10-13'])
   assert.equal(validRadarDate('2026-10-13',now),true)
   for (const date of ['2026-10-20','2026-10-12','2026-10-11','2026-02-30','2026-10-19T00:00:00Z','']) assert.equal(validRadarDate(date,now),false)
+})
+
+test('all is a seven-day read selection, not a valid cache-build date', () => {
+  const now = Date.parse('2026-10-18T16:00:00Z')
+  assert.equal(validRadarDateSelection('all',now),true)
+  assert.equal(validRadarDate('all',now),false)
+  assert.equal(validRadarDateSelection('2026-10-13',now),true)
+  assert.deepEqual(radarDateOptions(now),[
+    {value:'all',label:'今天（全部）'},
+    ...['2026-10-18','2026-10-17','2026-10-16','2026-10-15','2026-10-14','2026-10-13'].map(date=>({value:date,label:date}))
+  ])
+  for(const value of ['', 'ALL', '2026-10-12', '2026-10-20']) assert.equal(validRadarDateSelection(value,now),false)
 })
 
 test('update claims match pages, not another page with the same keyword', () => {
@@ -50,6 +62,7 @@ test('page GET reads a bounded cache page and never rebuilds it inside Vercel', 
   assert.match(source,/auth\.getUser/)
   assert.match(source,/canAccessTaskGroup/)
   assert.match(source,/validRadarDate/)
+  assert.match(source,/p_date: date === 'all' \? null : date/)
   assert.match(source,/rpc\('get_daily_radar_page'/)
   assert.doesNotMatch(source,/rpc\('refresh|refreshDailyRadarCaches/)
   assert.match(source,/private, no-store/)

@@ -45,10 +45,11 @@ try{
   else if(url.pathname.endsWith('/rankdown-signals'))body={rows:[{keyword:'独立跌词',stat_date:date(0),rank_position:3,prev_rank:1,volume:100,url:'https://a.com/1.html'}]}
   else if(url.pathname==='/api/radar-daily'){
    const p=url.searchParams,tab=p.get('tab'),day=p.get('date'),pg=Number(p.get('page')),size=Number(p.get('pageSize')),total=tab==='rank'?2505:42
-   requests.push({tab,date:day,page:pg,size})
+   const badge=p.get('badge')||'all',q=p.get('q')||''
+   requests.push({tab,date:day,page:pg,size,badge,q})
    if(tab===delayTab)await new Promise(r=>setTimeout(r,700))
    if(tab===failTab)return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'测试该来源暂时不可用'})}).catch(()=>{})
-   body={date:day,total,data:Array.from({length:Math.max(0,Math.min(size,total-pg*size))},(_,i)=>({keyword:`${tab}|${day}|${pg*size+i}`,volume:100,prevVolume:90,change:10,baselineVolume:50,netChange:50,siteCount:2,count:2,sites:['a.com','b.com'],first_date:day,last_date:day,rankDays:3,streak:3,domain:'a.com',dims:['new','rank'],newSites:['a.com'],rankSites:['b.com'],long_tail_count:3,site_count:2}))}
+   body={date:day,total,data:Array.from({length:Math.max(0,Math.min(size,total-pg*size))},(_,i)=>({keyword:`${q?q+'|':''}${badge==='all'?'':badge+'|'}${tab}|${day}|${pg*size+i}`,volume:100,prevVolume:90,change:10,baselineVolume:50,netChange:50,siteCount:2,count:2,sites:['a.com','b.com'],first_date:badge==='updated'?date(-8):day==='all'?date(-i%7):day,last_date:day==='all'?date(-i%7):day,rankDays:3,streak:badge==='new'?2:3,domain:'a.com',dims:['new','rank'],newSites:['a.com'],rankSites:['b.com'],long_tail_count:3,site_count:2}))}
   }
   await route.fulfill({contentType:'application/json',body:JSON.stringify(body)}).catch(()=>{})
  })
@@ -64,10 +65,12 @@ try{
   console.log(JSON.stringify({beforeFix:true,reproduced:'wordLib API succeeds but unrelated radarLoaded gate blocks render'}))
  }else{
   await visible(`wordLib|${date(-1)}|0`)
+  assert.equal(await page.getByLabel('筛选资料日期').locator('option').count(),7)
+  assert.deepEqual(await page.getByLabel('筛选资料日期').locator('option').allTextContents(),['今天（全部）',...Array.from({length:6},(_,i)=>date(-i-1))])
   await page.getByLabel('筛选资料日期').selectOption(date(-2));await visible(`wordLib|${date(-2)}|0`)
   delayTab='rank';await choose('竞品涨排名');await choose('更新词库');await visible(`wordLib|${date(-2)}|0`)
   await page.waitForTimeout(850);await visible(`wordLib|${date(-2)}|0`);delayTab=''
-  await choose('竞品涨排名');await visible(`rank|${date(0)}|0`)
+  await choose('竞品涨排名');await visible(`rank|all|0`)
   await page.getByLabel('筛选资料日期').selectOption(date(-3));await visible(`rank|${date(-3)}|0`)
   await choose('更新词库');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-2))
   await visible(`wordLib|${date(-2)}|0`);await choose('下一页');await visible(`wordLib|${date(-2)}|20`)
@@ -75,20 +78,36 @@ try{
   await page.getByRole('alert').filter({hasText:'测试该来源暂时不可用'}).waitFor({state:'visible'})
   await visible(`wordLib|${date(-2)}|20`);failTab=''
   await choose('竞品涨排名');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-3));await visible(`rank|${date(-3)}|0`)
+  await page.getByLabel('筛选资料日期').selectOption('all');await visible('rank|all|0')
+  await choose('更新');await visible('updated|rank|all|0')
+  await choose('下一页');await visible('updated|rank|all|20')
+  await page.getByLabel('搜索关键词',{exact:true}).fill('deep-target');await visible('deep-target|updated|rank|all|0')
+  assert.deepEqual(requests.at(-1),{tab:'rank',date:'all',page:0,size:20,badge:'updated',q:'deep-target'})
+  await choose('清空关键词搜索');await visible('updated|rank|all|0')
+  await choose('新增');await visible('new|rank|all|0')
+  await choose('全部');await visible('rank|all|0')
   failTab='cross';await choose('交叉词');await visible('该日期资料读取失败，请点击上方重试或切换日期。')
   await choose('更新词库');await visible(`wordLib|${date(-2)}|0`);failTab=''
   await choose('跌词更新');await visible('独立跌词')
   await page.screenshot({path:'.task-work/radar-tabs-fixed.png'})
-  console.log(JSON.stringify({taskWorkspace:true,wordLibFirstEntry:true,datesIndependent:true,lateResponsesIsolated:true,pagination:true,failureIsolated:true,rankdownIndependent:true}))
-  await page.goto('https://radar.test/radar');await visible(`volumeRising|${date(0)}|0`)
+  console.log(JSON.stringify({taskWorkspace:true,wordLibFirstEntry:true,datesIndependent:true,allSevenDates:true,combinedBadgeSearch:true,filterResetsPage:true,lateResponsesIsolated:true,pagination:true,failureIsolated:true,rankdownIndependent:true}))
+  await page.goto('https://radar.test/radar');await visible(`volumeRising|all|0`)
   await choose('更新词库');await visible(`wordLib|${date(-1)}|0`)
   await page.getByLabel('筛选资料日期').selectOption(date(-2));await visible(`wordLib|${date(-2)}|0`)
-  await choose('竞品涨排名');await visible(`rank|${date(0)}|0`)
-  await choose('»');await visible(`rank|${date(0)}|2500`)
+  await choose('竞品涨排名');await visible(`rank|all|0`)
+  await choose('»');await visible(`rank|all|2500`)
+  await page.getByLabel('筛选资料日期').selectOption('all');await visible('rank|all|0')
+  await choose('新增');await visible('new|rank|all|0')
+  await choose('»');await visible('new|rank|all|2500')
+  await choose('更新');await visible('updated|rank|all|0')
+  await choose('全部');await visible('rank|all|0')
   await choose('更新词库');assert.equal(await page.getByLabel('筛选资料日期').inputValue(),date(-2));await visible(`wordLib|${date(-2)}|0`)
   failTab='cross';await choose('交叉词');await visible('测试该来源暂时不可用');assert.ok(await page.getByLabel('筛选资料日期').isVisible())
-  failTab='';await choose('重试');await visible(`cross|${date(0)}|0`)
+  failTab='';await choose('重试');await visible(`cross|all|0`)
   assert.deepEqual(errors,[])
-  console.log(JSON.stringify({hotRadar:true,pageBeyond2000:true,datesIndependent:true,filtersSurviveFailure:true,retry:true,browserErrors:errors,requests:requests.length,productionWrites:0}))
+  await page.setViewportSize({width:1000,height:800});await choose('竞品涨排名');await visible('rank|all|0')
+  assert.ok(await page.getByLabel('筛选资料日期').isVisible())
+  await page.screenshot({path:'.task-work/radar-all-date-filters.png'})
+  console.log(JSON.stringify({hotRadar:true,pageBeyond2000:true,allSevenDates:true,combinedBadgeFilter:true,datesIndependent:true,filtersSurviveFailure:true,retry:true,browserErrors:errors,requests:requests.length,productionWrites:0}))
  }
 }finally{await browser.close()}

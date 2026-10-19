@@ -6,7 +6,7 @@ import { buildGroupMaps } from '@/lib/company-groups'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
 import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
-import { radarDates } from '@/lib/radar-dates'
+import { radarDateOptions } from '@/lib/radar-dates'
 import { useRadarPage } from '@/lib/use-radar-page'
 import { radarTabDate, radarTabScope } from '@/lib/radar-tab-state'
 
@@ -276,6 +276,7 @@ export default function HotRadarPage() {
   const [wordLibQuery, setWordLibQuery] = useState({ keyword: '', site: '' })
   const [sortCol, setSortCol]           = useState('')
   const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
+  const [badgeFilter, setBadgeFilter] = useState<'all'|'new'|'updated'>('all')
   const [wordLibMinSites, setWordLibMinSites] = useState(1)
 
   const today     = useMemo(() => getMYDate(),    [])
@@ -284,6 +285,7 @@ export default function HotRadarPage() {
   const pageParams = new URLSearchParams({ tab: activeTab === 'new' ? 'newWords' : activeTab,date: filterDate,
     page: String(page),pageSize: String(effectivePageSize),q: wordLibQuery.keyword,site: wordLibQuery.site,
     minSites: String(activeTab === 'wordLib' ? wordLibMinSites : minSites),minStreak: String(minStreak),
+    badge: ['cross','rank','streak','new'].includes(activeTab) ? badgeFilter : 'all',
     sort: sortCol || 'date',direction: sortDir || 'desc' })
   const dailyPage = useRadarPage<DailyRadarRow>(pageParams.toString())
   const loading = dailyPage.loading && dailyPage.data === null
@@ -312,6 +314,7 @@ export default function HotRadarPage() {
   }, [dailyPage.data,dailyPage.total,effectivePageSize,page])
 
   useEffect(() => {
+    if (filterKeyword.trim() === wordLibQuery.keyword && filterSite.trim() === wordLibQuery.site) return
     const timer = window.setTimeout(() => {
       const keyword = filterKeyword.trim()
       const site = filterSite.trim()
@@ -319,7 +322,7 @@ export default function HotRadarPage() {
       setPage(0)
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [filterKeyword, filterSite, activeTab])
+  }, [filterKeyword, filterSite, wordLibQuery])
 
   // ── Fetch ────────────────────────────────────────────────────────────────
 
@@ -483,11 +486,12 @@ export default function HotRadarPage() {
     ? ((dailyPage.data ?? []) as StreakEntry[]).map(row => ({ ...row,domains: [row.domain] }))
     : dailyPage.data ?? []
   const activeList = pagedList
-  const availableDates = radarDates()
+  const availableDates = radarDateOptions()
   const activeTotal = dailyPage.total
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
+    setBadgeFilter('all')
     setPage(0)
     setSortCol(tab === 'volumeRising' ? 'netChange' : 'date')
     setSortDir('desc')
@@ -602,7 +606,7 @@ export default function HotRadarPage() {
                 <span className="text-xs text-gray-400">资料日期</span>
                 <select aria-label="筛选资料日期" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0) }}
                   className="text-sm border border-gray-200 rounded px-2 py-1 text-gray-700 focus:outline-none">
-                  {availableDates.map(date => <option key={date} value={date}>{date}</option>)}
+                  {availableDates.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </div>
               <div className="flex items-center gap-1.5">
@@ -641,6 +645,20 @@ export default function HotRadarPage() {
                   </>
                 )}
               </div>
+              {['cross','rank','streak','new'].includes(activeTab) && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  类型
+                  <div className="inline-flex overflow-hidden rounded border border-gray-200 bg-white">
+                    {([['all','全部'],['new','新增'],['updated','更新']] as const).map(([value,label]) => (
+                      <button key={value} type="button" aria-pressed={badgeFilter === value}
+                        onClick={() => { setBadgeFilter(value); setPage(0) }}
+                        className={`px-2.5 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-green-600 ${badgeFilter === value ? 'bg-green-500 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-2 ml-auto">
                 <button onClick={copyKeywords}
                   className={`text-xs px-2.5 py-1 rounded font-medium transition-all duration-200 ${
@@ -693,7 +711,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={7} className="table-td text-center text-gray-400 py-10">暂无交叉词数据</td></tr>
                     ) : (
                       (pagedList as CrossEntry[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
                           <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
@@ -756,7 +774,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无数据</td></tr>
                     ) : (
                       (pagedList as WordEntry[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
                           <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} includeYesterday />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
@@ -812,7 +830,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={8} className="table-td text-center text-gray-400 py-10">暂无累计上涨的词</td></tr>
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
                           <VolumeRiseDateCell date={w.last_date} today={today} yesterday={yesterday} />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
@@ -875,7 +893,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无数据</td></tr>
                     ) : (
                       (pagedList as RankEntry[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
                           <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={getBadge(w.first_date, w.last_date, yesterday)} />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
@@ -926,7 +944,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">暂无连续上涨词</td></tr>
                     ) : (
                       (pagedList as StreakGrouped[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}|${w.domains.join(',')}`} className="hover:bg-gray-50 transition-colors">
                           <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge={getStreakBadge(w.streak, w.last_date, yesterday)} />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
@@ -992,7 +1010,7 @@ export default function HotRadarPage() {
                       <tr><td colSpan={6} className="table-td text-center text-gray-400 py-10">{wordLibError ? '词库读取失败，请点击上方重试' : '没有匹配的词库资料'}</td></tr>
                     ) : (
                       (pagedList as (WordEntry & { longTailCount: number })[]).map(w => (
-                        <tr key={w.keyword} className="hover:bg-gray-50 transition-colors">
+                        <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
                           <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
