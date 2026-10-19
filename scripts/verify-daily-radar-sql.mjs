@@ -31,7 +31,7 @@ try {
   const retireLegacyGuard = await readFile(new URL('../supabase/migrations/20261019_retire_keyword_only_claim_guard.sql', import.meta.url), 'utf8')
   const recommendation = await readFile(new URL('../supabase/migrations/20261013_paged_recommendations.sql', import.meta.url), 'utf8')
   await db.exec(recommendation.slice(0,recommendation.indexOf('create or replace function public.get_task_group_recommendations_page'))+'\ncommit;')
-  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql','20261019_radar_all_dates_page.sql']) {
+  for (const name of ['20261019_daily_radar_cache.sql','20261019_url_task_claim_identity.sql','20261019_recommendation_page_history.sql','20261019_radar_page_query.sql','20261019_radar_group_completion_filter.sql','20261019_radar_all_dates_page.sql','20261019_radar_display_order.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   }
   assert.equal((await db.query("select count(*)::int as n from pg_trigger where tgrelid='member_claimed_keywords'::regclass and tgname='prevent_duplicate_active_group_claim'")).rows[0].n,0)
@@ -177,6 +177,31 @@ try {
   assert.deepEqual(partial.cachedDates,[date])
   const missing=(await db.query(`select get_daily_radar_page(null,'missing-scope','rank') as result`)).rows[0].result
   assert.equal(missing.cacheReady,false)
+  // Test the actual multi-key order BEFORE page boundaries. Large counts on an
+  // update/older day must not jump ahead of a new signal/more recent date.
+  const older=(await db.query('select ($1::date-1)::text as d',[today])).rows[0].d
+  const displayRow=(keyword,day,first,count,volume=0,netChange=0)=>({keyword,last_date:day,first_date:first,count,volume,netChange})
+  await db.query(`insert into radar_daily_cache(data_date,scope_key,payload) values($1,'display-order',$2),($3,'display-order',$4)`,[
+    today,JSON.stringify({newWords:[displayRow('today-update-big',today,older,100),displayRow('today-new-small',today,today,1),
+      displayRow('today-new-big',today,today,10),displayRow('today-update-small',today,older,2)],
+      volumeRisingWords:[displayRow('today-volume-small',today,older,0,2,999),displayRow('today-volume-big',today,older,0,200,1)]}),
+    older,JSON.stringify({newWords:[displayRow('older-update-big',older,'2000-01-01',1000),displayRow('older-new-small',older,older,1),
+      displayRow('older-new-big',older,older,10)],
+      volumeRisingWords:[displayRow('older-volume-big',older,'2000-01-01',0,10000,10000),displayRow('older-volume-small',older,'2000-01-01',0,50,99999)]})
+  ])
+  const displayPage=async(tab,pg=0,sort='date',direction='desc',selectedDate=null,badge='all')=>(await db.query(`select get_daily_radar_page(
+    p_date=>$1,p_scope=>'display-order',p_tab=>$2,p_page=>$3,p_size=>2,p_sort=>$4,p_direction=>$5,p_badge=>$6) as result`,
+    [selectedDate,tab,pg,sort,direction,badge])).rows[0].result
+  const ordered=[]
+  for(let pg=0;pg<4;pg++)ordered.push(...(await displayPage('newWords',pg)).data.map(row=>row.keyword))
+  assert.deepEqual(ordered,['today-new-big','today-new-small','today-update-big','today-update-small','older-new-big','older-new-small','older-update-big'])
+  assert.deepEqual((await displayPage('newWords',0,'date','asc')).data.map(row=>row.keyword),['older-new-big','older-new-small'])
+  assert.equal((await displayPage('newWords',0,'count')).data[0].keyword,'older-update-big') // explicit sort still wins
+  assert.deepEqual((await displayPage('newWords',0,'date','desc',older)).data.map(row=>row.keyword),['older-new-big','older-new-small'])
+  assert.equal((await displayPage('newWords',0,'date','desc',null,'updated')).total,3)
+  assert.deepEqual((await displayPage('volumeRising')).data.map(row=>row.keyword),['today-volume-big','today-volume-small'])
+  assert.deepEqual((await displayPage('volumeRising',1)).data.map(row=>row.keyword),['older-volume-big','older-volume-small'])
+  assert.equal((await displayPage('volumeRising',0,'netChange')).data[0].keyword,'older-volume-small')
   for(const role of ['anon','authenticated']) {
     assert.equal((await db.query(`select has_function_privilege($1,
       'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
@@ -241,6 +266,6 @@ try {
   await assert.rejects(build('2099-01-01'),/Invalid daily radar/)
   console.log(JSON.stringify({dailyRadarSql:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
     liveCompletionFiltering:true,legacyKeywordGuardReproduced:true,legacyKeywordGuardRetired:true,existingTasksPreserved:true,
-    groupedCandidates:30000,allSevenDates:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
+    groupedCandidates:30000,allSevenDates:true,dateThenBadgeOrder:true,dateThenVolumeOrder:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
     legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
 } finally { await db.close() }

@@ -4,7 +4,6 @@ import { useEffect, useState, useMemo } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { buildGroupMaps } from '@/lib/company-groups'
 import { radarCacheNotice } from '@/lib/radar-cache-notice'
-import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 import { radarDateOptions } from '@/lib/radar-dates'
 import { useRadarPage } from '@/lib/use-radar-page'
@@ -133,7 +132,7 @@ function DateCell({ last_date, today, yesterday, badge, includeYesterday }: {
 }) {
   const isRecent = last_date === today || (includeYesterday && last_date === yesterday)
   return (
-    <td className="table-td whitespace-nowrap w-24">
+    <td className="table-td whitespace-nowrap w-24" title={last_date}>
       <div className={`flex items-center gap-1 flex-wrap ${isRecent ? 'text-green-600' : 'text-gray-400'}`}>
         <span className={`text-xs ${isRecent ? 'font-semibold' : ''}`}>{fmtDate(last_date)}</span>
         <BadgeChip badge={badge} />
@@ -274,8 +273,8 @@ export default function HotRadarPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [wordLibSiteKws, setWordLibSiteKws] = useState<{domain: string; keywords: string[]}[]>([])
   const [wordLibQuery, setWordLibQuery] = useState({ keyword: '', site: '' })
-  const [sortCol, setSortCol]           = useState('')
-  const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('')
+  const [sortCol, setSortCol]           = useState('date')
+  const [sortDir, setSortDir]           = useState<'asc'|'desc'|''>('desc')
   const [badgeFilter, setBadgeFilter] = useState<'all'|'new'|'updated'>('all')
   const [wordLibMinSites, setWordLibMinSites] = useState(1)
 
@@ -493,7 +492,7 @@ export default function HotRadarPage() {
     setActiveTab(tab)
     setBadgeFilter('all')
     setPage(0)
-    setSortCol(tab === 'volumeRising' ? 'netChange' : 'date')
+    setSortCol('date')
     setSortDir('desc')
   }
 
@@ -804,7 +803,7 @@ export default function HotRadarPage() {
               {activeTab === 'volumeRising' && (
                 <table aria-label="数据表格" className="w-full table-fixed">
                   <colgroup>
-                    <col className="w-28" />
+                    <col className="w-24" />
                     <col className="w-48" />
                     <col className="w-28" />
                     <col className="w-24" />
@@ -815,7 +814,7 @@ export default function HotRadarPage() {
                   </colgroup>
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="table-th" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">发现上涨{sortIcons('date')}</span></th>
+                      <th className="table-th" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">日期{sortIcons('date')}</span></th>
                       <th className="table-th">关键词</th>
                       <th className="table-th text-center whitespace-nowrap" title="当前搜索量减去系统追踪起点搜索量"><span className="inline-flex items-center justify-center gap-0.5">累计上涨{sortIcons('netChange')}</span></th>
                       <th className="table-th text-center whitespace-nowrap" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5">本次变化{sortIcons('change')}</span></th>
@@ -831,7 +830,7 @@ export default function HotRadarPage() {
                     ) : (
                       (pagedList as VolumeRisingEntry[]).map(w => (
                         <tr key={`${w.keyword}|${w.last_date}`} className="hover:bg-gray-50 transition-colors">
-                          <VolumeRiseDateCell date={w.last_date} today={today} yesterday={yesterday} />
+                          <DateCell last_date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />
                           <td className="table-td font-medium text-gray-900 overflow-hidden">
                             <span className="block truncate" title={w.keyword}>{w.keyword}</span>
                           </td>

@@ -1,6 +1,5 @@
 'use client'
 
-import { VolumeRiseDateCell } from '@/components/volume-rise-date-cell'
 import { formatVolumeRiseDate } from '@/lib/keyword-volume-date'
 
 import Link from 'next/link'
@@ -302,7 +301,7 @@ function DateCell({ date, today, yesterday, badge, includeYesterday }: {
 }) {
   const isRecent = date === today || (!!includeYesterday && date === yesterday)
   return (
-    <td className="px-3 py-2 w-24 whitespace-nowrap">
+    <td className="px-3 py-2 w-24 whitespace-nowrap" title={date}>
       <div className={`flex items-center gap-1 flex-wrap ${isRecent ? 'text-green-600' : 'text-gray-400'}`}>
         <span className={`text-xs ${isRecent ? 'font-semibold' : ''}`}>{fmtDate(date)}</span>
         <BadgeChip badge={badge} />
@@ -2703,7 +2702,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         <>
           <table aria-label="数据表格" className="w-full min-w-[780px] table-fixed">
             <thead><tr className="text-xs text-gray-400 border-b border-gray-100">
-              <th className="px-3 py-2 text-left font-medium w-28" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">发现上涨{sortIcons('date')}</span></th>
+              <th className="px-3 py-2 text-left font-medium w-24" title="实际发现搜索量上涨的日期，不是最近采集日期"><span className="inline-flex items-center gap-0.5 whitespace-nowrap">日期{sortIcons('date')}</span></th>
               <th className="px-2 py-2 text-left font-medium">关键词</th>
               <th className="px-2 py-2 text-center font-medium w-28" title="当前搜索量减去系统追踪起点搜索量"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">累计上涨{sortIcons('netChange')}</span></th>
               <th className="px-2 py-2 text-center font-medium w-24" title="相对上一次抓取的变化"><span className="inline-flex items-center justify-center gap-0.5 whitespace-nowrap">本次变化{sortIcons('change')}</span></th>
@@ -2717,7 +2716,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               ) : slice.map((w, i) => (
                 <KwRow key={`${w.keyword}|${i}`} keyword={w.keyword} today={today} yesterday={yesterday}
                   badge="updated"
-                  dateCell={<VolumeRiseDateCell date={w.last_date} today={today} yesterday={yesterday} className="px-3 py-2" />}
+                  dateCell={<DateCell date={w.last_date} today={today} yesterday={yesterday} badge="updated" includeYesterday />}
                   claimed={claimedSet.has(w.keyword)}
                   onClaim={() => claimKeyword(w.keyword, '搜索上涨', w.volume)}
                   onView={() => openDetail(w.keyword, '搜索上涨')}>
@@ -3516,7 +3515,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
                   {RIGHT_TABS.map(([tab, label]) => (
-                    <button key={tab} onClick={() => { setRightTab(tab); setBadgeFilter('all'); setSortCol(tab === 'volumeRising' ? 'netChange' : 'date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
+                    <button key={tab} onClick={() => { setRightTab(tab); setBadgeFilter('all'); setSortCol('date'); setSortDir('desc'); setTabPage(current => ({ ...current, [tab]: 0 })) }}
                       aria-pressed={rightTab === tab}
                       className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${rightTab === tab ? 'border-green-500 text-green-700' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                       {label}

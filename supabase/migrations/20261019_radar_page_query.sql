@@ -45,6 +45,8 @@ with source as materialized (
   select item,row_number() over(order by
     case when p_direction='asc' then case p_sort when 'keyword' then item->>'keyword' when 'date' then item->>'last_date' end end asc nulls last,
     case when p_direction<>'asc' then case p_sort when 'keyword' then item->>'keyword' when 'date' then item->>'last_date' end end desc nulls last,
+    -- Date remains primary; within each date, new signals precede updates.
+    case when p_tab='newWords' and p_sort='date' then case badge when 'new' then 0 else 1 end end asc,
     case when p_direction='asc' and p_sort in ('volume','count','siteCount','rankDays','streak','change','netChange','long_tail_count','site_count') then coalesce(nullif(item->>p_sort,'')::numeric,0) end asc nulls last,
     case when p_direction<>'asc' and p_sort in ('volume','count','siteCount','rankDays','streak','change','netChange','long_tail_count','site_count') then coalesce(nullif(item->>p_sort,'')::numeric,0) end desc nulls last,
     coalesce((item->>'volume')::numeric,(item->>'count')::numeric,(item->>'long_tail_count')::numeric,0) desc,

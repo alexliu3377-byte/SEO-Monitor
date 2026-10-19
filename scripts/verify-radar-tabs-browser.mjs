@@ -30,7 +30,7 @@ const bundle=await build({stdin:{contents:`import React from 'react';import{crea
 const css=(await postcss([tailwindcss({content:['app/(dashboard)/task-groups/page.tsx','app/(dashboard)/hot-keywords/page.tsx','components/volume-rise-date-cell.tsx']})]).process('@tailwind base;@tailwind utilities;',{from:undefined})).css
 const html=`<style>${css}</style><div id="root"></div><script>${bundle.outputFiles[0].text.replaceAll('</script','<\\/script')}</script>`
 const browser=await chromium.launch({headless:true})
-const requests=[], errors=[]
+const requests=[], sortRequests=[], errors=[]
 let failTab='',delayTab=''
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}})
@@ -47,6 +47,7 @@ try{
    const p=url.searchParams,tab=p.get('tab'),day=p.get('date'),pg=Number(p.get('page')),size=Number(p.get('pageSize')),total=tab==='rank'?2505:42
    const badge=p.get('badge')||'all',q=p.get('q')||''
    requests.push({tab,date:day,page:pg,size,badge,q})
+   sortRequests.push({tab,sort:p.get('sort'),direction:p.get('direction')})
    if(tab===delayTab)await new Promise(r=>setTimeout(r,700))
    if(tab===failTab)return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'测试该来源暂时不可用'})}).catch(()=>{})
    body={date:day,total,data:Array.from({length:Math.max(0,Math.min(size,total-pg*size))},(_,i)=>({keyword:`${q?q+'|':''}${badge==='all'?'':badge+'|'}${tab}|${day}|${pg*size+i}`,volume:100,prevVolume:90,change:10,baselineVolume:50,netChange:50,siteCount:2,count:2,sites:['a.com','b.com'],first_date:badge==='updated'?date(-8):day==='all'?date(-i%7):day,last_date:day==='all'?date(-i%7):day,rankDays:3,streak:badge==='new'?2:3,domain:'a.com',dims:['new','rank'],newSites:['a.com'],rankSites:['b.com'],long_tail_count:3,site_count:2}))}
@@ -89,9 +90,19 @@ try{
   failTab='cross';await choose('交叉词');await visible('该日期资料读取失败，请点击上方重试或切换日期。')
   await choose('更新词库');await visible(`wordLib|${date(-2)}|0`);failTab=''
   await choose('跌词更新');await visible('独立跌词')
+  await choose('搜索量上涨');await visible('volumeRising|all|0')
+  assert.deepEqual(sortRequests.at(-1),{tab:'volumeRising',sort:'date',direction:'desc'})
+  const taskVolumeDateCell=page.locator('tbody tr').filter({hasText:'volumeRising|all|0'}).first().locator('td').first()
+  assert.equal((await taskVolumeDateCell.innerText()).replace(/\s/g,''),date(0).slice(5).replace('-','/')+'更新')
+  const taskDateClass=await taskVolumeDateCell.getAttribute('class')
+  await choose('共新增词');await visible(`newWords|${date(-1)}|0`)
+  assert.deepEqual(sortRequests.at(-1),{tab:'newWords',sort:'date',direction:'desc'})
+  assert.equal(await page.locator('tbody tr').filter({hasText:`newWords|${date(-1)}|0`}).first().locator('td').first().getAttribute('class'),taskDateClass)
   await page.screenshot({path:'.task-work/radar-tabs-fixed.png'})
   console.log(JSON.stringify({taskWorkspace:true,wordLibFirstEntry:true,datesIndependent:true,allSevenDates:true,combinedBadgeSearch:true,filterResetsPage:true,lateResponsesIsolated:true,pagination:true,failureIsolated:true,rankdownIndependent:true}))
   await page.goto('https://radar.test/radar');await visible(`volumeRising|all|0`)
+  assert.deepEqual(sortRequests.at(-1),{tab:'volumeRising',sort:'date',direction:'desc'})
+  assert.equal((await page.locator('tbody tr').filter({hasText:'volumeRising|all|0'}).first().locator('td').first().innerText()).replace(/\s/g,''),date(0).slice(5).replace('-','/')+'更新')
   await choose('更新词库');await visible(`wordLib|${date(-1)}|0`)
   await page.getByLabel('筛选资料日期').selectOption(date(-2));await visible(`wordLib|${date(-2)}|0`)
   await choose('竞品涨排名');await visible(`rank|all|0`)
@@ -108,6 +119,9 @@ try{
   await page.setViewportSize({width:1000,height:800});await choose('竞品涨排名');await visible('rank|all|0')
   assert.ok(await page.getByLabel('筛选资料日期').isVisible())
   await page.screenshot({path:'.task-work/radar-all-date-filters.png'})
-  console.log(JSON.stringify({hotRadar:true,pageBeyond2000:true,allSevenDates:true,combinedBadgeFilter:true,datesIndependent:true,filtersSurviveFailure:true,retry:true,browserErrors:errors,requests:requests.length,productionWrites:0}))
+  await choose('搜索量上涨');await visible('volumeRising|all|0')
+  assert.deepEqual(sortRequests.at(-1),{tab:'volumeRising',sort:'date',direction:'desc'})
+  await page.screenshot({path:'.task-work/radar-volume-date-consistent.png'})
+  console.log(JSON.stringify({hotRadar:true,pageBeyond2000:true,allSevenDates:true,combinedBadgeFilter:true,datesIndependent:true,filtersSurviveFailure:true,retry:true,defaultDateSort:true,consistentVolumeDateCell:true,browserErrors:errors,requests:requests.length,productionWrites:0}))
  }
 }finally{await browser.close()}
