@@ -42,6 +42,7 @@ export function parseCollectorContentItem(source: ContentFeedSource, value: unkn
   } catch { /* Cover images are optional metadata. */ }
   return {
     source,sourceId: id,title,url: url.toString(),category: category as ContentFeedItemInput['category'],
+    sourceCategory: source === '52pojie' ? clean(item.sourceCategory,40) || null : null,
     author: clean(item.author,120) || null,summary: clean(item.summary,280) || null,coverUrl,publishedAt,
   }
 }

@@ -13,6 +13,14 @@ test('public collector only accepts known sources and their official article URL
   assert.equal(parseCollectorContentItem('ccplay', { title: '资讯', category: 'game_news', url: 'http://m2.ccplay.cn/news/123.html' }), null)
 })
 
+test('forum source categories survive ingestion separately from the software content type', () => {
+  const parsed = parseCollectorContentItem('52pojie',{title:'测试工具',url:'https://www.52pojie.cn/thread-123-1-1.html',category:'software',sourceCategory:' Android\n ',publishedAt:'2026-10-20T08:00:00Z'})
+  assert.equal(parsed?.category,'software')
+  assert.equal(parsed?.sourceCategory,'Android')
+  assert.equal(parsed?.publishedAt,'2026-10-20T08:00:00.000Z')
+  assert.equal(parseCollectorContentItem('52pojie',{title:'工具',url:'https://www.52pojie.cn/thread-1-1-1.html',category:'software'})?.sourceCategory,null)
+})
+
 test('public item IDs are derived from source URLs, not trusted from input', () => {
   for (const [source, url, category, expected] of [
     ['52pojie', 'https://www.52pojie.cn/thread-123-1-1.html', 'software', '123'],

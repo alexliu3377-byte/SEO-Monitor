@@ -6,6 +6,7 @@ import {
   decodeContentFeedBytes,
   parse4399NewGames,
   parse52PojieRss,
+  parse52PojieForum,
   parseCcplayNews,
   parseContentFeedSources,
 } from '../lib/content-feed'
@@ -31,6 +32,38 @@ test('52pojie GBK RSS is decoded and reduced to public metadata', () => {
   assert.equal(item.summary, '简短介绍，不保存完整正文。')
   assert.equal(item.coverUrl, 'https://attach.52pojie.cn/example.jpg')
   assert.equal(item.publishedAt, '2026-10-09T01:40:39.000Z')
+})
+
+test('52pojie forum preserves source category and uses creation time, never the last reply', () => {
+  const rows=parse52PojieForum(`<table><tbody id="stickthread_9"><tr><th><a class="xst" href="thread-9-1-1.html">置顶</a></th></tr></tbody>
+    <tbody id="normalthread_123"><tr><th><em>[<a href="forum.php?mod=forumdisplay&fid=16&filter=typeid&typeid=231">Windows</a>]</em>
+      <a class="s xst" href="forum.php?mod=viewthread&tid=123&extra=tracking">测试软件</a> - 阅读权限10 <span class="tps">2 3</span></th>
+      <td class="by"><cite><a>原作者</a></cite><em><span>2026-10-20 16:21</span></em></td>
+      <td class="by"><cite>最后回复者</cite><em><a>2026-10-21 09:20</a></em></td></tr></tbody>
+    <tbody id="normalthread_124"><tr><th><em>[<a href="forum.php?filter=typeid&typeid=232">Android</a>]</em><a class="xst" href="thread-124-1-1.html">安卓工具</a></th>
+      <td class="by"><cite>作者二</cite><em><span title="2026-10-21 09:05">3分钟前</span></em></td></tr></tbody></table>`)
+  assert.equal(rows.length,2)
+  assert.equal(rows[0].sourceCategory,'Windows')
+  assert.equal(rows[0].title,'测试软件')
+  assert.equal(rows[0].url,'https://www.52pojie.cn/thread-123-1-1.html')
+  assert.equal(rows[0].sourceId,'123')
+  assert.equal(rows[0].author,'原作者')
+  assert.equal(rows[0].publishedAt,'2026-10-20T08:21:00.000Z')
+  assert.equal(rows[1].sourceCategory,'Android')
+  assert.equal(rows[1].publishedAt,'2026-10-21T01:05:00.000Z')
+  assert.equal(contentFeedDatabaseRows(rows,'2026-10-21T01:00:00Z')[0].source_category,'Windows')
+})
+
+test('52pojie missing classifications/timestamps remain unknown instead of being guessed from replies', () => {
+  const [row]=parse52PojieForum(`<table><tbody id="normalthread_1"><tr><th><a class="xst" href="thread-1-1-1.html">普通软件</a></th>
+    <td class="by"><cite>作者</cite><em>昨天</em></td><td class="by"><em>2026-10-21 12:00</em></td></tr></tbody></table>`)
+  assert.equal(row.sourceCategory,null)
+  assert.equal(row.publishedAt,null)
+  for(const date of ['2026-02-30 12:00','2026-10-21 25:01']){
+    const [invalid]=parse52PojieForum(`<table><tbody id="normalthread_1"><tr><th><a class="xst" href="thread-1-1-1.html">标题</a></th><td class="by"><em>${date}</em></td></tr></tbody></table>`)
+    assert.equal(invalid.publishedAt,null)
+  }
+  assert.deepEqual(parse52PojieForum('<h1>安全验证</h1>'),[])
 })
 test('4399 parser only reads the latest-game list and canonicalizes metadata', () => {
   const html = `<ul id="j-gamelist"><li><a class="m_game"><span class="ks_name">推荐位</span></a></li></ul>

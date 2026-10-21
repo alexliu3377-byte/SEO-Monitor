@@ -5,7 +5,7 @@ import {chromium} from 'playwright'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 
-const bundle=await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import Feed from './components/content-feed-tab';createRoot(document.getElementById('root')).render(<Feed/>);`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'dynamic-fixture',setup(b){
+const bundle=await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import Feed from './components/content-feed-tab';createRoot(document.getElementById('root')).render(<Feed kind={location.pathname==='/app'?'app':'all'}/>);`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'dynamic-fixture',setup(b){
  b.onResolve({filter:/^next\/dynamic$/},()=>({path:'dynamic',namespace:'fixture'}))
  b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:`import React,{lazy,Suspense}from'react';export default loader=>{const View=lazy(loader);return props=><Suspense fallback={<span>正在打开文字</span>}><View {...props}/></Suspense>}`,loader:'jsx',resolveDir:process.cwd()}))
 }}]})
@@ -25,6 +25,7 @@ const handler=async route=>{
   if(detailError)return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'测试读取失败'})})
   body=emptyDetail?{status:'queued',text:'',message:'内部采集诊断不应显示'}:url.pathname.includes('/article/')?{status:'blocked',text:'',articleText:'已经保存的文章正文',videoExpected:true,message:'内部采集诊断不应显示'}:{status:'completed',text:'已经保存的视频文字',textSource:'platform_auto'}
  }else throw Error('Unexpected API '+url.pathname)
+ if(url.pathname==='/api/content-feed'&&url.searchParams.get('sources')==='52pojie')body={total:3,totalPages:1,page:1,pageSize:20,items:['Windows','Android',null].map((sourceCategory,index)=>({id:'app-'+index,source:'52pojie',category:'software',sourceCategory,title:'应用标题'+index,url:'https://www.52pojie.cn/thread-'+index+'-1-1.html',author:'作者',publishedAt:'2026-10-20T08:21:00Z',firstSeenAt:'2026-10-21T00:00:00Z'}))}
  await route.fulfill({contentType:'application/json',body:JSON.stringify(body)})
 }
 const button=(page,id)=>page.getByRole('button',{name:`查看文字：${id}${cases.find(row=>row[0]===id)?.[2]&&!unavailable?'':'（暂无文字）'}`,exact:true})
@@ -76,6 +77,14 @@ try{
  await button(mobilePage,'queued').scrollIntoViewIfNeeded();await mobilePage.screenshot({path:'.task-work/content-text-disabled-mobile.png'})
  await button(mobilePage,'ready').click();await mobilePage.getByText('已经保存的视频文字',{exact:true}).waitFor()
  await mobile.close()
+ await page.goto('https://content.test/app');await page.getByText('应用标题0',{exact:true}).waitFor()
+ assert.deepEqual((await page.locator('thead th').allTextContents()).map(text=>text.trim()),['来源','分类','标题','作者','发布时间','操作'])
+ const appRows=page.locator('tbody tr')
+ assert.equal(await appRows.nth(0).locator('td').nth(1).innerText(),'Windows')
+ assert.equal(await appRows.nth(1).locator('td').nth(1).innerText(),'Android')
+ assert.equal(await appRows.nth(2).locator('td').nth(1).innerText(),'—')
+ assert.equal(await page.getByRole('combobox').count(),0,'Source category column must not reintroduce the old generic type filter')
+ await page.screenshot({path:'.task-work/app-source-categories.png'})
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({readableTextOnly:true,partialArticleKept:true,allEmptyStatesDisabled:true,noHoverOrEmptyRequests:true,noCollectorDiagnostics:true,detailErrorRetry:true,metadataFailsClosed:true,keyboardAndFocus:true,mobile375:true,coarsePointer44:true,browserErrors:errors,productionWrites:0}))
+ console.log(JSON.stringify({appCategoryBeforeTitle:true,unknownCategoryNotInvented:true,readableTextOnly:true,partialArticleKept:true,allEmptyStatesDisabled:true,noHoverOrEmptyRequests:true,noCollectorDiagnostics:true,detailErrorRetry:true,metadataFailsClosed:true,keyboardAndFocus:true,mobile375:true,coarsePointer44:true,browserErrors:errors,productionWrites:0}))
 }finally{await browser.close()}

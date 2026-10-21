@@ -52,7 +52,7 @@ export async function GET(request: Request) {
   const to = from + pageSize - 1
   let query = service
     .from('content_feed_items')
-    .select('id, source, source_id, category, title, url, cover_url, author, summary, published_at, first_seen_at', { count: 'exact' })
+    .select('id, source, source_id, category, source_category, title, url, cover_url, author, summary, published_at, first_seen_at', { count: 'exact' })
     .in('source', sourceFilter.sources)
     .order('published_at', { ascending: false, nullsFirst: false })
     .order('first_seen_at', { ascending: false })
@@ -78,6 +78,7 @@ export async function GET(request: Request) {
     source: row.source,
     sourceId: row.source_id,
     category: row.category,
+    sourceCategory: row.source_category,
     title: row.title,
     url: row.url,
     coverUrl: row.cover_url,

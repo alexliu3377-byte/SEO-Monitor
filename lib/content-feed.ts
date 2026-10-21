@@ -31,6 +31,7 @@ export type ContentFeedItemInput = {
   source: ContentFeedSource
   sourceId: string
   category: ContentFeedCategory
+  sourceCategory?: string | null
   title: string
   url: string
   coverUrl: string | null
@@ -42,6 +43,7 @@ export type ContentFeedDatabaseRow = {
   source: ContentFeedSource
   source_id: string
   category: ContentFeedItemInput['category']
+  source_category: string | null
   title: string
   url: string
   cover_url: string | null
@@ -59,7 +61,7 @@ export type ContentFeedFetchResult = {
 type ContentFeedRefreshSource = typeof CONTENT_FEED_REFRESH_SOURCES[number]
 
 const SOURCE_URLS: Record<ContentFeedRefreshSource, string> = {
-  '52pojie': 'https://www.52pojie.cn/forum.php?mod=rss&fid=16',
+  '52pojie': 'https://www.52pojie.cn/forum.php?mod=forumdisplay&fid=16&orderby=dateline',
   '4399': 'https://a.4399.cn/game-new.html',
   ccplay: 'https://m2.ccplay.cn/news',
 }
@@ -189,6 +191,41 @@ export function parse52PojieRss(xml: string): ContentFeedItemInput[] {
   })
   return dedupeItems(items)
 }
+
+function forumPublishedAt(value: string): string | null {
+  const match = value.trim().match(/^(20\d{2}-\d{1,2}-\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (!match || !dateOnlyToIso(match[1])) return null
+  const hours = Number(match[2] || 0), minutes = Number(match[3] || 0), seconds = Number(match[4] || 0)
+  if (hours > 23 || minutes > 59 || seconds > 59) return null
+  return new Date(Date.parse(dateOnlyToIso(match[1])!) + (hours * 3600 + minutes * 60 + seconds) * 1000).toISOString()
+}
+
+export function parse52PojieForum(html: string): ContentFeedItemInput[] {
+  const $ = load(html)
+  const items: ContentFeedItemInput[] = []
+  $('tbody[id^="normalthread_"]').each((_, element) => {
+    const row = $(element), anchor = row.find('th a.xst').first()
+    const title = cleanText(anchor.text(), 240)
+    const candidate = sourceArticleUrl(anchor.attr('href'), SOURCE_URLS['52pojie'], 'www.52pojie.cn')
+    if (!title || !candidate) return
+    const target = new URL(candidate)
+    const id = target.pathname.match(/^\/thread-(\d+)-/)?.[1]
+      || (target.pathname === '/forum.php' && target.searchParams.get('mod') === 'viewthread' ? target.searchParams.get('tid') : null)
+    if (!id || !/^\d+$/.test(id)) return
+    // The FIRST by-cell contains author/creation time. The last one is a reply.
+    const by = row.find('td.by').first(), time = by.find('em').first()
+    const absoluteTime = time.find('[title]').first().attr('title') || time.text()
+    items.push({ source: '52pojie', sourceId: id, category: 'software',
+      sourceCategory: cleanText(row.find('th em a[href*="typeid="]').first().text(), 40) || null,
+      title, url: `https://www.52pojie.cn/thread-${id}-1-1.html`, coverUrl: null,
+      author: cleanText(by.find('cite').first().text(), 120) || null,
+      summary: null, publishedAt: forumPublishedAt(absoluteTime),
+    })
+  })
+  return dedupeItems(items)
+}
+
+export type ContentFeedFetchOptions = { fromDate?: string; toDate?: string; maxPages?: number }
 
 export function parse4399NewGames(html: string): ContentFeedItemInput[] {
   const $ = load(html)
@@ -333,11 +370,32 @@ async function fetchPage(url: string, charset: 'utf8' | 'gb18030'): Promise<stri
   throw lastError instanceof Error ? lastError : new Error('request failed')
 }
 
-async function fetch52Pojie(): Promise<ContentFeedItemInput[]> {
-  const xml = await fetchPage(SOURCE_URLS['52pojie'], 'gb18030')
-  const items = parse52PojieRss(xml)
-  if (items.length === 0) throw new Error('RSS returned no parseable items')
-  return items
+async function fetch52Pojie(options: ContentFeedFetchOptions): Promise<ContentFeedFetchResult> {
+  const from = options.fromDate ? dateOnlyToIso(options.fromDate) : null
+  const to = options.toDate ? dateOnlyToIso(options.toDate) : null
+  const maxPages = options.maxPages ?? MAX_PAGES
+  if ((options.fromDate && !from) || (options.toDate && !to) || (from && to && from > to)
+    || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 8) throw new Error('Invalid 52pojie date range or page limit (1-8)')
+  const items: ContentFeedItemInput[] = []
+  let reachedBoundary = false
+  for (let page = 1; page <= maxPages; page += 1) {
+    if (page > 1) await waitBetweenPages()
+    const url = new URL(SOURCE_URLS['52pojie'])
+    url.searchParams.set('page', String(page))
+    const html = await fetchPage(url.toString(), 'gb18030')
+    const pageItems = parse52PojieForum(html)
+    if (!pageItems.length) throw new Error('52pojie forum returned no parseable topics; collection is not complete')
+    for (const item of pageItems) {
+      if (from && (!item.publishedAt || item.publishedAt < from)) continue
+      if (to && (!item.publishedAt || item.publishedAt >= new Date(Date.parse(to) + 86400000).toISOString())) continue
+      items.push(item)
+    }
+    if (from && pageItems.every(item => item.publishedAt && item.publishedAt < from)) { reachedBoundary = true; break }
+    const $ = load(html)
+    if (!$('.pg a.nxt').length) { reachedBoundary = true; break }
+  }
+  if (!items.length) throw new Error('52pojie: no topics in the requested range; do not mark backfill complete')
+  return { items: dedupeItems(items), warnings: from && !reachedBoundary ? ['Page limit reached before the requested start date; backfill may be incomplete'] : [] }
 }
 
 async function fetch4399(): Promise<ContentFeedItemInput[]> {
@@ -397,8 +455,8 @@ async function fetchCcplay(): Promise<ContentFeedFetchResult> {
   return { items: unique, warnings }
 }
 
-export async function fetchContentFeedSource(source: ContentFeedSource): Promise<ContentFeedFetchResult> {
-  if (source === '52pojie') return { items: await fetch52Pojie(), warnings: [] }
+export async function fetchContentFeedSource(source: ContentFeedSource, options: ContentFeedFetchOptions = {}): Promise<ContentFeedFetchResult> {
+  if (source === '52pojie') return fetch52Pojie(options)
   if (source === '4399') return { items: await fetch4399(), warnings: [] }
   if (source === 'ccplay') return fetchCcplay()
   throw new Error(`${source} must be refreshed by the browser collector`)
@@ -430,6 +488,7 @@ export function contentFeedDatabaseRows(
     source: item.source,
     source_id: item.sourceId,
     category: item.category,
+    source_category: item.sourceCategory || null,
     title: item.title,
     url: item.url,
     cover_url: item.coverUrl,

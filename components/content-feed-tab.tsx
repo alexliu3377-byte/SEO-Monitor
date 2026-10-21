@@ -12,6 +12,7 @@ type ContentFeedItem = {
   source: string
   sourceId: string
   category: string
+  sourceCategory?: string | null
   title: string
   url: string
   coverUrl: string | null
@@ -122,7 +123,8 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
   const [transcriptItem, setTranscriptItem] = useState<ContentFeedItem | null>(null)
   const [transcriptStatusUnavailable, setTranscriptStatusUnavailable] = useState(false)
   const showCategory = kind === 'all'
-  const tableColumnCount = showCategory ? 6 : 5
+  const showSourceCategory = kind === 'app'
+  const tableColumnCount = showCategory || showSourceCategory ? 6 : 5
 
   useEffect(() => {
     setSources(defaultSources)
@@ -217,11 +219,12 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
       </div>
 
       <div className="overflow-x-auto">
-        <table className={`w-full table-fixed ${showCategory ? 'min-w-[900px]' : 'min-w-[820px]'}`}>
+        <table className={`w-full table-fixed ${showCategory || showSourceCategory ? 'min-w-[900px]' : 'min-w-[820px]'}`}>
           <caption className="sr-only">公开内容动态列表</caption>
           <thead className="bg-slate-50/80">
             <tr className="text-left text-xs font-medium text-slate-500">
               <th className="w-32 px-4 py-2.5 sm:px-5">来源</th>
+              {showSourceCategory && <th className="w-24 px-3 py-2.5">分类</th>}
               <th className="px-3 py-2.5">标题</th>
               {showCategory && <th className="w-24 px-3 py-2.5">类型</th>}
               <th className="w-32 px-3 py-2.5">作者</th>
@@ -272,6 +275,9 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
                   <td className="px-4 py-2.5 sm:px-5">
                     <span className={`inline-flex whitespace-nowrap rounded-md border px-2 py-1 text-xs font-medium ${source.className}`}>{source.label}</span>
                   </td>
+                  {showSourceCategory && <td className="px-3 py-2.5 text-xs text-slate-600">
+                    <span className="block truncate" title={item.sourceCategory || undefined}>{item.sourceCategory || '—'}</span>
+                  </td>}
                   <td className="px-3 py-2.5">
                     <a
                       href={item.url}
