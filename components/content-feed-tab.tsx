@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SimplePagination } from '@/components/simple-pagination'
 import dynamic from 'next/dynamic'
-import { isTranscriptSource, transcriptStatusLabel } from '@/lib/content-transcript'
+import { isTranscriptSource } from '@/lib/content-transcript'
 
 const ContentTranscriptDialog = dynamic(() => import('@/components/content-transcript-dialog'), { ssr: false })
 
@@ -20,6 +20,7 @@ type ContentFeedItem = {
   publishedAt: string | null
   firstSeenAt: string
   transcriptStatus?: string | null
+  hasTranscript?: boolean
 }
 
 type ContentFeedResponse = {
@@ -265,6 +266,7 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
               const source = sourceMeta(item.source)
               const itemCategory = categoryMeta(item.category)
               const dateIsPublished = Boolean(item.publishedAt)
+              const canViewText = !transcriptStatusUnavailable && item.hasTranscript === true
               return (
                 <tr key={item.id} className="group hover:bg-emerald-50/30">
                   <td className="px-4 py-2.5 sm:px-5">
@@ -298,9 +300,12 @@ export default function ContentFeedTab({ kind = 'all' }: { kind?: 'all' | 'game'
                     >
                       查看原文
                     </a>
-                    {isTranscriptSource(item.source) && <button type="button" onClick={() => setTranscriptItem(item)}
-                      title={transcriptStatusLabel(item.transcriptStatus)} aria-label={`查看文字：${item.title}（${transcriptStatusLabel(item.transcriptStatus)}）`}
-                      className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [@media(pointer:coarse)]:min-h-11">查看文字</button>}
+                    {isTranscriptSource(item.source) && <button type="button" disabled={!canViewText}
+                      onClick={() => { if (canViewText) setTranscriptItem(item) }}
+                      title={canViewText ? '查看已保存的文字' : '暂无可查看文字'} aria-label={`查看文字：${item.title}${canViewText ? '' : '（暂无文字）'}`}
+                      className={`inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center whitespace-nowrap rounded-md border bg-white px-2.5 text-xs font-medium [@media(pointer:coarse)]:min-h-11 ${canViewText
+                        ? 'border-slate-200 text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500'
+                        : 'cursor-default border-slate-100 text-slate-300'}`}>查看文字</button>}
                     </div>
                   </td>
                 </tr>

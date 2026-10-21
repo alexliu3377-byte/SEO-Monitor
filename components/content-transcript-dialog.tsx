@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { transcriptStatusLabel, transcriptSourceLabel } from '@/lib/content-transcript'
+import { transcriptSourceLabel } from '@/lib/content-transcript'
 
 type Transcript = { status: string; text: string; articleText?: string; videoExpected?: boolean; textSource?: string; message?: string; updatedAt?: string; model?: string }
 
@@ -31,7 +31,6 @@ export default function ContentTranscriptDialog({ item, onClose }: {
 
   useEffect(() => {
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
     setLoading(true)
     setError('')
     async function load() {
@@ -42,13 +41,12 @@ export default function ContentTranscriptDialog({ item, onClose }: {
         if (typeof result.status !== 'string' || typeof result.text !== 'string') throw new Error('文字资料返回格式异常')
         if (controller.signal.aborted) return
         setData(result)
-        if (['queued', 'processing'].includes(result.status)) timer = setTimeout(load, 15_000)
       } catch (loadError) {
         if (!controller.signal.aborted) setError((loadError as Error).message)
       } finally { if (!controller.signal.aborted) setLoading(false) }
     }
     load()
-    return () => { controller.abort(); if (timer) clearTimeout(timer) }
+    return () => controller.abort()
   }, [item.id, reload])
 
   async function copy() {
@@ -94,19 +92,13 @@ export default function ContentTranscriptDialog({ item, onClose }: {
                   <p className="mb-4 text-xs text-slate-600">来源：{transcriptSourceLabel(data.textSource)} · 已统一简体，游戏名、软件名等请对照原视频核实。</p>
                   <div className="whitespace-pre-wrap break-words text-sm leading-7">{data.text}</div>
                 </section>}
-                {data?.status !== 'completed' && <div role="status" className={data?.articleText ? 'mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3' : ''}>
-                {data?.articleText && <p className="mb-1 text-sm font-medium">正文已保存，{data.videoExpected ? '视频文字' : '其余内容'}尚未完成</p>}
-                <p className="text-sm font-medium">{transcriptStatusLabel(data?.status)}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{data?.message || (data?.status === 'processing'
-                  ? '采集电脑正在处理，文字完成后会自动保存。可以关闭窗口，稍后回来查看。'
-                  : data?.status === 'queued' ? '已加入自动任务，等待采集电脑处理。无需逐条点击。'
-                    : '请查看原文，或检查采集电脑上的自动转写任务及登录状态。')}</p>
-              </div>}</>}
+                {!data?.text && !data?.articleText && <p role="status" className="text-sm text-slate-500">暂无可查看文字，请关闭窗口后刷新列表。</p>}
+              </>}
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-5 py-3">
           <p role="status" className="min-w-0 text-xs text-slate-600">{copyStatus}</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading} className="btn-secondary">刷新状态</button>
+            {error && <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading} className="btn-secondary">重新读取</button>}
             <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn-secondary whitespace-nowrap">查看原文</a>
             {(data?.text || data?.articleText) && !error && <button type="button" onClick={copy} className="btn-secondary whitespace-nowrap">复制文字</button>}
           </div>

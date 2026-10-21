@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { CONTENT_FEED_CATEGORIES, parseContentFeedSources } from '@/lib/content-feed'
+import { loadContentTranscriptMetadata } from '@/lib/content-transcript-metadata'
 
 export const maxDuration = 30
 
@@ -68,15 +69,10 @@ export async function GET(request: Request) {
   if (typeResult.error) return databaseError(typeResult.error)
   const total = count ?? 0
   // Read only tiny status metadata for the current page, never full transcripts.
-  const transcriptStates = new Map<string, string>()
-  let transcriptStatusUnavailable = false
   const transcriptIds = (data ?? []).filter((row: { source: string }) => ['bilibili', 'xiaohongshu', 'xiaoheihe_guide', 'xiaoheihe_ns'].includes(row.source))
     .map((row: { id: string }) => row.id)
-  if (transcriptIds.length) {
-    const transcriptResult = await service.from('content_feed_transcripts').select('item_id,status').in('item_id', transcriptIds)
-    transcriptStatusUnavailable = Boolean(transcriptResult.error)
-    if (!transcriptResult.error) for (const row of transcriptResult.data ?? []) transcriptStates.set(row.item_id, row.status)
-  }
+  const { states: transcriptStates, textIds: transcriptTextIds, unavailable: transcriptStatusUnavailable } =
+    await loadContentTranscriptMetadata(service, transcriptIds)
   const items = (data ?? []).map((row: Record<string, unknown>) => ({
     id: row.id,
     source: row.source,
@@ -90,6 +86,7 @@ export async function GET(request: Request) {
     publishedAt: row.published_at,
     firstSeenAt: row.first_seen_at,
     transcriptStatus: transcriptStates.get(String(row.id)) ?? null,
+    hasTranscript: transcriptTextIds.has(String(row.id)),
   }))
 
   return NextResponse.json({
