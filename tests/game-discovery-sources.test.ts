@@ -105,3 +105,15 @@ test('each rising type verifies its actual board header instead of silently acce
   assert.equal(parseMomorankHtml(html,'momo_rising_popularity').items[0].metric,'#27')
   assert.throws(()=>parseMomorankHtml(html,'momo_rising_bestplay'))
 })
+
+test('consecutive-rise highlights retain their source day counts, including streamed badges',()=>{
+  const html=ranking(1).replaceAll('/games/','/douyin/games/').replace('</body>',`${summary('douyin/').replace('<span>上升</span>','<span>连升</span>').replace('<span>+21</span>','<span>3天</span>')}</body>`)
+  const result=parseMomorankHtml(html,'momo_douyin_popularity')
+  assert.deepEqual(result.highlights.changes,[{label:'连升',items:[{title:'变化游戏',url:'https://www.momorank.com/douyin/games/21',change:'3天'}]}])
+  const collection={dataset:'momo_douyin_popularity',collectedAt:'2020-10-21T00:00:00Z',sourceModifiedAt:null,...result}
+  assert.equal(validateGameDiscoveryCollection(collection).highlights?.changes[0].items[0].change,'3天')
+  for(const change of ['+3','3名','0天','-2天',null])assert.throws(()=>validateGameDiscoveryCollection({...collection,highlights:{changes:[{label:'连升',items:[{title:'变化游戏',url:null,change}]}],rising:[]}}))
+  const changes=['新进榜','上升','连升','下降','脱榜'].map(label=>({label,items:[{title:'游戏',url:null,change:label==='连升'?'2天':null}]}))
+  assert.equal(validateGameDiscoveryCollection({...collection,highlights:{changes,rising:[]}}).highlights?.changes.length,5)
+  assert.throws(()=>validateGameDiscoveryCollection({...collection,highlights:{changes:[...changes,changes[0]],rising:[]}}))
+})

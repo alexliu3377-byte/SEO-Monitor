@@ -17,8 +17,8 @@ function time(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 }
 
-function ChangeValue({ value }: { value: string | null }) {
-  const color = value?.startsWith('+') || value?.startsWith('日升') ? 'text-emerald-700' : value?.startsWith('-') ? 'text-red-600' : 'text-slate-500'
+function ChangeValue({ value, streak = false }: { value: string | null; streak?: boolean }) {
+  const color = streak ? 'text-amber-700' : value?.startsWith('+') || value?.startsWith('日升') ? 'text-emerald-700' : value?.startsWith('-') ? 'text-red-600' : 'text-slate-500'
   return <span title={value || undefined} className={`shrink-0 truncate text-xs tabular-nums ${color}`}>{value || '—'}</span>
 }
 
@@ -30,9 +30,9 @@ function GameName({ title, url }: { title: string; url: string | null }) {
 function Changes({ groups }: { groups: GameDiscoveryHighlights['changes'] }) {
   if (!groups.length) return <p className="py-6 text-center text-xs text-slate-500">来源未提供本日变化摘要</p>
   return <div className="space-y-3">{groups.map(group => <div key={group.label}>
-    <p className="mb-1 text-xs font-medium text-slate-600">{group.label}</p>
+    <p className={`mb-1 text-xs font-medium ${group.label === '连升' ? 'text-amber-700' : 'text-slate-600'}`}>{group.label}</p>
     <ul>{group.items.map((row, index) => <li key={`${row.url || row.title}-${index}`} className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-50 py-2 text-xs">
-      <GameName title={row.title} url={row.url} /><ChangeValue value={row.change || (group.label === '新进榜' ? '新上榜' : null)} />
+      <GameName title={row.title} url={row.url} /><ChangeValue value={row.change || (group.label === '新进榜' ? '新上榜' : null)} streak={group.label === '连升'} />
     </li>)}</ul>
   </div>)}</div>
 }

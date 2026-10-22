@@ -8,6 +8,7 @@ try{
  await db.exec('create role anon;create role authenticated;create role service_role;')
  await db.exec(await readFile(new URL('../supabase/migrations/20261021_game_discovery_sources.sql',import.meta.url),'utf8'))
  await db.exec(await readFile(new URL('../supabase/migrations/20261022_momorank_platform_views.sql',import.meta.url),'utf8'))
+ await db.exec(await readFile(new URL('../supabase/migrations/20261022_momorank_streak_highlights.sql',import.meta.url),'utf8'))
  const call=(dataset,date,time,items)=>db.query('select replace_game_discovery_cache($1,$2::date,$3::timestamptz,null,$4::jsonb) as accepted',[dataset,date,time,JSON.stringify(items)])
  assert.equal((await call('momo_hot_words','2020-10-20','2020-10-21T00:00:00Z',rows(10))).rows[0].accepted,10)
  await assert.rejects(call('momo_hot_words','2020-10-21','2020-10-22T00:00:00Z',rows(11)))
@@ -39,5 +40,11 @@ try{
  assert.deepEqual((await db.query("select get_game_discovery_page('momo_douyin_publisher',1) as payload")).rows[0].payload,published,'Failed rows/summary must preserve the entire previous snapshot')
  assert.equal((await v2('momo_douyin_publisher','2020-10-20','2020-10-23T00:00:00Z',douyin)).rows[0].accepted,0)
  assert.equal((await db.query("select has_function_privilege('anon','replace_game_discovery_cache_v2(text,date,timestamptz,timestamptz,jsonb,jsonb)','EXECUTE') as browser")).rows[0].browser,false)
+ const streakHighlights={changes:['新进榜','上升','连升','下降','脱榜'].map(label=>({label,items:[{title:'游戏',url:'https://www.momorank.com/douyin/games/1',change:label==='连升'?'3天':null}]})),rising:[]}
+ assert.equal((await v2('momo_douyin_popularity','2020-10-22','2020-10-23T00:00:00Z',douyin,streakHighlights)).rows[0].accepted,10)
+ const streakPage=(await db.query("select get_game_discovery_page('momo_douyin_popularity',1) as payload")).rows[0].payload
+ assert.equal(streakPage.metadata.highlights.changes.find(row=>row.label==='连升').items[0].change,'3天')
+ for(const change of ['+3','3名',null])await assert.rejects(v2('momo_douyin_popularity','2020-10-23','2020-10-24T00:00:00Z',douyin,{changes:[{label:'连升',items:[{title:'游戏',url:null,change}]}],rising:[]}))
+ assert.deepEqual((await db.query("select get_game_discovery_page('momo_douyin_popularity',1) as payload")).rows[0].payload,streakPage)
  console.log(JSON.stringify({atomicPublishing:true,rowsAndHighlightsSameSnapshot:true,platformIsolation:true,sourceDatesSeparate:true,unknownWechatFreshness:true,noPaidRows:true,olderSourceIgnored:true,sqlPaging20:true,serviceOnlyWrites:true,productionWrites:0}))
 }finally{await db.close()}

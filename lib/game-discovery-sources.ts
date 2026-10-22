@@ -66,6 +66,7 @@ export type GameDiscoveryHighlights = {
   changes: Array<{label:string;items:Array<{title:string;url:string|null;change:string|null}>}>
   rising: GameDiscoveryItem[]
 }
+export const MOMORANK_CHANGE_LABELS = ['新进榜','上升','连升','下降','脱榜'] as const
 export function validSourceDate(value: unknown): value is string {
   return typeof value === 'string' && /^20\d{2}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10) === value
@@ -102,11 +103,12 @@ export function validateGameDiscoveryCollection(value: unknown): GameDiscoveryCo
   const rawHighlights=data.highlights as GameDiscoveryHighlights | undefined
   let highlights:GameDiscoveryHighlights={changes:[],rising:[]}
   if(rawHighlights!==undefined){
-    if(!rawHighlights || !Array.isArray(rawHighlights.changes) || rawHighlights.changes.length>4 || !Array.isArray(rawHighlights.rising) || rawHighlights.rising.length>10)throw new Error('变化摘要无效')
+    if(!rawHighlights || !Array.isArray(rawHighlights.changes) || rawHighlights.changes.length>MOMORANK_CHANGE_LABELS.length || !Array.isArray(rawHighlights.rising) || rawHighlights.rising.length>10)throw new Error('变化摘要无效')
     highlights={changes:rawHighlights.changes.map(group=>{
-      if(!group || typeof group.label!=='string' || !['新进榜','上升','下降','脱榜'].includes(group.label) || !Array.isArray(group.items) || group.items.length>10)throw new Error('变化分组无效')
+      if(!group || !MOMORANK_CHANGE_LABELS.some(label=>label===group.label) || !Array.isArray(group.items) || group.items.length>10)throw new Error('变化分组无效')
       return {label:group.label,items:group.items.map(row=>{
         if(!row || typeof row.title!=='string' || !row.title.trim() || row.title.length>240 || (row.change!==null && (typeof row.change!=='string' || row.change.length>100)) || (row.url!==null && (!isMomoGameUrl(row.url) || dataset.startsWith('momo_douyin_')!==new URL(row.url).pathname.startsWith('/douyin/'))))throw new Error('变化条目无效')
+        if(group.label==='连升' && (typeof row.change!=='string' || !/^[1-9]\d{0,3}\s*天$/.test(row.change)))throw new Error('连升必须保留来源天数，不能使用上涨名次')
         return {title:row.title,url:row.url,change:row.change}
       })}
     }),rising:[]}

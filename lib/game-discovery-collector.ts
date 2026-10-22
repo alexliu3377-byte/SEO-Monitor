@@ -1,5 +1,5 @@
 import { load } from 'cheerio'
-import { GAME_DISCOVERY_SOURCES, MOMORANK_RISING, isMomoOverview, isMomoRising, isMomoGameUrl, validateGameDiscoveryCollection, validSourceDate, type GameDiscoveryDataset, type GameDiscoveryItem, type GameDiscoveryHighlights } from './game-discovery-sources'
+import { GAME_DISCOVERY_SOURCES, MOMORANK_RISING, MOMORANK_CHANGE_LABELS, isMomoOverview, isMomoRising, isMomoGameUrl, validateGameDiscoveryCollection, validSourceDate, type GameDiscoveryDataset, type GameDiscoveryItem, type GameDiscoveryHighlights } from './game-discovery-sources'
 
 const clean = (value: string | undefined | null, length = 500) => (value || '').replace(/\s+/g,' ').trim().slice(0,length)
 const optional = (value: string | undefined | null, length = 500) => clean(value,length) || null
@@ -76,7 +76,7 @@ export function parseMomorankHtml(html: string, dataset: GameDiscoveryDataset) {
     if(changeSection.find('time[datetime]').first().attr('datetime')!==sourceDate)throw new Error('今日变化与榜单日期不一致')
     changeSection.find('ul').each((_,el)=>{
       const list=$(el), label=clean(list.prev().text(),40)
-      if(!['新进榜','上升','下降','脱榜'].includes(label))return
+      if(!MOMORANK_CHANGE_LABELS.some(allowed=>allowed===label))return
       const seen=new Set<string>()
       const rows=list.find('li a').slice(0,10).toArray().flatMap(el=>{
         const link=$(el), url=new URL(link.attr('href')||'/',config.url).toString()

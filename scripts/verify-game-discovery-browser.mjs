@@ -22,7 +22,7 @@ const handler=async route=>{
  if(url.pathname==='/api/charts/game-discovery'){
   const dataset=url.searchParams.get('dataset'),page=Number(url.searchParams.get('page')),wechat=dataset.startsWith('wechat')
   if(fail)return route.fulfill({status:503,json:{error:'测试来源读取失败'}})
-  data={total:empty?0:wechat?100:10,metadata:empty?null:{source_date:wechat?null:'2026-10-20',collected_at:'2026-10-21T00:00:00Z',source_modified_at:wechat?'2026-07-15T09:47:09Z':null,highlights:{changes:[{label:'上升',items:[{title:'本日变化游戏',url:null,change:'+21'}]}],rising:Array.from({length:10},(_,i)=>({position:i+1,sourceId:String(i),title:'上升游戏'+i,metric:'#53',change:'+21',url:null}))}},items:empty?[]:Array.from({length:wechat?20:10},(_,i)=>({position:(page-1)*20+i+1,source_id:dataset+i,title:dataset+'游戏'+((page-1)*20+i+1),summary:'公开简介',url:null,metric:'#53',change:'+21',tags:['休闲']}))}
+  data={total:empty?0:wechat?100:10,metadata:empty?null:{source_date:wechat?null:'2026-10-20',collected_at:'2026-10-21T00:00:00Z',source_modified_at:wechat?'2026-07-15T09:47:09Z':null,highlights:{changes:[{label:'上升',items:[{title:'本日变化游戏',url:null,change:'+21'}]},{label:'连升',items:[{title:'连续上涨游戏',url:null,change:'3天'}]}],rising:Array.from({length:10},(_,i)=>({position:i+1,sourceId:String(i),title:'上升游戏'+i,metric:'#53',change:'+21',url:null}))}},items:empty?[]:Array.from({length:wechat?20:10},(_,i)=>({position:(page-1)*20+i+1,source_id:dataset+i,title:dataset+'游戏'+((page-1)*20+i+1),summary:'公开简介',url:null,metric:'#53',change:'+21',tags:['休闲']}))}
  }else if(url.pathname==='/api/charts/taptap-search-trends')data={items:[{rank:1,name:'TapTap词',source:'TapTap'}]}
  else if(url.pathname==='/api/charts/haoyou')data={searchItems:[{rank:1,name:'快爆词',source:'好游快爆'}]}
  else if(url.pathname==='/api/charts/douyin-minigames')data={items:[{rank:1,game_id:'tt1',title:'抖音游戏',summary:'简介'}],total:1,collectedAt:'2026-10-21T00:00:00Z'}
@@ -52,6 +52,11 @@ try{
  assert.ok(await page.getByRole('heading',{name:'今日变化 · 2026/10/20',exact:true}).isVisible(),'Daily changes retain the actual source date')
  assert.ok(await page.getByText('2026/10/21 08:00 采集',{exact:true}).isVisible())
  await platforms.getByRole('button',{name:'抖音',exact:true}).click();await page.getByText('momo_douyin_overview游戏1',{exact:true}).waitFor()
+ const changesCard=page.getByRole('region',{name:'今日变化',exact:true})
+ assert.ok(await changesCard.getByText('连升',{exact:true}).isVisible())
+ assert.ok(await changesCard.getByText('3天',{exact:true}).isVisible())
+ assert.equal(await changesCard.getByText('+3',{exact:true}).count(),0)
+ await page.screenshot({path:'.task-work/game-discovery-douyin-streak.png'})
  assert.ok(await page.getByRole('heading',{name:'热门榜 Top 10',exact:true}).isVisible())
  assert.equal(await types.getByRole('button',{name:'热搜访问',exact:true}).count(),0)
  assert.equal(await types.getByRole('button',{name:'畅玩榜',exact:true}).count(),0)
