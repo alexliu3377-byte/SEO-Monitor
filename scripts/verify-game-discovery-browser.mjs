@@ -22,9 +22,9 @@ const handler=async route=>{
  if(url.pathname==='/api/charts/game-discovery'){
   const dataset=url.searchParams.get('dataset'),page=Number(url.searchParams.get('page')),wechat=dataset.startsWith('wechat')
   if(fail)return route.fulfill({status:503,json:{error:'测试来源读取失败'}})
-  data={total:empty?0:wechat?100:10,metadata:empty?null:{source_date:wechat?null:'2026-10-20',collected_at:'2026-10-21T00:00:00Z',source_modified_at:wechat?'2026-07-15T09:47:09Z':null,highlights:{changes:[{label:'上升',items:[{title:'本日变化游戏',url:null,change:'+21'}]},{label:'连升',items:[{title:'连续上涨游戏',url:null,change:'3天'}]}],rising:Array.from({length:10},(_,i)=>({position:i+1,sourceId:String(i),title:'上升游戏'+i,metric:'#53',change:'+21',url:null}))}},items:empty?[]:Array.from({length:wechat?20:10},(_,i)=>({position:(page-1)*20+i+1,source_id:dataset+i,title:dataset+'游戏'+((page-1)*20+i+1),summary:'公开简介',url:null,metric:'#53',change:'+21',tags:['休闲']}))}
- }else if(url.pathname==='/api/charts/taptap-search-trends')data={items:[{rank:1,name:'TapTap词',source:'TapTap'}]}
- else if(url.pathname==='/api/charts/haoyou')data={searchItems:[{rank:1,name:'快爆词',source:'好游快爆'}]}
+  data={total:empty?0:wechat?100:10,metadata:empty?null:{source_date:wechat?null:'2026-10-20',collected_at:'2026-10-21T00:00:00Z',source_modified_at:wechat?'2026-07-15T09:47:09Z':null,highlights:{changes:[{label:'上升',items:[{title:'天天象棋',url:null,change:'+9'},{title:'欢乐麻将',url:null,change:'+8'},{title:'非常长的游戏名称用来确认手机横向摘要不会撑破页面宽度',url:null,change:'+2'},{title:'开心消消乐',url:null,change:'+1'},{title:'本日变化游戏',url:null,change:'+4'}]},{label:'连升',items:[{title:'连续上涨游戏',url:null,change:'3天'},{title:'另一连升游戏',url:null,change:'2天'}]}],rising:Array.from({length:10},(_,i)=>({position:i+1,sourceId:String(i),title:'上升游戏'+i,metric:'#53',change:'+21',url:null}))}},items:empty?[]:Array.from({length:wechat?20:10},(_,i)=>({position:(page-1)*20+i+1,source_id:dataset+i,title:dataset+'游戏'+((page-1)*20+i+1),summary:'公开简介',url:null,metric:'#53',change:'+21',tags:['休闲']}))}
+ }else if(url.pathname==='/api/charts/taptap-search-trends')data={updatedAt:'2026-10-21T00:00:00Z',items:[{rank:1,name:'TapTap词',source:'TapTap'}]}
+ else if(url.pathname==='/api/charts/haoyou')data={updatedAt:'2026-10-21T00:00:00Z',searchItems:[{rank:1,name:'快爆词',source:'好游快爆'}]}
  else if(url.pathname==='/api/charts/douyin-minigames')data={items:[{rank:1,game_id:'tt1',title:'抖音游戏',summary:'简介'}],total:1,collectedAt:'2026-10-21T00:00:00Z'}
  else throw Error('Unexpected API '+url.pathname)
  return route.fulfill({json:data})
@@ -50,18 +50,31 @@ try{
  assert.ok(await page.getByRole('columnheader',{name:'今日变化',exact:true}).isVisible())
  assert.equal(await page.getByText(/^资料日期：/).count(),0)
  assert.ok(await page.getByRole('heading',{name:'今日变化 · 2026/10/20',exact:true}).isVisible(),'Daily changes retain the actual source date')
+ const wechatChanges=page.getByRole('region',{name:'今日变化',exact:true})
+ const firstChange=await wechatChanges.getByText('天天象棋',{exact:true}).boundingBox(),secondChange=await wechatChanges.getByText('欢乐麻将',{exact:true}).boundingBox()
+ assert.ok(Math.abs(firstChange.y-secondChange.y)<2 && secondChange.x-firstChange.x<180,'Games and their changes sit next to one another, not on full-width rows')
+ const changeValue=await wechatChanges.getByText('+9',{exact:true}).boundingBox()
+ assert.ok(changeValue.x-(firstChange.x+firstChange.width)<12,'Change values stay beside their game names')
+ assert.equal(await wechatChanges.getByRole('group',{name:'上升游戏',exact:true}).locator('li').count(),5,'Wrapping must not discard any source items')
+ await page.screenshot({path:'.task-work/game-discovery-compact-changes.png'})
  assert.ok(await page.getByText('2026/10/21 08:00 采集',{exact:true}).isVisible())
  await platforms.getByRole('button',{name:'抖音',exact:true}).click();await page.getByText('momo_douyin_overview游戏1',{exact:true}).waitFor()
  const changesCard=page.getByRole('region',{name:'今日变化',exact:true})
  assert.ok(await changesCard.getByText('连升',{exact:true}).isVisible())
  assert.ok(await changesCard.getByText('3天',{exact:true}).isVisible())
  assert.equal(await changesCard.getByText('+3',{exact:true}).count(),0)
+ assert.equal(await changesCard.getByRole('group',{name:'连升游戏',exact:true}).locator('li').count(),2)
  await page.screenshot({path:'.task-work/game-discovery-douyin-streak.png'})
  assert.ok(await page.getByRole('heading',{name:'热门榜 Top 10',exact:true}).isVisible())
  assert.equal(await types.getByRole('button',{name:'热搜访问',exact:true}).count(),0)
  assert.equal(await types.getByRole('button',{name:'畅玩榜',exact:true}).count(),0)
  await types.getByRole('button',{name:'发行人热度榜',exact:true}).click();await page.getByText('momo_douyin_publisher游戏1',{exact:true}).waitFor()
  assert.equal(requests.at(-1),'/api/charts/game-discovery?dataset=momo_douyin_publisher&page=1')
+ assert.ok(await page.getByRole('region',{name:'今日变化',exact:true}).isVisible(),'Douyin ordinary rankings also show daily changes')
+ for(const [label,dataset] of [['热门榜','momo_douyin_popularity'],['畅销榜','momo_douyin_bestseller'],['新游榜','momo_douyin_new']]){
+  await types.getByRole('button',{name:label,exact:true}).click();await page.getByText(dataset+'游戏1',{exact:true}).waitFor()
+  assert.ok(await page.getByRole('region',{name:'今日变化',exact:true}).isVisible(),label+' keeps the daily-change summary')
+ }
  await types.getByRole('button',{name:'上升榜',exact:true}).click();await page.getByText('momo_douyin_rising_popularity游戏1',{exact:true}).waitFor()
  await rising.getByRole('button',{name:'发行人热度榜',exact:true}).click();await page.getByText('momo_douyin_rising_publisher游戏1',{exact:true}).waitFor()
  await platforms.getByRole('button',{name:'微信',exact:true}).click();await page.getByText('momo_overview游戏1',{exact:true}).waitFor()
@@ -82,6 +95,13 @@ try{
  assert.equal(await page.getByRole('group',{name:'MomoRank榜单类型',exact:true}).count(),0)
  const source=page.getByRole('link',{name:'打开MomoRank 热搜访问来源（新窗口）',exact:true})
  assert.equal(await source.getAttribute('href'),'https://www.momorank.com/insights/hot-search')
+ const searchCard=page.getByRole('region',{name:'MomoRank 热搜访问',exact:true})
+ assert.equal(await searchCard.getByText(/来源按搜索后的访问|仅展示免费公开资料/).count(),0)
+ assert.ok(await searchCard.getByText('每日读取一次',{exact:true}).isVisible())
+ assert.ok(await searchCard.getByText('2026/10/21 08:00 更新',{exact:true}).isVisible())
+ assert.ok(await searchCard.locator('ol li').first().locator('span').first().evaluate(el=>el.classList.contains('bg-yellow-400')))
+ const searchHeaders=await grid.locator(':scope > section > div:first-child').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().height))
+ assert.ok(Math.max(...searchHeaders)-Math.min(...searchHeaders)<2,'All three search card headers align')
  assert.ok(!requests.some(url=>url.includes('dataset=momo_hot_words')||url.includes('dataset=momo_ip')))
  await page.screenshot({path:'.task-work/game-discovery-search-trends.png'})
  fail=true;await page.goto('https://discovery.test/content/charts?section=game&view=rankings&source=momorank');await page.getByRole('alert').waitFor()
@@ -94,7 +114,12 @@ try{
  const platformButton=mp.getByRole('group',{name:'MomoRank平台',exact:true}).getByRole('button',{name:'微信',exact:true})
  assert.ok((await platformButton.boundingBox()).height>=44)
  await platformButton.focus();assert.equal(await mp.locator(':focus').textContent(),'微信')
- await mp.screenshot({path:'.task-work/game-discovery-mobile.png'});await mobile.close()
+ await mp.screenshot({path:'.task-work/game-discovery-mobile.png'})
+ await mp.setViewportSize({width:812,height:375})
+ assert.ok(await mp.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Inline changes fit landscape too')
+ await mp.getByRole('button',{name:'搜索趋势',exact:true}).click();await mp.getByText('momo_hot_search游戏1',{exact:true}).waitFor()
+ assert.ok(await mp.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Search cards also fit landscape')
+ await mobile.close()
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({realChartsNavigation:true,currentDatasetOnly:true,threeSearchColumns:true,hotSearchReplacesWords:true,platformSpecificMenus:true,threeOverviewCards:true,allRisingTypes:true,dailyChanges:true,matchingOfficialButtons:true,sourceDatesRetainedForDailyChanges:true,headerMetadataSimplified:true,collectedTimeAndSourceNoteKept:true,sharedPaging:true,filterResetsPage:true,errorRetry:true,mobile375:true,browserErrors:errors,productionWrites:0}))
+ console.log(JSON.stringify({realChartsNavigation:true,currentDatasetOnly:true,threeSearchColumns:true,alignedSearchHeaders:true,compactChanges:true,allDouyinBoardsHaveChanges:true,hotSearchReplacesWords:true,platformSpecificMenus:true,threeOverviewCards:true,allRisingTypes:true,dailyChanges:true,matchingOfficialButtons:true,sourceDatesRetainedForDailyChanges:true,headerMetadataSimplified:true,collectedTimeAndSourceNoteKept:true,sharedPaging:true,filterResetsPage:true,errorRetry:true,mobile375:true,landscape812:true,browserErrors:errors,productionWrites:0}))
 }finally{await browser.close()}
