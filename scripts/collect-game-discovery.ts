@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { DiscoverySourceBlocked, fetchGameDiscoveryDataset } from '../lib/game-discovery-collector'
-import { GAME_DISCOVERY_SOURCES, isGameDiscoveryDataset, type GameDiscoveryDataset } from '../lib/game-discovery-sources'
+import { GAME_DISCOVERY_SOURCES, MOMORANK_DATASETS, WECHAT_DATASETS, isGameDiscoveryDataset, type GameDiscoveryDataset } from '../lib/game-discovery-sources'
 
 async function main() {
   const args=process.argv.slice(2), sourceIndex=args.indexOf('--source'), datasetIndex=args.indexOf('--dataset')
@@ -16,14 +16,14 @@ async function main() {
   }
   const base=process.env.TREND_INGEST_URL?.trim(),secret=process.env.TREND_INGEST_SECRET?.trim()
   if(write&&(!base||!secret))throw new Error('TREND_INGEST_URL / TREND_INGEST_SECRET 未配置')
-  const datasets=(Object.keys(GAME_DISCOVERY_SOURCES) as GameDiscoveryDataset[]).filter(key=>GAME_DISCOVERY_SOURCES[key].provider===source&&(!dataset||key===dataset))
+  const datasets=dataset?[dataset as GameDiscoveryDataset]:source==='momorank'?MOMORANK_DATASETS:WECHAT_DATASETS
   let failed=false
   for(let index=0;index<datasets.length;index++){
     const key=datasets[index]
     if(index)await new Promise(resolve=>setTimeout(resolve,8000))
     try{
       const result=await fetchGameDiscoveryDataset(key)
-      if(!write){console.log(JSON.stringify({dryRun:true,dataset:key,sourceDate:result.sourceDate,sourceModifiedAt:result.sourceModifiedAt,count:result.items.length,first:result.items[0]}));continue}
+      if(!write){console.log(JSON.stringify({dryRun:true,dataset:key,sourceDate:result.sourceDate,sourceModifiedAt:result.sourceModifiedAt,count:result.items.length,changes:result.highlights?.changes.map(group=>({label:group.label,count:group.items.length})),rising:result.highlights?.rising.length,first:result.items[0]}));continue}
       const response=await fetch(new URL('/api/charts/game-discovery/ingest',new URL(base!).origin),{
         method:'POST',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json'},body:JSON.stringify(result),redirect:'error',signal:AbortSignal.timeout(60000),
       })

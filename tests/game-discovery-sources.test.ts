@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseMomorankHtml, parseWechatPublicHtml, fetchGameDiscoveryDataset, DiscoverySourceBlocked } from '../lib/game-discovery-collector'
-import { validateGameDiscoveryCollection, type GameDiscoveryItem } from '../lib/game-discovery-sources'
+import { validateGameDiscoveryCollection, MOMORANK_TABS, MOMORANK_RISING, MOMORANK_DATASETS, type GameDiscoveryItem } from '../lib/game-discovery-sources'
 import { allowsServiceAuthPath } from '../lib/service-api-access'
 
 const date='2020-10-20'
@@ -60,4 +60,48 @@ test('source fetch stops on verification and oversized pages, without browser lo
     assert.equal(calls,1)
   }
   await assert.rejects(fetchGameDiscoveryDataset('momo_hot_words',(async()=>new Response(' '.repeat(2_000_001))) as typeof fetch))
+})
+
+function summary(platform='') {
+  return `<section aria-label="榜单变化摘要"><header><p>今日变化</p><h2>榜单<time datetime="${date}">10/20</time></h2></header><div><div><div><span>上升</span></div><ul><li><a title="变化游戏" href="/${platform}games/21"><span class="truncate">变化游戏</span><template id="P:a"></template></a></li></ul></div></div></section><div hidden id="S:a"><span>+21</span></div><script>$RS("S:a","P:a")</script>`
+}
+
+test('platform menus begin with overview, remove IP and hot-words, and expose source-specific boards',()=>{
+  assert.equal(MOMORANK_TABS.wechat[0],'momo_overview');assert.equal(MOMORANK_TABS.douyin[0],'momo_douyin_overview')
+  assert.ok(!MOMORANK_TABS.douyin.some(key=>key==='momo_hot_search' as string))
+  assert.ok(MOMORANK_TABS.douyin.includes('momo_douyin_publisher'))
+  assert.deepEqual(MOMORANK_RISING.wechat.map(row=>row.label),['畅销榜','人气榜','畅玩榜'])
+  assert.ok(!MOMORANK_DATASETS.includes('momo_ip'));assert.ok(!MOMORANK_DATASETS.includes('momo_hot_words'))
+})
+
+test('daily changes reconstruct public streamed badges and keep their own source date',()=>{
+  const result=parseMomorankHtml(ranking(1).replace('</body>',`${summary()}</body>`),'momo_bestseller')
+  assert.deepEqual(result.highlights.changes,[{label:'上升',items:[{title:'变化游戏',url:'https://www.momorank.com/games/21',change:'+21'}]}])
+  assert.throws(()=>parseMomorankHtml(ranking(1).replace('</body>',`${summary().replace(`datetime="${date}"`,'datetime="2020-10-19"')}</body>`),'momo_bestseller'))
+})
+
+test('overview uses one public homepage snapshot for all three cards, not an invented current date',()=>{
+  const table=ranking(1).replace(`数据日期：${date}`,'')
+  const rising='<div><div><h2>今日排名上升 Top 10</h2></div><div><ul><li><a href="/games/21?type=bestseller"><span title="变化游戏">变化游戏</span><p>当前 #53</p><span>日升 21 名</span></a></li></ul></div></div>'
+  const result=parseMomorankHtml(table.replace('</body>',`${summary()}${rising}</body>`),'momo_overview')
+  assert.equal(result.sourceDate,date);assert.equal(result.highlights.rising[0].metric,'当前 #53')
+  assert.equal(result.highlights.rising[0].change,'日升 21 名');assert.equal(result.items[0].title,'游戏1')
+  assert.throws(()=>parseMomorankHtml(table.replace('</body>',`${summary()}</body>`),'momo_overview'))
+})
+
+test('Douyin game URLs and publisher chart are separate from WeChat, including highlights',()=>{
+  const html=ranking(1).replaceAll('/games/','/douyin/games/').replace('</body>',`${summary('douyin/')}</body>`)
+  const result=parseMomorankHtml(html,'momo_douyin_publisher')
+  assert.equal(result.items[0].url,'https://www.momorank.com/douyin/games/1')
+  const collection={dataset:'momo_douyin_publisher',collectedAt:'2020-10-21T00:00:00Z',sourceModifiedAt:null,...result}
+  assert.equal(validateGameDiscoveryCollection(collection).highlights?.changes[0].items[0].change,'+21')
+  assert.throws(()=>validateGameDiscoveryCollection({...collection,dataset:'momo_bestseller'}))
+  assert.throws(()=>validateGameDiscoveryCollection({...collection,highlights:{changes:[{label:'上升',items:[{title:'非法',url:'https://evil.test/',change:'+1'}]}],rising:[]}}))
+  assert.throws(()=>validateGameDiscoveryCollection({...collection,highlights:{changes:[],rising:[item()]}}))
+})
+
+test('each rising type verifies its actual board header instead of silently accepting another board',()=>{
+  const html=wrapper('<table><thead><tr><th>游戏</th><th>人气榜排名</th><th>日升降</th></tr></thead><tbody><tr><td><a href="/games/1">游戏1</a></td><td>#27</td><td>+61</td></tr></tbody></table>')
+  assert.equal(parseMomorankHtml(html,'momo_rising_popularity').items[0].metric,'#27')
+  assert.throws(()=>parseMomorankHtml(html,'momo_rising_bestplay'))
 })

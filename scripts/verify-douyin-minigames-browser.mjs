@@ -6,7 +6,7 @@ import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 
 const bundle = await build({ stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import View from './components/douyin-minigames-tab';createRoot(document.getElementById('root')).render(<View/>);`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' } })
-const css = (await postcss([tailwindcss({ content: ['components/douyin-minigames-tab.tsx','components/simple-pagination.tsx','components/page-number-input.tsx'] })]).process(await readFile('app/globals.css','utf8'), { from: 'app/globals.css' })).css
+const css = (await postcss([tailwindcss({ content: ['components/douyin-minigames-tab.tsx','components/game-discovery-controls.tsx','components/simple-pagination.tsx','components/page-number-input.tsx'] })]).process(await readFile('app/globals.css','utf8'), { from: 'app/globals.css' })).css
 const html = `<meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><div id="root"></div><script>${bundle.outputFiles[0].text.replaceAll('</script','<\\/script')}</script>`
 const browser = await chromium.launch({ headless: true })
 const requests = [], errors = []

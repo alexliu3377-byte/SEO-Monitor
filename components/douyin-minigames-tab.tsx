@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { SimplePagination } from './simple-pagination'
+import { DiscoveryFilterButton } from './game-discovery-controls'
 import { DOUYIN_MINIGAME_SOURCE_URL, MINIGAME_BOARDS, MINIGAME_BOARD_LABELS, type MinigameBoard } from '@/lib/douyin-minigames'
 
 type Result = { items: Array<{ rank: number; game_id: string; title: string; summary: string | null }>; total: number; collectedAt: string | null }
@@ -40,7 +41,7 @@ export default function DouyinMinigamesTab() {
       </div>
       <p className="mt-1 text-xs leading-5 text-slate-500">官方榜单，每榜最多前 100 款；排名不代表百度搜索量，小游戏不一定有独立安装包。</p>
       <div className="mt-3 flex flex-wrap gap-2" aria-label="小游戏榜单类型">
-        {MINIGAME_BOARDS.map(key => <button key={key} type="button" aria-pressed={board === key} onClick={() => { setBoard(key); setPage(0) }} className={`h-8 whitespace-nowrap rounded-md border px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [@media(pointer:coarse)]:h-11 ${board === key ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{MINIGAME_BOARD_LABELS[key]}</button>)}
+        {MINIGAME_BOARDS.map(key => <DiscoveryFilterButton key={key} selected={board === key} onClick={() => { setBoard(key); setPage(0) }}>{MINIGAME_BOARD_LABELS[key]}</DiscoveryFilterButton>)}
       </div>
     </div>
     {error ? <div role="alert" className="flex items-center justify-center gap-3 px-5 py-12 text-sm text-slate-600"><span>{error}</span><button type="button" className="btn-secondary whitespace-nowrap" onClick={() => setAttempt(value => value + 1)}>重试</button></div>

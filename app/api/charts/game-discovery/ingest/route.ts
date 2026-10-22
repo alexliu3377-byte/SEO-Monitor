@@ -14,8 +14,8 @@ export async function POST(request: Request) {
     collection=validateGameDiscoveryCollection(JSON.parse(raw))
   } catch { return NextResponse.json({error:'来源资料无效或不完整'},{status:400}) }
   const service=createServiceClient() as any
-  const {data,error}=await service.rpc('replace_game_discovery_cache',{p_dataset:collection.dataset,p_source_date:collection.sourceDate,
-    p_collected_at:collection.collectedAt,p_source_modified_at:collection.sourceModifiedAt,p_items:collection.items})
+  const {data,error}=await service.rpc('replace_game_discovery_cache_v2',{p_dataset:collection.dataset,p_source_date:collection.sourceDate,
+    p_collected_at:collection.collectedAt,p_source_modified_at:collection.sourceModifiedAt,p_items:collection.items,p_highlights:collection.highlights})
   if (error) return NextResponse.json({error:'来源资料保存失败，保留已有资料'},{status:500})
   return NextResponse.json({accepted:data,ignored:data===0})
 }
