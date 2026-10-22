@@ -100,8 +100,7 @@ function DatasetPanel({ source, dataset, platform, platformSwitch, filters }: {
       </div>
       <div className="mt-1 text-xs leading-5 text-slate-500">
         <p>{config.note}{config.provider === 'momorank' ? ' 仅展示免费公开资料。' : ''}</p>
-        {data.metadata && <p>资料日期：{data.metadata.source_date?.replaceAll('-', '/') || '未提供'}{compact ? ` · 采集：${time(data.metadata.collected_at)}` : ''}</p>}
-        {source === 'wechat' && data.metadata && <p role="status" className="text-amber-700">不能确认是当天排名。{data.metadata.source_modified_at ? `网页修改时间：${time(data.metadata.source_modified_at)}（非榜单日期）。` : ''}</p>}
+        {compact && data.metadata && <p>采集：{time(data.metadata.collected_at)}</p>}
       </div>
       {filters}
     </div>
