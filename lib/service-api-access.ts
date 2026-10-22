@@ -4,6 +4,8 @@ const SERVICE_AUTH_PATHS = [
   '/api/hot-radar/refresh',
   '/api/charts/monthly-trend',
   '/api/content-feed/ingest',
+  '/api/charts/douyin-minigames/ingest',
+  '/api/charts/game-discovery/ingest',
   '/api/content-feed/refresh',
   '/api/content-feed/transcripts/claim',
   '/api/content-feed/transcripts/result',

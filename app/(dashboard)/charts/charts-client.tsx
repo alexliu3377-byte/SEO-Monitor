@@ -11,6 +11,12 @@ const ContentFeedTab = dynamic(() => import('@/components/content-feed-tab'), {
 const MonthlyTrendTab = dynamic(() => import('@/components/monthly-trend-tab'), {
   loading: () => <PanelLoading label="正在读取月度趋势" />,
 })
+const DouyinMinigamesTab = dynamic(() => import('@/components/douyin-minigames-tab'), {
+  loading: () => <PanelLoading label="正在读取小游戏榜单" />,
+})
+const GameDiscoverySourceTab = dynamic(() => import('@/components/game-discovery-source-tab'), {
+  loading: () => <PanelLoading label="正在读取来源资料" />,
+})
 
 function PanelLoading({ label }: { label: string }) {
   return (
@@ -606,12 +612,7 @@ function SearchTrendsTab() {
         <SearchTrendList items={haoyouItems} loading={haoyouLoading} emptyText="暂未取得好游快爆热门搜索" tone="green" />
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-dashed border-gray-200 bg-white">
-        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
-          <h2 className="text-sm font-semibold text-gray-500">其他来源</h2>
-        </div>
-        <div className="flex min-h-48 items-center justify-center px-4 text-sm text-gray-300">暂未接入</div>
-      </section>
+      <GameDiscoverySourceTab key="hotwords" source="hotwords" />
     </div>
   )
 }
@@ -786,7 +787,7 @@ function Recent4399Tab() {
 
 type DiscoverySection = 'monthly' | 'game' | 'app' | 'content'
 type GameView = 'search' | 'rankings'
-type RankingSource = 'taptap' | 'haoyou' | '4399' | 'ccplay'
+type RankingSource = 'taptap' | 'haoyou' | '4399' | 'ccplay' | 'douyin_minigame' | 'wechat_minigame' | 'momorank'
 
 const SECTIONS: Array<{ id: DiscoverySection; label: string }> = [
   { id: 'monthly', label: '月度趋势' },
@@ -803,6 +804,9 @@ const RANKING_SOURCES: Array<{ id: RankingSource; label: string }> = [
   { id: 'haoyou', label: '好游快爆' },
   { id: '4399', label: '4399' },
   { id: 'ccplay', label: '虫虫助手' },
+  { id: 'douyin_minigame', label: '抖音小游戏' },
+  { id: 'wechat_minigame', label: '微信小游戏' },
+  { id: 'momorank', label: 'MomoRank' },
 ]
 
 function oneOf<T extends string>(value: string | null, values: readonly T[], fallback: T): T {
@@ -853,7 +857,13 @@ export default function ChartsClient() {
               <div className="mb-4 flex flex-wrap gap-2" aria-label="榜单来源">
                 {RANKING_SOURCES.map(item => <button key={item.id} type="button" aria-pressed={rankingSource === item.id} onClick={() => navigate({ source: item.id })} className={`h-9 rounded-lg border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${rankingSource === item.id ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{item.label}</button>)}
               </div>
-              {rankingSource === '4399'
+              {rankingSource === 'douyin_minigame'
+                ? <DouyinMinigamesTab />
+                : rankingSource === 'wechat_minigame'
+                  ? <GameDiscoverySourceTab key="wechat" source="wechat" />
+                  : rankingSource === 'momorank'
+                    ? <GameDiscoverySourceTab key="momorank" source="momorank" />
+                : rankingSource === '4399'
                 ? <Recent4399Tab />
                 : rankingSource === 'ccplay'
                   ? <ContentFeedTab key="ccplay-feed" kind="game" />
