@@ -290,12 +290,58 @@ try {
   await db.query(`insert into radar_daily_cache(data_date,scope_key,payload)
     select data_date,'today-only',payload from radar_daily_cache where scope_key='all-regression' and data_date=$1::date`,[today])
   assert.equal((await db.query("select get_daily_radar_page(null,'today-only','cross') as result")).rows[0].result.cacheReady,false)
+  await db.exec(await readFile(new URL('../supabase/migrations/20261023_radar_rank_badge_order.sql', import.meta.url),'utf8'))
+  // Same-date updates/older dates deliberately have larger metrics. They must
+  // not outrank a newer day or a new badge, even with an explicit metric sort.
+  const rankingRows=(tab,day)=>[
+    {keyword:`${tab}-${day}-new-small`,last_date:day,first_date:tab==='rank'?day:'2000-01-01',volume:1,rankDays:9,streak:2,domain:'ranking.test'},
+    {keyword:`${tab}-${day}-new-big`,last_date:day,first_date:tab==='rank'?day:'2000-01-01',volume:20,rankDays:2,streak:2,domain:'ranking.test'},
+    {keyword:`${tab}-${day}-update-big`,last_date:day,first_date:'2000-01-01',volume:99999,rankDays:100,streak:7,domain:'ranking.test'},
+    {keyword:`${tab}-${day}-update-small`,last_date:day,first_date:'2000-01-01',volume:1000,rankDays:4,streak:4,domain:'ranking.test'},
+  ]
+  for(const day of [today,older]) await db.query(`insert into radar_daily_cache(data_date,scope_key,payload)
+    values($1,'ranking-badge-order',$2)`,[day,JSON.stringify({rankWords:rankingRows('rank',day),streakWords:rankingRows('streak',day)})])
+  const rankingPage=async(tab,{pg=0,size=2,sort='date',direction='desc',selectedDate=null,badge='all',keyword='',selectedGroup=null}={})=>(await db.query(`
+    select get_daily_radar_page(p_date=>$1,p_scope=>'ranking-badge-order',p_tab=>$2,p_page=>$3,p_size=>$4,
+      p_sort=>$5,p_direction=>$6,p_badge=>$7,p_keyword=>$8,p_group_id=>$9) as result`,
+    [selectedDate,tab,pg,size,sort,direction,badge,keyword,selectedGroup])).rows[0].result
+  for(const tab of ['rank','streak']) {
+    const expected=[today,older].flatMap(day=>['new-big','new-small','update-big','update-small'].map(suffix=>`${tab}-${day}-${suffix}`))
+    const all=[]
+    for(let pg=0;pg<4;pg++)all.push(...(await rankingPage(tab,{pg})).data.map(row=>row.keyword))
+    assert.deepEqual(all,expected)
+    assert.equal((await rankingPage(tab)).total,8)
+    assert.equal(new Set(all).size,8)
+    for(const sort of ['volume',tab==='rank'?'rankDays':'streak']) {
+      const rows=(await rankingPage(tab,{size:20,sort})).data
+      assert.deepEqual(rows.map(row=>row.last_date),[today,today,today,today,older,older,older,older])
+      for(const day of [today,older]) {
+        const daily=rows.filter(row=>row.last_date===day)
+        assert.ok(daily.slice(0,2).every(row=>row.keyword.includes('-new-')))
+        assert.ok(daily.slice(2).every(row=>row.keyword.includes('-update-')))
+        for(const pair of [daily.slice(0,2),daily.slice(2)])assert.ok(pair[0][sort]>=pair[1][sort])
+      }
+    }
+    assert.deepEqual((await rankingPage(tab,{sort:'volume',direction:'asc'})).data.map(row=>row.keyword),
+      [`${tab}-${today}-new-small`,`${tab}-${today}-new-big`])
+    assert.deepEqual((await rankingPage(tab,{direction:'asc'})).data.map(row=>row.keyword),expected.slice(4,6))
+    assert.deepEqual((await rankingPage(tab,{selectedDate:older,size:20})).data.map(row=>row.keyword),expected.slice(4))
+    assert.equal((await rankingPage(tab,{badge:'new',size:20})).total,4)
+    assert.equal((await rankingPage(tab,{badge:'updated',size:20})).total,4)
+    assert.equal((await rankingPage(tab,{keyword:'new-',size:20})).total,4)
+    assert.equal((await rankingPage(tab,{selectedGroup:group})).total,8)
+  }
+  // Unrelated tabs retain their existing date cutoff and explicit metric order.
+  assert.equal((await displayPage('newWords',0,'date','desc',null,'updated')).total,1)
+  assert.equal((await displayPage('volumeRising',0,'netChange')).data[0].keyword,'older-volume-small')
+  assert.equal((await groupedPage('rank')).total,29997)
+  assert.equal((await groupedPage('streak')).total,29997)
   for(const role of ['anon','authenticated']) {
     assert.equal((await db.query(`select has_function_privilege($1,
       'public.get_daily_radar_page(date,text,text,uuid,integer,integer,text,text,integer,integer,text,text,text)','execute') as allowed`,[role])).rows[0].allowed,false)
   }
   console.log(JSON.stringify({dailyRadarSql:true,yesterdayAllExcludesToday:true,todayAllIncludesToday:true,datesIndependent:true,pagination:true,consecutive:true,urlIdentity:true,
     liveCompletionFiltering:true,legacyKeywordGuardReproduced:true,legacyKeywordGuardRetired:true,existingTasksPreserved:true,
-    groupedCandidates:30000,allSevenDates:true,dateThenBadgeOrder:true,dateThenVolumeOrder:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
+    groupedCandidates:30000,allSevenDates:true,dateThenBadgeOrder:true,rankingDateBadgeBeforeMetrics:true,dateThenVolumeOrder:true,combinedBadgeAndSearch:true,completionOriginalAndFinal:true,completionDateBoundary:true,
     legacyDatesInvented:false,cacheOnlyCleanup:true,productionWrites:0}))
 } finally { await db.close() }

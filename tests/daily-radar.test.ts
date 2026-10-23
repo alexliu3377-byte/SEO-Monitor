@@ -82,3 +82,15 @@ test('page GET reads a bounded cache page and never rebuilds it inside Vercel', 
   assert.doesNotMatch(source,/rpc\('refresh|refreshDailyRadarCaches/)
   assert.match(source,/private, no-store/)
 })
+
+test('ranking date and badge priority are applied in SQL before metric sorting and pagination', () => {
+  const sql = readFileSync('supabase/migrations/20261023_radar_rank_badge_order.sql','utf8')
+  const ranked = sql.slice(sql.indexOf('), ranked as ('))
+  const date = ranked.indexOf("p_tab in ('rank','streak') and p_sort='date'")
+  const badge = ranked.indexOf("p_tab in ('rank','streak') then case badge")
+  const metric = ranked.indexOf("p_sort in ('volume'")
+  const pagination = ranked.indexOf('where position>')
+  assert.ok(date >= 0 && date < badge && badge < metric && metric < pagination)
+  assert.match(sql,/case badge when 'new' then 0 else 1 end/)
+  assert.doesNotMatch(sql,/update radar_daily_cache|delete from|truncate|drop function/i)
+})
