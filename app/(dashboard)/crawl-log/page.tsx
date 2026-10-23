@@ -5,35 +5,10 @@ import { PageNumberInput } from '@/components/page-number-input'
 import { useState, useEffect, useCallback } from 'react'
 import { getBrowserClient } from '@/lib/supabase'
 import { CRAWL_RULES } from '@/lib/crawl-rules'
-
-type ActivityLog = {
-  id: string
-  type: 'cron_task' | 'cron_manual'
-  source: string | null
-  step: string | null
-  domain: string | null
-  group_index: number | null
-  total_groups: number | null
-  ip: string | null
-  status: 'running' | 'done' | 'warn' | 'fail'
-  ok_count: number
-  empty_count: number
-  skip_count: number
-  fail_count: number
-  rows_written: number
-  duration_ms: number | null
-  summary: string | null
-  logged_at: string
-}
-
-type SiteLog = {
-  id: string
-  domain: string
-  status: 'ok' | 'empty' | 'skip' | 'fail'
-  rows_written: number
-  detail: string | null
-  logged_at: string
-}
+import {
+  loadTodayCrawlSummaries, loadCrawlSiteLogs, summarizeCrawlTask,
+  type CrawlActivity as ActivityLog, type CrawlSiteLog as SiteLog, type CrawlTaskSummary,
+} from '@/lib/crawl-log-summary'
 
 function getMalaysiaToday(): string {
   return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -98,11 +73,11 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const SITE_STATUS_LABELS: Record<string, string> = {
-  ok: '成功', empty: '空', skip: '跳过', fail: '失败',
+  ok: '成功', empty: '空', skip: '跳过', fail: '失败', suspect: '待确认',
 }
 
 const SITE_STATUS_COLORS: Record<string, string> = {
-  ok: 'text-green-700', empty: 'text-yellow-600', skip: 'text-gray-400', fail: 'text-red-500',
+  ok: 'text-green-700', empty: 'text-yellow-600', skip: 'text-gray-400', fail: 'text-red-500', suspect: 'text-orange-600',
 }
 
 function StatusText({ status }: { status: string }) {
@@ -173,7 +148,7 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
         onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
           <div>
-            <h3 className="font-semibold text-gray-900">重试失败站点</h3>
+            <h3 className="font-semibold text-gray-900">重试异常站点</h3>
             <p className="text-xs text-gray-400 mt-0.5">步骤：{STEP_LABELS[step] ?? step}</p>
           </div>
           {!running && (
@@ -187,7 +162,7 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
 
         <div className="overflow-y-auto flex-1 px-5 py-3">
           {sites.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">暂无失败或空值站点</p>
+            <p className="text-sm text-gray-400 text-center py-8">暂无失败、空值或待确认站点</p>
           ) : (
             <div className="space-y-1">
               {sites.map(site => {
@@ -199,8 +174,8 @@ function RetryModal({ step, sites, onClose, onRefresh }: {
                         onChange={() => toggle(site.domain)} disabled={running}
                         className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-400 flex-shrink-0" />
                       <span className="text-sm text-gray-800 truncate">{site.domain}</span>
-                      <span className={`text-xs flex-shrink-0 ${site.status === 'fail' ? 'text-red-400' : 'text-yellow-500'}`}>
-                        {site.status === 'fail' ? '失败' : '空'}
+                      <span className={`text-xs flex-shrink-0 ${SITE_STATUS_COLORS[site.status]}`}>
+                        {SITE_STATUS_LABELS[site.status]}
                       </span>
                     </label>
                     <div className="text-xs ml-3 flex-shrink-0 w-16 text-right">
@@ -258,9 +233,8 @@ type Row2Stats = {
 }
 
 export default function CrawlLogPage() {
-  const [todayLogs, setTodayLogs] = useState<Record<string, ActivityLog[]>>({
-    keywords: [], rank: [], weight: [],
-  })
+  const [todaySummaries, setTodaySummaries] = useState<Record<string, CrawlTaskSummary>>({})
+  const [summaryError, setSummaryError] = useState<string | null>(null)
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -288,7 +262,6 @@ export default function CrawlLogPage() {
 
   // Card expand
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
-  const [expandedSites, setExpandedSites] = useState<Record<string, SiteLog[]>>({})
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -297,21 +270,16 @@ export default function CrawlLogPage() {
     const { from, to } = getMytDayRange(today)
     const errors: string[] = []
 
-    // Cards row 1: cron_task + cron_manual
-    const { data: todayData, error: todayErr } = await supabase
-      .from('activity_log')
-      .select('*')
-      .gte('logged_at', from)
-      .lte('logged_at', to)
-      .in('type', ['cron_task', 'cron_manual'])
-      .order('logged_at', { ascending: false })
-    if (todayErr) errors.push(todayErr.message)
-
-    const grouped: Record<string, ActivityLog[]> = { keywords: [], rank: [], weight: [] }
-    for (const row of (todayData || []) as ActivityLog[]) {
-      if (row.step && grouped[row.step]) grouped[row.step].push(row)
+    // Counts, expanded details and retry targets share one paginated snapshot.
+    try {
+      setTodaySummaries(await loadTodayCrawlSummaries(supabase, today, from, to))
+      setSummaryError(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法读取站点明细'
+      setTodaySummaries({})
+      setSummaryError(message)
+      errors.push(message)
     }
-    setTodayLogs(grouped)
 
     // Row 2 rank-title card: all has_rank_title sites, count those with data today
     const { data: rtSitesRaw, error: rtSitesErr } = await supabase.from('sites').select('id').eq('has_rank_title', true)
@@ -385,62 +353,21 @@ export default function CrawlLogPage() {
     setSiteLogsLoading(true)
     setSiteLogs([])
     setSiteLogsError(null)
-    const supabase = getBrowserClient()
-    const { data, error } = await supabase
-      .from('activity_site_log')
-      .select('*')
-      .eq('activity_id', activity.id)
-      .order('logged_at', { ascending: true })
-    if (error) setSiteLogsError(error.message)
-    setSiteLogs((data || []) as SiteLog[])
-    setSiteLogsLoading(false)
-  }
-
-  // Fetch problem sites for a step using latest-per-domain status.
-  // Manual retries that succeeded are excluded (their latest status is 'ok').
-  async function fetchProblemSites(step: string): Promise<SiteLog[]> {
-    const supabase = getBrowserClient()
-    const allStepLogs = todayLogs[step] || []
-    const mainLogs = allStepLogs.filter(l => l.type === 'cron_task')
-    const manualLogs = allStepLogs.filter(l => l.type === 'cron_manual')
-    if (mainLogs.length === 0) return []
-    const latestTime = new Date(mainLogs[0].logged_at).getTime()
-    const mainIds = mainLogs.filter(l => latestTime - new Date(l.logged_at).getTime() < 3 * 3600000).map(l => l.id)
-    const manualIds = manualLogs.map(l => l.id)
-    const ids = [...mainIds, ...manualIds]
-    if (ids.length === 0) return []
-    const { data, error } = await supabase
-      .from('activity_site_log')
-      .select('*')
-      .in('activity_id', ids)
-      .not('status', 'eq', 'skip')
-      .order('logged_at', { ascending: false })
-    if (error) console.error('fetchProblemSites failed:', error.message)
-    // Take latest status per domain, keep only still-problematic ones
-    const latestPerDomain = new Map<string, SiteLog>()
-    for (const log of (data || []) as SiteLog[]) {
-      if (!latestPerDomain.has(log.domain)) latestPerDomain.set(log.domain, log)
+    try {
+      setSiteLogs(await loadCrawlSiteLogs(getBrowserClient(), [activity.id]))
+    } catch (error) {
+      setSiteLogsError(error instanceof Error ? error.message : '无法读取站点明细')
+    } finally {
+      setSiteLogsLoading(false)
     }
-    return Array.from(latestPerDomain.values())
-      .filter(s => s.status === 'fail' || s.status === 'empty')
-      .sort((a, b) => a.status.localeCompare(b.status))
   }
 
-  async function openRetry(step: string) {
-    let sites = expandedSites[step]
-    if (!sites) {
-      sites = await fetchProblemSites(step)
-      setExpandedSites(p => ({ ...p, [step]: sites! }))
-    }
-    setRetryModal({ step, sites: sites ?? [] })
+  function openRetry(step: string) {
+    setRetryModal({ step, sites: todaySummaries[step]?.problems ?? [] })
   }
 
-  async function toggleExpandStep(step: string) {
-    if (expandedStep === step) { setExpandedStep(null); return }
-    setExpandedStep(step)
-    if (expandedSites[step]) return
-    const sites = await fetchProblemSites(step)
-    setExpandedSites(p => ({ ...p, [step]: sites }))
+  function toggleExpandStep(step: string) {
+    setExpandedStep(current => current === step ? null : step)
   }
 
   function resetFilters() {
@@ -469,43 +396,8 @@ export default function CrawlLogPage() {
   const safePage = Math.min(page, totalPages)
   const pagedLogs = filteredLogs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
-  function getTodaySummary(step: string) {
-    const allStepLogs = todayLogs[step] || []
-    const mainLogs = allStepLogs.filter(l => l.type === 'cron_task')
-    if (mainLogs.length === 0) return { ok: 0, empty: 0, fail: 0, total: 0, latestRun: undefined, runs: 0 }
-
-    // Sort oldest→newest to identify the main batch vs later retry runs
-    const sorted = [...mainLogs].sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
-    const firstTime = new Date(sorted[0].logged_at).getTime()
-    const BATCH_WINDOW = 30 * 60 * 1000 // 30 min: parallel sub-jobs are grouped here
-
-    // Main batch = parallel jobs that started close together
-    const mainBatch = sorted.filter(l => new Date(l.logged_at).getTime() - firstTime < BATCH_WINDOW)
-    // cronRetries = 第二次跑空值的 cron_task（超过 30 分钟后启动）
-    const cronRetries = sorted.filter(l => new Date(l.logged_at).getTime() - firstTime >= BATCH_WINDOW)
-
-    let ok    = mainBatch.reduce((s, l) => s + l.ok_count,    0)
-    let empty = mainBatch.reduce((s, l) => s + l.empty_count, 0)
-    let fail  = mainBatch.reduce((s, l) => s + l.fail_count,  0)
-    const total = ok + empty + fail  // 总数锁定在第一次主跑
-
-    // 后续重跑（cron_task 重试 + 手动重试）只调整 ok/empty/fail，不改变总数
-    const adjustRuns = [
-      ...cronRetries,
-      ...allStepLogs.filter(l => l.type === 'cron_manual'),
-    ]
-    for (const run of adjustRuns) {
-      const fromEmpty = Math.min(empty, run.ok_count)
-      empty = Math.max(0, empty - fromEmpty)
-      fail  = Math.max(0, fail  - Math.max(0, run.ok_count - fromEmpty))
-      ok   += run.ok_count
-    }
-    ok = Math.min(ok, total)
-
-    return { ok, empty, fail, total, latestRun: mainLogs[0], runs: mainBatch.length }
-  }
-
   const rulesSection = CRAWL_RULES.find(r => r.key === rulesStep)
+  const detailSummary = detailActivity ? summarizeCrawlTask([detailActivity], siteLogs) : null
 
   return (
     <div className="p-8">
@@ -516,7 +408,8 @@ export default function CrawlLogPage() {
         </div>
         <button
           onClick={fetchData}
-          className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50"
+          disabled={loading}
+          className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -538,11 +431,11 @@ export default function CrawlLogPage() {
 
           {/* Today's GitHub Actions task status */}
           <div>
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">今日任务状态</h2>
-            <div className="grid grid-cols-3 gap-4">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3" title="按今日资料的站点最新结果统计，重试不重复计数">今日任务状态</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {(['keywords', 'weight', 'rank'] as const).map(step => {
-                const { ok, empty, fail, total, latestRun, runs } = getTodaySummary(step)
-                const hasProblems = empty > 0 || fail > 0
+                const { ok, empty, fail, suspect, total, latestRun, runs, problems, running, missingDetails } = todaySummaries[step] ?? summarizeCrawlTask([], [])
+                const hasProblems = problems.length > 0
                 const isExpanded = expandedStep === step
                 return (
                   <div key={step} className="card p-4">
@@ -561,12 +454,14 @@ export default function CrawlLogPage() {
                       )}
                     </div>
 
-                    {runs > 0 ? (
+                    {summaryError ? (
+                      <p className="text-xs text-red-500 mt-3">统计读取失败，请刷新重试</p>
+                    ) : runs > 0 ? (
                       <>
                         {/* X/Y 站成功 */}
                         <div className="flex items-end justify-between mt-3">
                           <div>
-                            <span className={`text-2xl font-bold tabular-nums ${hasProblems ? 'text-yellow-600' : 'text-green-700'}`}>
+                            <span className={`text-2xl font-bold tabular-nums ${hasProblems || missingDetails || running ? 'text-yellow-600' : 'text-green-700'}`}>
                               {ok}
                             </span>
                             <span className="text-sm text-gray-400">
@@ -577,6 +472,9 @@ export default function CrawlLogPage() {
                             )}
                             {empty > 0 && (
                               <span className="ml-1 text-xs text-yellow-500">{empty} 空</span>
+                            )}
+                            {suspect > 0 && (
+                              <span className="ml-1 text-xs text-orange-600">{suspect} 待确认</span>
                             )}
                           </div>
                           {hasProblems && (
@@ -589,6 +487,8 @@ export default function CrawlLogPage() {
                               </button>
                               <button
                                 onClick={() => toggleExpandStep(step)}
+                                aria-expanded={isExpanded}
+                                aria-controls={`crawl-problems-${step}`}
                                 className="text-xs text-blue-500 hover:text-blue-700"
                               >
                                 {isExpanded ? '收起' : '查看'}
@@ -596,20 +496,20 @@ export default function CrawlLogPage() {
                             </div>
                           )}
                         </div>
+                        {running && <p className="text-xs text-blue-600 mt-2">采集中，当前为已取得的站点结果</p>}
+                        {missingDetails && <p className="text-xs text-orange-600 mt-2">部分站点明细缺失，当前数量未完整确认</p>}
 
                         {/* Expanded problem sites */}
                         {isExpanded && (
-                          <div className="mt-3 border-t border-gray-100 pt-2 space-y-1">
-                            {!expandedSites[step] ? (
-                              <p className="text-xs text-gray-400">加载中…</p>
-                            ) : expandedSites[step].length === 0 ? (
+                          <div id={`crawl-problems-${step}`} className="mt-3 border-t border-gray-100 pt-2 space-y-1">
+                            {problems.length === 0 ? (
                               <p className="text-xs text-gray-400">无问题站点记录</p>
                             ) : (
-                              expandedSites[step].map(sl => (
+                              problems.map(sl => (
                                 <div key={sl.id} className="flex items-center justify-between text-xs">
                                   <span className="text-gray-700 truncate max-w-[140px]" title={sl.domain}>{sl.domain}</span>
-                                  <span className={sl.status === 'fail' ? 'text-red-500' : 'text-yellow-600'}>
-                                    {sl.status === 'fail' ? '失败' : '空'}
+                                  <span className={SITE_STATUS_COLORS[sl.status]} title={sl.detail ?? ''}>
+                                    {SITE_STATUS_LABELS[sl.status]}
                                   </span>
                                 </div>
                               ))
@@ -627,7 +527,7 @@ export default function CrawlLogPage() {
           </div>
 
           {/* Row 2: rank-title / index-pages */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
               {/* Card A — 排名抓取 */}
               <div className="card p-4">
@@ -904,8 +804,6 @@ export default function CrawlLogPage() {
           onClose={() => setRetryModal(null)}
           onRefresh={() => {
             fetchData()
-            setExpandedSites({})
-            setExpandedStep(null)
           }}
         />
       )}
@@ -962,10 +860,11 @@ export default function CrawlLogPage() {
             <div className="px-6 py-4">
               <div className="flex items-center flex-wrap gap-4 mb-4 text-sm">
                 <StatusText status={detailActivity.status} />
-                <span className="text-gray-500">成功 <span className="font-medium text-green-700">{detailActivity.ok_count}</span></span>
-                <span className="text-gray-500">空 <span className="font-medium text-yellow-600">{detailActivity.empty_count}</span></span>
+                <span className="text-gray-500">成功 <span className="font-medium text-green-700">{siteLogsLoading || siteLogsError ? '—' : detailSummary?.ok}</span></span>
+                <span className="text-gray-500">空 <span className="font-medium text-yellow-600">{siteLogsLoading || siteLogsError ? '—' : detailSummary?.empty}</span></span>
                 <span className="text-gray-500">跳过 <span className="font-medium text-gray-500">{detailActivity.skip_count}</span></span>
-                <span className="text-gray-500">失败 <span className="font-medium text-red-500">{detailActivity.fail_count}</span></span>
+                <span className="text-gray-500">失败 <span className="font-medium text-red-500">{siteLogsLoading || siteLogsError ? '—' : detailSummary?.fail}</span></span>
+                {!siteLogsLoading && !siteLogsError && !!detailSummary?.suspect && <span className="text-gray-500">待确认 <span className="font-medium text-orange-600">{detailSummary.suspect}</span></span>}
                 <span className="text-gray-400">{formatDuration(detailActivity.duration_ms)}</span>
               </div>
               {detailActivity.summary && (

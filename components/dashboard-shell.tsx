@@ -11,9 +11,9 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   }
 
   return (
-    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       <Sidebar />
-      <main id="main-content" className="min-h-screen flex-1 bg-slate-50 pt-14 lg:ml-[220px] lg:h-screen lg:overflow-y-auto lg:pt-0">
+      <main id="main-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50 pt-14 lg:ml-[220px] lg:pt-0">
         {children}
       </main>
     </div>
