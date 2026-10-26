@@ -39,7 +39,7 @@ test('every live pager adapter preserves its zero/one-based convention and query
           clampedPage:6,clampedListPage:6,clampedCoveragePage:6,mainPage:6,totalPages:900,pages:900,oTotalPages:900,
           sourceDetailTotalPages:900,detailTotalPages:900,historyPages:900,total:18000,historyTotal:18000,messageTotal:18000,
           sortedVisible:{length:18000},sortedDisplay:{length:18000},filteredGroups:{length:18000},filteredCoverage:{length:18000},
-          pageSize:20,PAGE_SIZE:20,loading:false,disabled:false,historyLoading:false,messageLoading:false,
+          pageSize:20,PAGE_SIZE:20,loading:false,disabled:false,historyLoading:false,messageLoading:false,label:'事项分页',
           discussionItem:{id:'discussion'},lookupUrl:'https://example.com/page',searchQuery:'original query'}
         for(const name of ['onChange','onPage','onPageChange','setPage','setOPage','setSubPage','setSourceDetailPage','setDetailPage',
           'setHistoryPage','setMainPage','setListPage','setCoveragePage','loadMessages','handleSearch','doSearch','lookup']){

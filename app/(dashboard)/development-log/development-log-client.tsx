@@ -4,6 +4,8 @@ import { PageNumberInput } from '@/components/page-number-input'
 
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import DevelopmentProgressBoard, { ReleaseDevelopmentTasks } from './development-progress-board'
+import { localDevelopmentDate } from '@/lib/development-progress'
 
 type DevelopmentRelease = {
   id: string
@@ -121,6 +123,7 @@ export default function DevelopmentLogClient() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<ReleaseForm>(EMPTY_RELEASE)
   const [saving, setSaving] = useState(false)
+  const [taskRevision, setTaskRevision] = useState(0)
 
   const load = useCallback(async (targetPage: number) => {
     setLoading(true)
@@ -143,7 +146,7 @@ export default function DevelopmentLogClient() {
 
   function startNew() {
     setEditingId(null)
-    setForm({ ...EMPTY_RELEASE, releaseDate: new Date().toISOString().slice(0, 10) })
+    setForm({ ...EMPTY_RELEASE, releaseDate: localDevelopmentDate() })
     setFormOpen(true)
   }
 
@@ -195,14 +198,14 @@ export default function DevelopmentLogClient() {
           <div>
             <p className="text-sm font-semibold text-emerald-700">奇心内容发布系统</p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">开发日志</h1>
-            <p className="mt-2 text-sm text-slate-500">记录正式版本的主题、内容、实现方式与维护说明。</p>
+            <p className="mt-2 text-sm text-slate-500">上方追踪开发进度，下方保留已发布版本与完整交接记录。</p>
           </div>
           <div className="flex items-center gap-3">
             {!loading && <span className="text-sm text-slate-500">共 {total} 个版本</span>}
             {canManage && !loading && (
               <button type="button" onClick={startNew} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                 <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 4v12M4 10h12" /></svg>
-                新增版本
+                新增发布版本
               </button>
             )}
           </div>
@@ -210,6 +213,8 @@ export default function DevelopmentLogClient() {
 
         {message && <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</div>}
         {formOpen && canManage && <ReleaseEditor form={form} setForm={setForm} saving={saving} editing={Boolean(editingId)} onSubmit={save} onCancel={() => setFormOpen(false)} />}
+
+        <DevelopmentProgressBoard onChange={() => setTaskRevision(value => value + 1)} />
 
         <section aria-labelledby="release-timeline-title" className="mx-auto min-w-0 max-w-5xl">
             <div className="mb-4 flex items-center justify-between gap-4">
@@ -227,7 +232,7 @@ export default function DevelopmentLogClient() {
             {!loading && !error && (
               <div className="space-y-5">
                 {releases.map(release => (
-                  <ReleaseTimelineItem key={release.id} release={release} canManage={canManage} onEdit={startEdit} />
+                  <ReleaseTimelineItem key={release.id} release={release} canManage={canManage} onEdit={startEdit} taskRevision={taskRevision} />
                 ))}
                 <Pagination page={page} total={total} onChange={setPage} />
               </div>
@@ -238,7 +243,7 @@ export default function DevelopmentLogClient() {
   )
 }
 
-function ReleaseTimelineItem({ release, canManage, onEdit }: { release: DevelopmentRelease; canManage: boolean; onEdit: (release: DevelopmentRelease) => void }) {
+function ReleaseTimelineItem({ release, canManage, onEdit, taskRevision }: { release: DevelopmentRelease; canManage: boolean; onEdit: (release: DevelopmentRelease) => void; taskRevision: number }) {
   return (
     <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md md:grid md:grid-cols-[190px_minmax(0,1fr)]">
       <header className="flex flex-col justify-between bg-slate-950 p-5 text-white sm:p-6 md:min-h-64">
@@ -278,6 +283,8 @@ function ReleaseTimelineItem({ release, canManage, onEdit }: { release: Developm
           <ExperimentalList items={release.experimental_features ?? []} />
 
           <ReleaseDetails implementation={release.implementation_notes ?? []} limitations={release.limitations ?? []} />
+
+          <ReleaseDevelopmentTasks releaseId={release.id} refreshKey={taskRevision} />
 
           {release.source_note && (
             <section className="mt-4 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3">
