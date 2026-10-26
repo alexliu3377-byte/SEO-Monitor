@@ -291,6 +291,7 @@ try {
     select data_date,'today-only',payload from radar_daily_cache where scope_key='all-regression' and data_date=$1::date`,[today])
   assert.equal((await db.query("select get_daily_radar_page(null,'today-only','cross') as result")).rows[0].result.cacheReady,false)
   await db.exec(await readFile(new URL('../supabase/migrations/20261023_radar_rank_badge_order.sql', import.meta.url),'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/20261026_radar_narrow_materialization.sql', import.meta.url),'utf8'))
   // Same-date updates/older dates deliberately have larger metrics. They must
   // not outrank a newer day or a new badge, even with an explicit metric sort.
   const rankingRows=(tab,day)=>[

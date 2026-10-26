@@ -229,12 +229,13 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '环境快照',
     badge: 'daily-crawl.yml · index-pages 重试后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 daily-crawl.yml 在 index-pages 重试完成后立即调用 GET /api/environment/daily-snapshot（含 Bearer CRON_SECRET），与 tracking 并行、不再等待 tracking 全部完成，也不需要进入页面；environment-snapshot.yml 保留 workflow_dispatch，可手动指定日期补跑' },
+      { label: '触发方式', text: '每日由 daily-crawl.yml 在 index-pages 重试完成后，在 GitHub Runner 直接执行 scripts/refresh-derived-cache.ts --kind=environment，读写 Supabase，不再让 Vercel 承担每日计算；environment-snapshot.yml 保留手动指定日期补跑入口。环境快照、热词七日缓存完成后再跑月度趋势，分组成效缓存最多同时处理两个分组，减少数据库高峰。' },
       { label: '计算来源', text: '① rank_changes：统计目标日期全站涨/跌排名词总数及有数据站点数；② index_snapshots：对比目标日期与前一日各站收录数，计算平均变化百分比；③ 日期本身：计算星期几、是否中国大陆法定节假日、是否学生放假期间（暑假7-8月、寒假1月20日-2月底）' },
       { label: '写入表', text: 'environment_daily（按 date 唯一 upsert；字段：date, weekday, is_holiday, is_school_holiday, total_rankup, total_rankdown, sites_with_rank_data, avg_index_change_pct, sites_with_index_data, crawl_anomaly；永久保留）' },
       { label: 'crawl_anomaly 判定', text: '当日 total_rankup + total_rankdown = 0 时标记为 true，表示排名数据疑似未抓取到；用于在评分时排除异常日期的数据' },
       { label: '用途', text: '未来评分修正：若某日 avg_index_change_pct < -5% 或 crawl_anomaly=true，该日相关词的排名跌幅不计入规则失败评分（env_excluded）；积累半年后可分析规则在不同环境（节假日 / 暑假 / 算法波动日）下的差异表现' },
-      { label: '节假日维护', text: '中国大陆法定节假日硬编码在 /api/environment/daily-snapshot/route.ts 的 PUBLIC_HOLIDAYS Set 中，每年国务院通知发布后手动追加 2026-2027 年份' },
+      { label: '节假日维护', text: '中国大陆法定节假日集中在 lib/environment-snapshot.ts 的 PUBLIC_HOLIDAYS Set 中；日期计算使用 UTC 日历字段，避免本地电脑与 Runner 时区不同造成错日。' },
+      { label: '聚合与保护', text: '排名及近30日内容数量由两个 service_role 专用 SQL 聚合返回，避免每日2000条截断及搬运整月原始资料；来源查询失败则停止发布，不把失败伪装成零。' },
     ],
   },
   {
@@ -260,7 +261,7 @@ export const CRAWL_RULES: RuleSection[] = [
     title: '分组报告缓存',
     badge: 'daily-crawl.yml · tracking 成功后立即运行（可手动补跑）',
     items: [
-      { label: '触发方式', text: '每日由 daily-crawl.yml 在 tracking 全部批次成功后读取分组清单，每个分组各自并行调用 GET /api/tracking-cache/refresh?groupId=...（Bearer CRON_SECRET），避免多个分组串在同一个 Vercel 请求内触发504；环境快照和完整热词缓存会在 index-pages 重试后先刷新，不受 tracking 耗时影响；group-tracking-cache.yml 保留 workflow_dispatch 手动补跑入口' },
+      { label: '触发方式', text: '每日 tracking 完成且月度刷新结束后，在 GitHub Runner 执行 scripts/refresh-derived-cache.ts --kind=tracking --group-id=...；不再调用 Vercel 刷新接口。最多两个分组并行，同一分组的自动/手动任务互斥。月度刷新失败不阻断分组缓存；group-tracking-cache.yml 保留手动补跑入口。' },
       { label: '背景（2026-08-18 新增）', text: '分组报告"成效追踪"（/api/task-groups/[id]/outcomes）和"追踪汇总"（/api/task-groups/[id]/tracking-summary）之前每次打开页面都现场对 site_tracking_records 做全量扫描（这张表永久保留，接口本身不带时间范围限制）+ 批量查认领来源/排名匹配词 + "更新"型claim的真新排名历史判断，多轮查询叠加导致打开很慢（用户反馈）。用户明确接受"数据只到当天早上、当天新提交的记录要等第二天才反映"这个延迟，换成定时预算好+缓存，跟热词雷达同一套思路' },
       { label: '计算逻辑', text: 'lib/group-tracking-cache.ts 的 computeGroupTrackingPayload()——原本写在 outcomes/route.ts 里的查询+算分逻辑原样抽出来，逐个分组调用，供读接口（缓存未命中兜底）和刷新接口共用同一份代码' },
       { label: '写入表', text: '2026-09-04 起使用分页缓存：group_tracking_cache_rows 每个claim一行并保存可索引的筛选/排序字段，group_tracking_cache_state 只保存更新时间、行数和小型月度汇总；replace_group_tracking_paged_cache RPC 在一个事务里原子替换。旧 group_tracking_cache 大JSON暂时继续同步，作为迁移期间的兼容兜底' },
