@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
+    "agent": "tsx scripts/local-content-agent.ts",
     "trend:setup": "tsx scripts/trend-collector.ts --setup",
     "trend:collect": "tsx scripts/trend-collector.ts",
     "content:collect": "tsx scripts/content-source-collector.ts",

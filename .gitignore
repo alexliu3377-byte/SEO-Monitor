@@ -39,3 +39,6 @@ next-env.d.ts
 
 # Temporary checkouts used for coordinated worker fixes
 /.task-work/
+
+# Private local Agent tasks, references and approved preference memory
+/.content-agent/
