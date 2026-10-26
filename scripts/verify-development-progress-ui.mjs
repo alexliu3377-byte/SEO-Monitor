@@ -11,13 +11,13 @@ const bundle = await build({
   stdin: { contents: `import React from 'react';import{createRoot}from'react-dom/client';import Page from './app/(dashboard)/development-log/development-log-client';createRoot(document.getElementById('root')).render(<Page/>);`, resolveDir: process.cwd(), loader: 'tsx' },
   bundle: true, write: false, format: 'iife', jsx: 'automatic', alias: { '@': process.cwd() }, define: { 'process.env.NODE_ENV': '"development"' },
 })
-const css = await postcss([tailwindcss({ content: ['app/(dashboard)/development-log/*.tsx', 'components/app-dialog.tsx', 'components/page-number-input.tsx'] })])
+const css = await postcss([tailwindcss({ content: ['app/(dashboard)/development-log/*.tsx', 'components/app-dialog.tsx', 'components/page-number-input.tsx', 'components/development-stage-progress.tsx'] })])
   .process('@tailwind base;@tailwind components;@tailwind utilities;.btn-primary,.btn-secondary,.btn-ghost{border-radius:6px;padding:6px 12px;font-size:12px;min-height:32px}.btn-primary{background:#059669;color:white}.btn-secondary{border:1px solid #cbd5e1;background:white}.btn-ghost{color:#475569}button:disabled{opacity:.5}button:focus-visible{outline:2px solid #059669}button{cursor:pointer}', { from: undefined })
 const date = new Date().toISOString()
-const tasks = [{ id: '00000000-0000-4000-8000-000000000001', title: '开发日志进度与发布归档', description: '从想法到上线全程可追踪，保留测试与难题记录。', owner_name: '项目负责人', stage: 'testing',
-  checklist: [{ id: '00000000-0000-4000-8000-000000000003', text: '完成进度看板和历史', done: true }, { id: '00000000-0000-4000-8000-000000000004', text: '完成验收', done: false }],
-  blocker: '', next_step: '测试后部署并检查线上', test_notes: '', deployment_notes: '', revision: 1, release_id: null, created_at: date, updated_at: date, started_at: date, tested_at: null, deployed_at: null }]
-let events = [{ id: 1, actor_name: '项目负责人', note: '创建事项并完成主体', snapshot: structuredClone(tasks[0]), created_at: date }]
+const tasks = [{ id: '00000000-0000-4000-8000-000000000001', title: 'AI Agent 自动采集与改写', description: '从新词发现到内容资料归集，生成可供组员审核的改写草稿与攻略；最终由组员编辑 SEO 标题并确认发布。', owner_name: '项目负责人', stage: 'planned',
+  checklist: ['梳理新词发现、采集、改写与人工审核方向', '确认模型接入、运行方式与费用边界', '定义采集来源、过滤规则与去重标准', '实现自动采集与多来源资料归集', '实现目标标题改写与教程攻略草稿', '真实样本测试与人工审核流程', '部署定时任务并完成线上验收'].map((text, index) => ({ id: `00000000-0000-4000-8000-00000000000${index + 3}`, text, done: index === 0 })),
+  blocker: '模型接入与费用方案尚未确认，尚未开始开发。', next_step: '确认首版来源、过滤规则与输出模板。', test_notes: '', deployment_notes: '', revision: 1, release_id: null, created_at: date, updated_at: date, started_at: null, tested_at: null, deployed_at: null }]
+let events = [{ id: 1, actor_name: '项目负责人', note: '仅整理需求方向，尚未实施采集与改写联动', snapshot: structuredClone(tasks[0]), created_at: date }]
 const release = { id: '00000000-0000-4000-8000-000000000002', version: 'v0.0.1', title: '测试版本', release_date: date.slice(0, 10), status: 'completed', summary: '仅本地浏览器测试，不代表真实发布记录。', highlights: ['保留发布历史'], implementation_notes: [], limitations: [], experimental_features: [], source_note: null }
 let readOnly = false
 const server = createServer(async (req, res) => {
@@ -53,12 +53,24 @@ const output = path.resolve('.task-work/development-progress')
 try {
   await mkdir(output, { recursive: true })
   await page.goto(root)
+  await page.getByRole('button', { name: 'AI Agent 自动采集与改写', exact: true }).waitFor()
+  const stepper = page.locator('[data-development-stepper="planned"]')
+  assert.equal(await stepper.locator('li').count(), 6)
+  assert.equal(await stepper.locator('[aria-current="step"]').innerText(), '已计划\n当前阶段')
+  assert.ok((await stepper.boundingBox()).width > 800)
+  await page.locator('section[aria-labelledby="development-progress-title"]').screenshot({ path: path.join(output, 'board.png') })
+  await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+  await page.setViewportSize({ width: 1365, height: 1000 })
   await page.getByRole('button', { name: '查看关联开发过程', exact: true }).click()
   await page.getByText('这个版本暂未关联开发事项。旧版本内容保留不变。').waitFor()
   await page.getByRole('button', { name: '查看进度', exact: true }).click()
   await page.getByRole('button', { name: '更新进度', exact: true }).click()
   await page.getByLabel('当前阶段').selectOption('ready')
-  await page.getByLabel('完成检查项 2', { exact: true }).check()
+  for (const checkbox of await page.getByRole('checkbox').all()) await checkbox.check()
   await page.getByLabel('测试结果 / 验收依据').fill('测试通过')
   await page.getByLabel('本次进展说明').fill('本地验收完成')
   await page.getByRole('button', { name: '保存进度', exact: true }).click()
@@ -73,7 +85,7 @@ try {
   await page.getByRole('button', { name: '归入发布版本', exact: true }).click()
   await page.getByLabel('发布版本', { exact: true }).selectOption(release.id)
   await page.getByRole('button', { name: '确认归档', exact: true }).click()
-  await page.getByRole('button', { name: /开发日志进度与发布归档 · 查看难题/ }).click()
+  await page.getByRole('button', { name: /AI Agent 自动采集与改写 · 查看难题/ }).click()
   await page.getByText('完成线上验收', { exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '更新进度', exact: true }).count(), 0)
   await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
@@ -82,10 +94,8 @@ try {
   await page.getByLabel('需求背景 / 想解决什么').fill('希望保留新想法并逐步推进')
   await page.getByRole('button', { name: '保存进度', exact: true }).click()
   await page.getByText('新功能想法', { exact: true }).waitFor()
-  await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true })
   await page.setViewportSize({ width: 375, height: 812 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
   await page.getByRole('button', { name: '查看进度', exact: true }).click()
   await page.getByRole('button', { name: '更新进度', exact: true }).click()

@@ -3,8 +3,9 @@
 import { cloneElement, FormEvent, ReactElement, useEffect, useId, useRef, useState } from 'react'
 import AppDialog from '@/components/app-dialog'
 import { PageNumberInput } from '@/components/page-number-input'
+import { DevelopmentStageProgress } from '@/components/development-stage-progress'
 import {
-  checklistProgress, DEVELOPMENT_FLOW, DEVELOPMENT_STAGES, STAGE_LABELS,
+  checklistProgress, DEVELOPMENT_STAGES, STAGE_LABELS,
   type DevelopmentStage, type DevelopmentTask, type DevelopmentTaskInput,
 } from '@/lib/development-progress'
 
@@ -68,13 +69,8 @@ export default function DevelopmentProgressBoard({ onChange }: { onChange?: () =
   function filter(value: string) { setScope('active'); setStage(value); setPage(1) }
   return <section aria-labelledby="development-progress-title" className="space-y-4">
     <div className="flex flex-wrap items-end justify-between gap-3">
-      <div><h2 id="development-progress-title" className="text-lg font-semibold text-slate-900">开发进度</h2><p className="mt-1 text-xs leading-5 text-slate-500">想法 → 开发 → 测试 → 上线。进度按检查项计算，100% 不代表已上线。</p></div>
+      <div><h2 id="development-progress-title" className="text-lg font-semibold text-slate-900">开发进度</h2><p className="mt-1 text-xs leading-5 text-slate-500">圆点表示开发阶段；检查项与测试、上线分别记录。</p></div>
       <div className="flex gap-2"><button className="btn-secondary" onClick={() => setRefresh(n => n + 1)} disabled={loading}>刷新</button>{canManage && <button className="btn-primary" onClick={() => setSelected(null)}>新增事项</button>}</div>
-    </div>
-    <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-white sm:grid-cols-3 lg:grid-cols-6">
-      {DEVELOPMENT_FLOW.map(value => <button key={value} aria-pressed={scope === 'active' && stage === value} onClick={() => filter(value)} className={`border-b border-r border-slate-100 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500 ${scope === 'active' && stage === value ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}>
-        <span className="block text-xs text-slate-600">{STAGE_LABELS[value]}</span><span className="mt-1 block text-xl font-semibold tabular-nums text-slate-900">{loading && !tasks.length ? '—' : counts[value] ?? 0}</span>
-      </button>)}
     </div>
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
@@ -82,16 +78,18 @@ export default function DevelopmentProgressBoard({ onChange }: { onChange?: () =
           <button aria-pressed={scope === 'active' && !stage} className={scope === 'active' && !stage ? 'btn-primary' : 'btn-ghost'} onClick={() => filter('')}>未归档</button>
           <button aria-pressed={scope === 'active' && stage === 'paused'} className={scope === 'active' && stage === 'paused' ? 'btn-primary' : 'btn-ghost'} onClick={() => filter('paused')}>已暂停 {counts.paused ?? 0}</button>
           <button aria-pressed={scope === 'history'} className={scope === 'history' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setScope('history'); setStage(''); setPage(1) }}>归档 / 已取消</button>
-        </div><span className="text-xs text-slate-500">{total} 项</span>
+        </div><div className="flex items-center gap-3"><label className="sr-only" htmlFor="development-stage-filter">阶段筛选</label><select id="development-stage-filter" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500" value={stage} onChange={event => { setStage(event.target.value); setPage(1) }}><option value="">全部阶段</option>{DEVELOPMENT_STAGES.map(value => <option key={value} value={value}>{STAGE_LABELS[value]}</option>)}</select><span className="text-xs text-slate-500">{total} 项</span></div>
       </div>
       {error ? <div role="alert" className="p-5 text-sm text-red-700">{error}<button className="btn-secondary ml-3" onClick={() => setRefresh(n => n + 1)}>重试</button></div>
         : loading ? <div role="status" className="p-6 text-sm text-slate-500">正在读取开发进度…</div>
           : tasks.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">{scope === 'history' ? '暂无归档或取消事项，过去的版本日志仍保留在下方。' : '暂无此阶段的事项。新增想法后，就可以拆分检查项、记录进展。'}</div>
-            : <ul className="divide-y divide-slate-100">{tasks.map(task => <li key={task.id} className="grid items-center gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_150px_100px]">
-              <div className="min-w-0"><div className="flex items-center gap-2"><TaskStage stage={task.stage} /><button className="min-w-0 truncate text-left text-sm font-semibold text-slate-900 hover:text-emerald-700 focus-visible:underline" title={task.title} onClick={() => setSelected(task.id)}>{task.title}</button></div>
+            : <ul className="divide-y divide-slate-100">{tasks.map(task => <li key={task.id} className="px-4 py-5 sm:px-5">
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2"><TaskStage stage={task.stage} /><button className="min-w-0 text-left text-sm font-semibold text-slate-900 hover:text-emerald-700 focus-visible:underline [overflow-wrap:anywhere]" onClick={() => setSelected(task.id)}>{task.title}</button></div>
                 <p className="mt-2 text-xs text-slate-500">{task.owner_name || '负责人待定'} · {timestamp(task.updated_at)} 更新{task.release && ` · ${task.release.version}`}</p>
                 {(task.blocker || task.next_step) && <p title={task.blocker || task.next_step} className={`mt-1 truncate text-xs ${task.blocker ? 'text-amber-800' : 'text-slate-600'}`}>{task.blocker ? `难题：${task.blocker}` : `下一步：${task.next_step}`}</p>}
-              </div><ProgressBar task={task} /><button className="btn-secondary justify-self-start md:justify-self-end" onClick={() => setSelected(task.id)}>查看进度</button>
+              </div><button className="btn-secondary shrink-0" onClick={() => setSelected(task.id)}>查看进度</button></div>
+              <div className="mt-5"><DevelopmentStageProgress stage={task.stage} /></div>
+              <p className="mt-3 text-right text-xs text-slate-600">检查项完成 {checklistProgress(task.checklist).completed}/{task.checklist.length} · {task.checklist.length ? '不代表已测试或已上线' : '等待拆分工作项'}</p>
             </li>)}</ul>}
     </div>
     <Pager page={page} total={total} onChange={setPage} disabled={loading} label="开发事项分页" />
@@ -102,7 +100,8 @@ export default function DevelopmentProgressBoard({ onChange }: { onChange?: () =
 function Facts({ task }: { task: DevelopmentTask }) {
   return <div className="space-y-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">
     <div className="flex items-center gap-3"><TaskStage stage={task.stage} /><span>{task.owner_name || '负责人待定'}</span>{task.release && <span className="text-emerald-700">已归入 {task.release.version}</span>}</div>
-    <ProgressBar task={task} />
+    <DevelopmentStageProgress stage={task.stage} />
+    <p className="text-xs text-slate-600">检查项完成 {checklistProgress(task.checklist).completed}/{task.checklist.length}，不代表已测试或已上线。</p>
     <p className="whitespace-pre-wrap">{task.description}</p>
     {task.checklist.length > 0 && <ul className="space-y-1">{task.checklist.map(item => <li key={item.id} className="flex gap-2"><span className={item.done ? 'text-emerald-700' : 'text-slate-500'}>{item.done ? '已完成' : '待完成'}</span><span className="min-w-0 flex-1">{item.text}</span></li>)}</ul>}
     {([['当前难题 / 暂停原因', task.blocker], ['下一步', task.next_step], ['测试与验收', task.test_notes], ['部署与线上验证', task.deployment_notes]] as const).map(([label, text]) => text && <div key={label}><h4 className="font-medium text-slate-900">{label}</h4><p className="mt-1 whitespace-pre-wrap">{text}</p></div>)}
@@ -183,7 +182,7 @@ function TaskDialog({ taskId, onClose, onSaved }: { taskId: string | null; onClo
           <Field label="事项名称"><input required maxLength={120} className={INPUT} value={form.title} onChange={event => update('title', event.target.value)} /></Field>
           <div className="grid gap-4 sm:grid-cols-2"><Field label="负责人"><input maxLength={80} className={INPUT} placeholder="可以暂不指定" value={form.owner_name} onChange={event => update('owner_name', event.target.value)} /></Field>
             <Field label="当前阶段"><select className={INPUT} value={form.stage} onChange={event => update('stage', event.target.value as DevelopmentStage)}>{DEVELOPMENT_STAGES.map(stage => <option key={stage} value={stage}>{STAGE_LABELS[stage]}</option>)}</select></Field></div>
-          <ol aria-label="开发阶段" className="grid grid-cols-3 gap-1 sm:grid-cols-6">{DEVELOPMENT_FLOW.map(stage => <li key={stage} aria-current={form.stage === stage ? 'step' : undefined} className={`border-t-2 py-2 text-center text-xs ${stage === form.stage ? 'border-emerald-600 font-semibold text-emerald-800' : 'border-slate-200 text-slate-500'}`}>{STAGE_LABELS[stage]}</li>)}</ol>
+          <DevelopmentStageProgress stage={form.stage} />
           <Field label="需求背景 / 想解决什么"><textarea required rows={3} maxLength={4000} className={INPUT} value={form.description} onChange={event => update('description', event.target.value)} /></Field>
           <section aria-label="检查项" className="space-y-2"><div className="flex items-center justify-between gap-2"><h3 className="text-sm font-medium text-slate-800">检查项（最多 30 项）</h3><button type="button" className="btn-secondary" disabled={form.checklist.length >= 30} onClick={() => update('checklist', [...form.checklist, { id: crypto.randomUUID(), text: '', done: false }])}>添加检查项</button></div>
             {form.checklist.map((item, index) => <div key={item.id} className="flex items-center gap-2"><input type="checkbox" aria-label={`完成检查项 ${index + 1}`} checked={item.done} className="h-4 w-4 accent-emerald-600" onChange={event => update('checklist', form.checklist.map(check => check.id === item.id ? { ...check, done: event.target.checked } : check))} /><input required aria-label={`检查项 ${index + 1}内容`} maxLength={300} className={`${INPUT} !mt-0 min-w-0 flex-1`} value={item.text} onChange={event => update('checklist', form.checklist.map(check => check.id === item.id ? { ...check, text: event.target.value } : check))} /><button type="button" className="btn-ghost" aria-label={`移除检查项 ${index + 1}`} onClick={() => update('checklist', form.checklist.filter(check => check.id !== item.id))}>移除</button></div>)}

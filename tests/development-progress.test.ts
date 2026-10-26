@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { DevelopmentStageProgress } from '../components/development-stage-progress'
 import { checklistProgress, localDevelopmentDate, parseDevelopmentTask } from '../lib/development-progress'
 
 const input = () => ({ title: '开发进度', description: '保留从想法到上线的过程', owner_name: '负责人', stage: 'development',
@@ -11,6 +14,28 @@ test('checklist completion is independent of deployment stage, without invented 
   assert.deepEqual(checklistProgress([input().checklist[0]]), { total: 1, completed: 0, percent: 0 })
   assert.equal(checklistProgress([{ ...input().checklist[0], done: true }]).percent, 100)
   assert.ok(parseDevelopmentTask({ ...input(), checklist: [{ ...input().checklist[0], done: true }] }).data)
+})
+test('stage stepper has labelled dots and a current step, separate from work percentages', () => {
+  const planned = renderToStaticMarkup(createElement(DevelopmentStageProgress, { stage: 'planned' }))
+  assert.equal((planned.match(/<li\b/g) ?? []).length, 6)
+  assert.equal((planned.match(/aria-current="step"/g) ?? []).length, 1)
+  assert.match(planned, /width:20%/)
+  assert.match(planned, /当前阶段/)
+  assert.doesNotMatch(planned, /role="progressbar"|aria-valuenow/)
+  const paused = renderToStaticMarkup(createElement(DevelopmentStageProgress, { stage: 'paused' }))
+  assert.doesNotMatch(paused, /aria-current="step"/)
+  assert.match(paused, /不推定已完成/)
+})
+test('development board removes count cards and presents full-width stage progress instead', () => {
+  const source = readFileSync('app/(dashboard)/development-log/development-progress-board.tsx', 'utf8')
+  assert.doesNotMatch(source, /lg:grid-cols-6|counts\[value\]|_150px_100px/)
+  assert.match(source, /DevelopmentStageProgress stage=\{task.stage\}/)
+  assert.match(source, /阶段筛选/)
+  const sql = readFileSync('supabase/migrations/20261026_ai_content_roadmap.sql', 'utf8')
+  assert.match(sql, /AI Agent 自动采集与改写/)
+  assert.match(sql, /'stage','planned'/)
+  assert.match(sql, /尚未实施/)
+  assert.doesNotMatch(sql, /delete from|update public.development_tasks|cron\.schedule/)
 })
 test('test and deployment evidence gate later stages, pause and cancellation need reasons', () => {
   for (const stage of ['ready', 'live']) assert.ok(parseDevelopmentTask({ ...input(), stage }).error)

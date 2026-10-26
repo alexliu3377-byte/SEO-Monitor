@@ -16,7 +16,7 @@ async function rejects(code, operation) {
 try {
   await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
     create table user_profiles(id uuid primary key,username text,role text,is_active boolean);
-    create table development_releases(id uuid primary key,version text,status text);
+    create table development_releases(id uuid primary key default gen_random_uuid(),version text,status text);
     insert into user_profiles values('${actor}','项目负责人','super',true);
     insert into development_releases values('${release}','v0.0.1','completed'),('${plannedRelease}','v0.0.2','planned');
     grant select on user_profiles,development_releases to service_role;`)
@@ -62,7 +62,26 @@ try {
   assert.equal((await db.query('select development_task_counts() as counts')).rows[0].counts.pending, 11)
   assert.equal((await db.query('select id from development_tasks where release_id is null and stage<>\'cancelled\' order by updated_at desc,id offset 10 limit 10')).rows.length, 1)
   assert.equal((await db.query('select count(*)::int as n from development_releases')).rows[0].n, 2)
-  console.log(JSON.stringify({ developmentProgress: true, atomicHistory: true, optimisticLocking: true, browserAccessDenied: true, testAndDeployGates: true, appendOnly: true, linkedHistoryPreserved: true, pagination: true, productionWrites: 0 }))
+  await db.exec(`reset role;
+    alter table development_releases add unique(version),add title text,add release_date date,add summary text,
+      add highlights jsonb,add experimental_features jsonb,add implementation_notes jsonb,add limitations jsonb,add source_note text;
+    insert into user_profiles values('294f63a9-7c06-455f-9896-0fbc6344cee5','负责人','super',true);`)
+  const rollout = await save(null, 0, { ...payload, title: '开发日志进度与发布归档', stage: 'live', checklist, test_notes: '测试通过', deployment_notes: '部署验证通过' })
+  const roadmapSql = await readFile(new URL('../supabase/migrations/20261026_ai_content_roadmap.sql', import.meta.url), 'utf8')
+  await db.exec(roadmapSql)
+  await db.exec(roadmapSql)
+  assert.ok((await db.query('select release_id from development_tasks where id=$1', [rollout.id])).rows[0].release_id)
+  assert.equal((await db.query('select count(*)::int as n from development_task_events where task_id=$1', [rollout.id])).rows[0].n, 2)
+  const roadmap = (await db.query("select stage,checklist,started_at,tested_at,deployed_at from development_tasks where title='AI Agent 自动采集与改写'")).rows
+  assert.equal(roadmap.length, 1)
+  assert.equal(roadmap[0].stage, 'planned')
+  assert.equal(roadmap[0].checklist.length, 7)
+  assert.equal(roadmap[0].checklist.filter(item => item.done).length, 1)
+  assert.equal(roadmap[0].started_at, null)
+  assert.equal(roadmap[0].tested_at, null)
+  assert.equal(roadmap[0].deployed_at, null)
+  assert.equal((await db.query('select count(*)::int as n from development_releases')).rows[0].n, 3)
+  console.log(JSON.stringify({ developmentProgress: true, atomicHistory: true, optimisticLocking: true, browserAccessDenied: true, testAndDeployGates: true, appendOnly: true, linkedHistoryPreserved: true, pagination: true, roadmapOnly: true, idempotentSeed: true, productionWrites: 0 }))
 } catch (error) {
   console.error(JSON.stringify({ error: error.message, code: error.code, where: error.where }))
   process.exitCode = 1
