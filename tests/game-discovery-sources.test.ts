@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseMomorankHtml, parseWechatPublicHtml, fetchGameDiscoveryDataset, DiscoverySourceBlocked } from '../lib/game-discovery-collector'
-import { validateGameDiscoveryCollection, MOMORANK_TABS, MOMORANK_RISING, MOMORANK_DATASETS, type GameDiscoveryItem } from '../lib/game-discovery-sources'
+import { validateGameDiscoveryCollection, GAME_DISCOVERY_SOURCES, MOMORANK_TABS, MOMORANK_RISING, MOMORANK_DATASETS, type GameDiscoveryItem } from '../lib/game-discovery-sources'
 import { allowsServiceAuthPath } from '../lib/service-api-access'
 
 const date='2020-10-20'
@@ -116,4 +116,49 @@ test('consecutive-rise highlights retain their source day counts, including stre
   const changes=['新进榜','上升','连升','下降','脱榜'].map(label=>({label,items:[{title:'游戏',url:null,change:label==='连升'?'2天':null}]}))
   assert.equal(validateGameDiscoveryCollection({...collection,highlights:{changes,rising:[]}}).highlights?.changes.length,5)
   assert.throws(()=>validateGameDiscoveryCollection({...collection,highlights:{changes:[...changes,changes[0]],rising:[]}}))
+})
+
+function publicRising(dataset: (typeof MOMORANK_RISING.wechat)[number]['dataset'] | (typeof MOMORANK_RISING.douyin)[number]['dataset']) {
+  const config=GAME_DISCOVERY_SOURCES[dataset], requested=new URL(config.url)
+  const label=[...MOMORANK_RISING.wechat,...MOMORANK_RISING.douyin].find(row=>row.dataset===dataset)!.label
+  const platform=dataset.startsWith('momo_douyin_')?'douyin/':''
+  return wrapper(`<a aria-current="page" href="${config.url}">${label}</a><a aria-current="page" href="${config.url}&date=${date}">当日上升</a><table><thead><tr><th>游戏</th><th>当前排名</th><th>日上升名次</th><th>近7日走势</th></tr></thead><tbody><tr><td><a href="/${platform}games/3?type=${requested.searchParams.get('type')}"><span title="公开游戏">公开游戏</span></a><a href="/pricing">Pro 解锁</a></td><td>#53</td><td><a href="/pricing">Pro 解锁</a><span hidden>+8888</span></td><td><a href="/pricing">Pro 解锁</a></td></tr></tbody></table><script>window.PRIVATE={change:9999};</script>`)
+}
+
+test('all seven rising boards keep public names and current ranks while locked metrics stay null',()=>{
+  for(const {dataset} of [...MOMORANK_RISING.wechat,...MOMORANK_RISING.douyin]){
+    const data=parseMomorankHtml(publicRising(dataset),dataset)
+    const validated=validateGameDiscoveryCollection({dataset,collectedAt:'2020-10-21T00:00:00Z',sourceModifiedAt:null,...data})
+    assert.equal(validated.items[0].title,'公开游戏')
+    assert.equal(validated.items[0].metric,'#53')
+    assert.equal(validated.items[0].position,1,'current rank 53 is not the position in the rising list')
+    assert.equal(validated.items[0].change,null)
+    assert.deepEqual(validated.items[0].tags,[])
+    assert.ok(!/解锁|Pro|8888|9999/.test(JSON.stringify(validated)))
+  }
+})
+
+test('generic current-rank headers still require the actual selected daily board and platform',()=>{
+  const html=publicRising('momo_rising')
+  assert.throws(()=>parseMomorankHtml(html,'momo_rising_popularity'),/分类不匹配/)
+  assert.throws(()=>parseMomorankHtml(html,'momo_douyin_rising_bestseller'),/分类不匹配/)
+  assert.throws(()=>parseMomorankHtml(html.replaceAll('view=daily','view=weekly'),'momo_rising'),/分类不匹配/)
+  assert.throws(()=>parseMomorankHtml(html.replaceAll('aria-current="page"',''),'momo_rising'),/分类不匹配/)
+  assert.throws(()=>parseMomorankHtml(html.replaceAll('https://www.momorank.com/rising','https://evil.test/rising'),'momo_rising'),/分类不匹配/)
+})
+
+test('overview counts each game once despite mobile duplicates and ignores Pro CTAs and ordinal badges',()=>{
+  for(const platform of ['', 'douyin/']){
+    const dataset=platform?'momo_douyin_overview':'momo_overview'
+    const table=ranking(1).replaceAll('/games/',`/${platform}games/`).replace(`数据日期：${date}`,'')
+    const rising=`<div><div><h2>今日排名上升 Top 10</h2></div><div><ul>${Array.from({length:10},(_,i)=>`<li><a href="/${platform}games/${21+i}?type=popular"><span>${i+1}</span><div><span class="truncate" title="上升游戏${i+1}">上升游戏${i+1}</span><p>当前 #${53+i}</p></div></a><a href="/${platform}games/${21+i}?type=popular&mobile=1"><span title="上升游戏${i+1}">上升游戏${i+1}</span></a><a href="/pricing">Pro 解锁</a><span hidden>日升 8888 名</span></li>`).join('')}</ul></div></div>`
+    const parsed=parseMomorankHtml(table.replace('</body>',`${summary(platform)}${rising}</body>`),dataset)
+    const data=validateGameDiscoveryCollection({dataset,collectedAt:'2020-10-21T00:00:00Z',sourceModifiedAt:null,...parsed})
+    assert.equal(data.highlights?.rising.length,10)
+    assert.deepEqual(data.highlights?.rising.map(row=>row.position),[1,2,3,4,5,6,7,8,9,10])
+    assert.ok(data.highlights?.rising.every(row=>row.change===null))
+    assert.equal(data.highlights?.rising[0].metric,'当前 #53')
+    assert.equal(data.highlights?.changes[0].items[0].change,'+21','public daily changes remain available')
+    assert.ok(!/解锁|Pro|8888/.test(JSON.stringify(data)))
+  }
 })

@@ -3,6 +3,12 @@ import { GAME_DISCOVERY_SOURCES, MOMORANK_RISING, MOMORANK_CHANGE_LABELS, isMomo
 
 const clean = (value: string | undefined | null, length = 500) => (value || '').replace(/\s+/g,' ').trim().slice(0,length)
 const optional = (value: string | undefined | null, length = 500) => clean(value,length) || null
+// Locked placeholders are not data. Never recover their values from scripts,
+// hidden DOM, paid exports or authenticated endpoints.
+const publicOptional = (value: string | undefined | null, length = 500) => {
+  const text=optional(value,length)
+  return text && !/\bpro\b|解锁|会员专享|付费(?:查看|可见)|升级(?:会员|套餐)/i.test(text) ? text : null
+}
 export class DiscoverySourceBlocked extends Error {}
 
 export function parseMomorankHtml(html: string, dataset: GameDiscoveryDataset) {
@@ -42,29 +48,42 @@ export function parseMomorankHtml(html: string, dataset: GameDiscoveryDataset) {
     if (nameIndex < 0) throw new Error('来源表格结构变化')
     if(isMomoRising(dataset)){
       const expected=[...MOMORANK_RISING.wechat,...MOMORANK_RISING.douyin].find(row=>row.dataset===dataset)?.label
-      if(!expected || !headers.includes(`${expected}排名`))throw new Error('来源返回的上升榜分类不匹配，不混入其它榜单')
+      const requested=new URL(config.url)
+      // Current public pages use a shared "当前排名" column. Verify the active
+      // board's public navigation, not merely the requested URL or any link.
+      const selectedBoard=$('a[aria-current="page"]').toArray().some(el=>{
+        if(clean($(el).text())!==expected)return false
+        try {
+          const selected=new URL($(el).attr('href')||'/',config.url)
+          return selected.origin===requested.origin && selected.pathname===requested.pathname
+            && selected.searchParams.get('type')===requested.searchParams.get('type') && selected.searchParams.get('view')==='daily'
+        } catch {return false}
+      })
+      if(!expected || !(headers.includes(`${expected}排名`) || (headers.includes('当前排名') && selectedBoard)))throw new Error('来源返回的上升榜分类不匹配，不混入其它榜单')
     }
     // Only the first ten unblurred public rows. Never collect paid/locked rows.
     table.find('tbody tr').slice(0,10).each((index, el) => {
       const cells = $(el).children('td'), nameCell = cells.eq(nameIndex)
-      if (cells.length < 3 || nameCell.find('a[href*="/pricing"]').length) return
+      if (cells.length < (isMomoRising(dataset) ? 2 : 3)) return
       const link = nameCell.find('a').filter((_,el)=>isMomoGameUrl(new URL($(el).attr('href')||'/',config.url).toString())).first()
+      if (!link.length && nameCell.find('a[href*="/pricing"]').length) return
       const title = clean(link.length ? link.find('[title]').first().attr('title') || link.text()
         : dataset === 'momo_ip' ? nameCell.find('[class*="font-medium"]').first().text()
           : nameCell.text().replace(/wx[a-f0-9]{16}/g,''),240)
       if (!title) throw new Error('来源游戏名称缺失')
       const href = link.attr('href'), candidate = href ? new URL(href,config.url) : null
       const url = candidate && isMomoGameUrl(candidate.toString()) ? candidate.toString() : null
-      const headerText = (prefix: string) => { const i=headers.findIndex(header => header.startsWith(prefix)); return i>=0 ? optional(cells.eq(i).text(),100) : null }
+      const headerText = (prefix: string) => { const i=headers.findIndex(header => header.startsWith(prefix)); return i>=0 ? publicOptional(cells.eq(i).text(),100) : null }
+      const currentRankIndex=headers.findIndex(header=>header==='当前排名' || header.endsWith('榜排名'))
       const summaryIndex = headers.findIndex(header => header === '简介')
       const nameDesc = dataset === 'momo_ip' ? nameCell.find('p').toArray().map(el=>clean($(el).text())).find(text=>text && text!==title) || '' : ''
       const tagIndex=headers.findIndex(header=>header==='标签')
-      const sourceTags=tagIndex>=0?cells.eq(tagIndex).find('span,div').filter((_,tag)=>$(tag).children().length===0).toArray().map(tag=>clean($(tag).text(),40)).filter(Boolean):[]
+      const sourceTags=tagIndex>=0?cells.eq(tagIndex).find('span,div').filter((_,tag)=>$(tag).children().length===0).toArray().map(tag=>publicOptional($(tag).text(),40)).filter((tag):tag is string=>Boolean(tag)):[]
       items.push({ position: rankIndex>=0 ? Number(cells.eq(rankIndex).text().replace(/[^0-9]/g,'')) : index+1,
         sourceId: candidate?.pathname.match(/^\/(?:douyin\/)?games\/(\d+)$/)?.[1] || title, title,
-        summary: optional(summaryIndex>=0 ? cells.eq(summaryIndex).text() : nameDesc), url,
-        metric: dataset === 'momo_ip' ? headerText('热度指数') : isMomoRising(dataset) ? optional(cells.eq(headers.findIndex(header=>header.endsWith('榜排名'))).text(),100) : null,
-        change: headerText(isMomoRising(dataset) ? '日升降' : '变化'),
+        summary: publicOptional(summaryIndex>=0 ? cells.eq(summaryIndex).text() : nameDesc), url,
+        metric: dataset === 'momo_ip' ? headerText('热度指数') : isMomoRising(dataset) && currentRankIndex>=0 ? publicOptional(cells.eq(currentRankIndex).text(),100) : null,
+        change: isMomoRising(dataset) ? headerText('日升降') || headerText('日上升名次') : headerText('变化'),
         tags: isMomoRising(dataset) && headerText('7日净升降') ? [`7日净升降 ${headerText('7日净升降')}`].map(tag => tag.slice(0,40)) : [...new Set(sourceTags)].slice(0,8),
       })
     })
@@ -83,7 +102,7 @@ export function parseMomorankHtml(html: string, dataset: GameDiscoveryDataset) {
         if(!isMomoGameUrl(url)||seen.has(url))return []
         seen.add(url)
         const title=clean(link.attr('title')||link.find('.truncate').first().text(),240)
-        const change=optional(link.children('span').last().text(),100)
+        const change=publicOptional(link.children('span').last().text(),100)
         return title?[{title,url,change:change===title?null:change}]:[]
       })
       if(rows.length)highlights.changes.push({label,items:rows})
@@ -92,13 +111,19 @@ export function parseMomorankHtml(html: string, dataset: GameDiscoveryDataset) {
   if(isMomoOverview(dataset)){
     const heading=$('h2').filter((_,el)=>clean($(el).text())==='今日排名上升 Top 10').first()
     const card=heading.parent().parent(), seen=new Set<string>()
-    card.find('ul').first().find('li a').slice(0,10).each((index,el)=>{
-      const link=$(el),url=new URL(link.attr('href')||'/',config.url).toString()
-      if(!isMomoGameUrl(url)||seen.has(url))return
-      seen.add(url)
-      const title=clean(link.find('[title]').first().attr('title'),240)
-      highlights.rising.push({position:index+1,sourceId:new URL(url).pathname.split('/').at(-1)!,title,url,summary:null,
-        metric:optional(link.find('p').first().text(),100),change:optional(link.children('span').last().text(),100),tags:[]})
+    // Each public li may contain desktop/mobile links and a separate Pro CTA.
+    // Count games, not anchors, and never confuse the ordinal badge with a rise.
+    card.find('ul').first().children('li').slice(0,10).each((_,el)=>{
+      const row=$(el),link=row.find('a').filter((_,candidate)=>isMomoGameUrl(new URL($(candidate).attr('href')||'/',config.url).toString())).first()
+      if(!link.length)return
+      const url=new URL(link.attr('href')!,config.url).toString(),sourceId=new URL(url).pathname.split('/').at(-1)!
+      if(seen.has(sourceId))return
+      seen.add(sourceId)
+      const title=clean(link.find('[title]').first().attr('title') || link.find('.truncate').first().text() || link.attr('title'),240)
+      if(!title)throw new Error('排行榜概览公开上升条目缺少名称')
+      const change=row.find('span').toArray().map(badge=>publicOptional($(badge).text(),100)).find(text=>text && /^(?:日升\s*\d+\s*名|[+↑]\s*\d+)$/.test(text)) || null
+      highlights.rising.push({position:highlights.rising.length+1,sourceId,title,url,summary:null,
+        metric:publicOptional(link.find('p').first().text(),100),change,tags:[]})
     })
     if(!heading.length || !highlights.rising.length)throw new Error('排行榜概览缺少公开上升榜，不覆盖旧概览')
   }
