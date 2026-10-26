@@ -1,0 +1,88 @@
+name: Collection readonly check
+
+on:
+  schedule:
+    - cron: '17 0 * * *' # 08:17 MYT; GitHub may deliver scheduled jobs late.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collection-readonly-check
+  cancel-in-progress: false
+
+jobs:
+  health:
+    name: Daily collection health (read only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Check completed steps and Bilibili freshness
+        run: node tools/crawlee-trial/health.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Keep health report even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: collection-health-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tools/crawlee-trial/output/health.*
+          retention-days: 7
+          if-no-files-found: warn
+
+  crawlee-trial:
+    name: Crawlee two-source comparison (no ingestion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Limit scheduled experiment to three mornings
+        id: trial-window
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          today=$(TZ=Asia/Kuala_Lumpur date +%F)
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || ( "$today" > "2026-10-26" && "$today" < "2026-10-30" ) ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo 'Crawlee scheduled trial ended. Daily health checks remain active; use workflow_dispatch for another comparison.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.trial-window.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.trial-window.outputs.enabled == 'true'
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tools/crawlee-trial/package-lock.json
+      - name: Install isolated trial dependencies
+        if: steps.trial-window.outputs.enabled == 'true'
+        working-directory: tools/crawlee-trial
+        run: npm ci --ignore-scripts --no-fund
+      - name: Verify trial guards and parser fixtures
+        if: steps.trial-window.outputs.enabled == 'true'
+        working-directory: tools/crawlee-trial
+        run: npm test
+      - name: Compare one public page per source
+        if: steps.trial-window.outputs.enabled == 'true'
+        working-directory: tools/crawlee-trial
+        run: npm run trial
+      - name: Keep comparison even on failure
+        if: always() && steps.trial-window.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: crawlee-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tools/crawlee-trial/output/comparison.*
+          retention-days: 7
+          if-no-files-found: warn

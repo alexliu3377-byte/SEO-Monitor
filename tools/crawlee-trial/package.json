@@ -1,0 +1,11 @@
+{
+  "name": "qixin-crawlee-readonly-trial",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "trial": "node run.mjs"
+  },
+  "dependencies": { "@crawlee/cheerio": "3.18.2", "cheerio": "1.0.0-rc.12" }
+}
