@@ -9,7 +9,7 @@ export const maxDuration = 300
 // The final retry workflow calls this once per group after tracking. It
 // atomically writes paged rows, compact monthly summaries and the legacy
 // compatibility cache. Admin/super sessions may also refresh one group with
-// ?groupId=...; omitting it remains available as a legacy all-group fallback.
+// ?groupId=...; only super/service callers retain the all-group fallback.
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
@@ -33,6 +33,9 @@ export async function GET(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const requestedGroupId = new URL(req.url).searchParams.get('groupId')
+  if (caller?.role === 'admin' && !requestedGroupId) {
+    return NextResponse.json({ error: '管理员必须指定有权访问的分组' }, { status: 403 })
+  }
   if (requestedGroupId && caller && !await canAccessTaskGroup(service, caller.id, caller.role, requestedGroupId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

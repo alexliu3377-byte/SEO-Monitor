@@ -23,14 +23,19 @@ function isBlockedIPv4(address: string): boolean {
 }
 
 function isBlockedIPv6(address: string): boolean {
-  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]
+  // Canonicalize DNS answers as well as URL literals. WHATWG URLs convert
+  // dotted IPv4-mapped IPv6 (and expanded IPv6) to compressed hexadecimal.
+  const literal = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]
+  const normalized = new URL(`http://[${literal}]/`).hostname.slice(1, -1)
   if (normalized === '::' || normalized === '::1') return true
   if (/^f[cd]/.test(normalized)) return true
   if (/^fe[89ab]/.test(normalized)) return true
   if (normalized.startsWith('ff')) return true
   if (normalized.startsWith('2001:db8:')) return true
-  const mapped = normalized.match(/(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/)
-  return mapped ? isBlockedIPv4(mapped[1]) : false
+  const mapped = normalized.match(/^::ffff:([\da-f]{1,4}):([\da-f]{1,4})$/)
+  if (!mapped) return false
+  const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16)
+  return isBlockedIPv4([high >> 8, high & 255, low >> 8, low & 255].join('.'))
 }
 
 function isBlockedAddress(address: string): boolean {

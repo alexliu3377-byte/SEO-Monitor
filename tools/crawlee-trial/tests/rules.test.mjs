@@ -28,7 +28,7 @@ test('health flags business partial success and missing local collection', () =>
   steps[0].complete = false
   steps[0].unresolved = [{ domain: 'example.invalid', status: 'empty' }]
   assert.equal(assessHealth(steps, { last_seen_at: '2026-10-25T20:00:00Z' }, now).issues.length, 2)
-  assert.equal(assessHealth([], null, now).issues.length, 6)
+  assert.equal(assessHealth([], null, now).issues.length, 7) // Six steps plus Bilibili freshness.
   assert.equal(assessHealth(steps.slice(1), bili, now).issues.length, 1)
 })
 test('database health is GET-only, redirect-safe, bounded and does not emit raw service errors', async () => {
