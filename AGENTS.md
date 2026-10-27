@@ -5,6 +5,7 @@
 - 同时阅读 [CLAUDE.md](CLAUDE.md)，其中抓取规则同步和本地 Next.js 文档要求适用于 Codex。
 - 审核与发布使用 [共享检查规范](docs/REVIEW_AND_RELEASE.md)；运行本机开发服务前阅读 [开发隔离说明](docs/LOCAL_DEVELOPMENT.md)。
 - 项目技能位于 `.agents/skills/`。若会话未自动发现技能，按任务显式读取对应 SKILL.md，不假定已加载。
+- 系统审核入口为 [.agents/skills/qixin-review/SKILL.md](.agents/skills/qixin-review/SKILL.md)，包含代码安全、采集数据、性能运行三个角色，可综合或单独调用。这些技能按请求运行，不是常驻监控；内容生成与自动发布属于独立工作，不由审核角色执行。
 
 - 本仓库为 SEO-Monitor 主项目，包含 Next.js 后台、接口、SQL 与部分采集逻辑；独立采集仓库为 trend-collector-worker，不能假设 clone 主项目就包含它。
 - 首次接手或迁移电脑时，先读 [开发交接](docs/DEVELOPMENT_HANDOFF.md)。其中运行状态有日期，不代表现在仍正常；排障应重新核对当前记录。
