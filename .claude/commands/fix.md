@@ -1,5 +1,7 @@
 # 修复模式 — 按优先级逐项修复
 
+先阅读项目根目录 AGENTS.md、CLAUDE.md 和 [共享审核与发布规范](../../docs/REVIEW_AND_RELEASE.md)。计划或修复不自动授权提交、Push、迁移或部署。
+
 根据上一份 Audit Report 的发现，进入修复模式。
 
 ## 修复规则（必须遵守）

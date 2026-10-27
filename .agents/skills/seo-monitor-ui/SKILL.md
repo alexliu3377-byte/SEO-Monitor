@@ -12,7 +12,7 @@ Use this skill for interface work in this repository. It supplements general UI 
 1. Inspect the existing page and at least one adjacent mature page before changing the design.
 2. Reuse the established Next.js, React, Tailwind, navy-sidebar, emerald-accent, white-surface visual language. Improve inconsistency locally; do not introduce a separate design system or redesign unrelated navigation.
 3. Identify the user's main decision or action on the page. Put that information first and remove controls that do not help that decision.
-4. For broad redesigns or uncertain interaction choices, use the installed `ui-ux-pro-max` skill as design evidence. Project rules here take precedence when generic recommendations conflict.
+4. Use existing dashboard pages and the bundled product reference as design evidence. This skill covers the active dashboard, not the retired page-studio editor; do not restore that editor or require an external design skill.
 
 ## Product rules
 

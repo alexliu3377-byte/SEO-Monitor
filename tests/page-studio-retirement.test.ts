@@ -1,10 +1,22 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import test from 'node:test'
 import { clearRetiredWorkspaceStorage } from '../lib/retired-workspace-storage'
 
 const root = path.resolve(import.meta.dirname, '..')
+
+test('retired editor no longer has a relaxed CSP route', async () => {
+  const require = createRequire(import.meta.url)
+  const config = require('../next.config.js')
+  const headers = await config.headers()
+  assert.equal(headers.some((entry: { source: string }) => entry.source.includes('page-studio')), false)
+  const global = headers.find((entry: { source: string }) => entry.source === '/:path*')
+  const csp = global.headers.find((header: { key: string }) => header.key === 'Content-Security-Policy').value
+  assert.match(csp, /frame-src https:\/\/challenges.cloudflare.com/)
+  assert.doesNotMatch(csp, /frame-src 'self' blob:/)
+})
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {

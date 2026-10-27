@@ -1,6 +1,6 @@
 # SEO Monitor visual reference
 
-Use this reference when implementing or reviewing a dashboard page in this repository.
+Use this reference when implementing or reviewing an active dashboard page in this repository. It does not describe or enable the retired page-studio editor.
 
 ## Existing language
 
