@@ -54,7 +54,9 @@ export function localDevPlan({ root, parentEnv, testProjectUrl, port = '3001' })
   Object.assign(env, config, { NODE_ENV: 'development' })
   return {
     env,
-    args: [path.join(root, 'node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', String(port)],
+    // Local Windows Turbopack CSS workers failed during isolated validation.
+    // Keep this compatibility choice local; the production build stays unchanged.
+    args: [path.join(root, 'node_modules/next/dist/bin/next'), 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(port)],
   }
 }
 

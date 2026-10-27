@@ -8,6 +8,10 @@ Worker 已另建开发检出：`C:\Users\OptiPlex 5060\cms\trend-collector-worke
 
 `npm.cmd run dev:safe` 使用 Node 24，默认监听 127.0.0.1:3001，只修改子进程环境。它要求明确输入已确认的独立测试项目 URL，并与 `.env.local` 比较，剥离继承的采集、GitHub、模型等凭证。不修改系统变量、采集配置或其他终端。
 
+安全开发入口显式使用 Next 官方支持的 `--webpack`。2026-10-27 在当前电脑的隔离副本中，默认 Turbopack 构建遇到 CSS 子进程通信失败，普通权限重试也复现；Webpack 编译成功。这是本机兼容措施，不改生产 `build` 命令，也不声称其他环境的 Turbopack 一定失败。本机隔离构建可使用 `npm.cmd run build -- --webpack`，仍须避免加载生产凭证。
+
+同日全量验证：主项目 246 项测试通过，Worker 75 项测试与类型检查通过。Webpack 完整构建（含生成的路由类型检查及 117 个页面生成）通过；期间发现并修复分组工作台、成效报告把组件自定义 props 当作页面 props 的问题，业务组件现与路由入口分离。构建使用隔离源码副本和假凭证，不能替代真实登录、生产 RLS 或采集新鲜度验证。沙箱中 Agent 文件替换曾返回 EPERM，普通 Windows 权限重跑通过；不为沙箱限制移除原子写入保护。
+
 `.env.local` 仅允许 NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY、SUPABASE_SERVICE_ROLE_KEY、可选 DAILY_LOGIN_SECRET。前三项必须来自同一个测试项目。存在 `.env`、`.env.development` 或 `.env.development.local` 时入口会拒绝启动，避免未审查的 Next 环境文件覆盖。不要为通过检查随意删除原配置。
 
 先在 Supabase 项目管理中确认这是独立测试项目，然后运行（替换示例 URL）：

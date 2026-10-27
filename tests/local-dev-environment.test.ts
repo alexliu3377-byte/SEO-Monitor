@@ -25,6 +25,7 @@ test('local dev isolates inherited collector credentials and preserves parent en
   assert.equal(plan.env.SUPABASE_SERVICE_ROLE_KEY, 'fake-service')
   assert.equal(plan.env.Path, 'windows-path')
   assert.deepEqual(parentEnv, before)
+  assert.equal(plan.args.includes('--webpack'), true)
   assert.deepEqual(plan.args.slice(-4), ['--hostname', '127.0.0.1', '--port', '3001'])
 })
 

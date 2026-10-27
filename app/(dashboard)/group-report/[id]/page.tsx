@@ -1,4 +1,4 @@
-import GroupReportPage from '../page'
+import GroupReportPage from '../group-report-client'
 
 export default async function GroupReportRoute({
   params,

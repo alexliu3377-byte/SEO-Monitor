@@ -90,7 +90,7 @@ test('editing uses separate lists with retry feedback; owned-site save authoriza
   assert.match(route, /if \(!caller\)/)
   assert.match(route, /caller\.role !== 'admin' && caller\.role !== 'super'/)
   assert.match(route, /private, no-store/)
-  const page = readFileSync(new URL('../app/(dashboard)/task-groups/page.tsx', import.meta.url), 'utf8')
+  const page = readFileSync(new URL('../app/(dashboard)/task-groups/task-groups-client.tsx', import.meta.url), 'utf8')
   assert.match(page, /fetch\('\/api\/task-groups\/site-options', \{ cache: 'no-store' \}\)/)
   assert.match(page, /setAllSites\(data\.ownedSites\)/)
   assert.match(page, /setFilterSites\(data\.filterSites\)/)

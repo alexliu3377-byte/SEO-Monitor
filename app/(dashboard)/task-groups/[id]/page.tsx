@@ -1,4 +1,4 @@
-import TaskGroupsPage from '../page'
+import TaskGroupsPage from '../task-groups-client'
 
 export default async function TaskGroupWorkspaceRoute({
   params,
