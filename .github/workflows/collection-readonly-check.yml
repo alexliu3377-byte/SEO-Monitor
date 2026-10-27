@@ -1,6 +1,12 @@
 name: Collection readonly check
 
 on:
+  workflow_call:
+    secrets:
+      NEXT_PUBLIC_SUPABASE_URL:
+        required: true
+      SUPABASE_SERVICE_ROLE_KEY:
+        required: true
   schedule:
     - cron: '17 0 * * *' # 08:17 MYT; GitHub may deliver scheduled jobs late.
   workflow_dispatch:
@@ -39,6 +45,8 @@ jobs:
           if-no-files-found: warn
 
   crawlee-trial:
+    # Calls from the daily derived workflow only run the read-only health job.
+    if: github.workflow == 'Collection readonly check'
     name: Crawlee two-source comparison (no ingestion)
     runs-on: ubuntu-latest
     timeout-minutes: 8

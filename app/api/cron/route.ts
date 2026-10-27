@@ -1,3 +1,4 @@
+import { parseCrawlContentDate } from '@/lib/crawl-content-date'
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
@@ -67,18 +68,7 @@ function getMalaysiaDate(offsetDays = 0): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-function parseContentDate(dateStr: string | undefined): string | null {
-  if (!dateStr) return null
-  const m = dateStr.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-  const m2 = dateStr.match(/^(\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m2) return `20${m2[1]}-${m2[2].padStart(2, '0')}-${m2[3].padStart(2, '0')}`
-  try {
-    const d = new Date(dateStr)
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  } catch { /* ignore */ }
-  return null
-}
+const parseContentDate = parseCrawlContentDate
 
 
 export async function GET(request: Request) {
@@ -183,8 +173,7 @@ export async function GET(request: Request) {
               return true
             })
 
-          // 日期解析失败仍按 yesterday 填充写库（避免影响下游按 content_date 分组的功能），
-          // 但统计出来放进 activity_site_log 的 detail，方便定位选择器坏了的站点
+          // 日期解析失败保留 NULL，不冒充昨日新增；记录 suspect，等待来源规则核查。
           const nullDateCount = cleanedEntries.filter((e) => !e.content_date).length
 
           let newCount = 0
@@ -209,13 +198,11 @@ export async function GET(request: Request) {
             }
 
             if (hasNullDate) {
-              // For undated entries, fall back to same-MYT-day dedup
-              const todayMYTStart = new Date(new Date(today + 'T16:00:00.000Z').getTime() - 86400000).toISOString()
+              // Undated keywords remain unknown; dedup across discoveries instead of re-inserting daily.
               const existingNull = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
                 .from('raw_keywords')
                 .select('id, keyword')
                 .eq('site_id', site.id)
-                .gte('discovered_at', todayMYTStart)
                 .is('content_date', null)
                 .order('id', { ascending: true })
                 .range(from, to))
@@ -235,7 +222,7 @@ export async function GET(request: Request) {
                 keyword: e.keyword,
                 site_id: site.id,
                 discovered_at: new Date().toISOString(),
-                content_date: e.content_date || yesterday,
+                content_date: e.content_date,
                 content_type: e.content_type || 'app',
                 source_url: e.source_url ?? null,
               }))
@@ -298,8 +285,8 @@ export async function GET(request: Request) {
             } else {
               kwOk++
               kwRows += newCount
-              const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（按昨日填充，请检查日期CSS选择器）` : ''
-              if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新词${newCount}条${dateDetail}` })
+              const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（保留未知日期，不计入昨日新增，请检查日期CSS选择器）` : ''
+              if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: nullDateCount > 0 ? 'suspect' : 'ok', rowsWritten: newCount, detail: `新词${newCount}条${dateDetail}` })
             }
           } else {
             if (kwAid) await siteLog(supabase, kwAid, { domain: site.domain, status: 'skip', detail: '无list_url配置' })

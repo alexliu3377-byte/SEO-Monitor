@@ -255,7 +255,7 @@ export async function loadFastTrackingMonth(
   }
   const computedAt = data?.computed_at as string | undefined
   const cachedAt = computedAt ? Date.parse(computedAt) : NaN
-  if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > TRACKING_CACHE_MAX_AGE_MS) return null
+  if (!Number.isFinite(cachedAt)) return null
   const payload = data?.summary_payload as GroupTrackingSummaryPayload | undefined
   const monthData = payload?.version === 2 ? payload.months?.[month] : undefined
   return monthData ? { data: monthData, computedAt: computedAt! } : null
@@ -281,38 +281,36 @@ export async function loadFastTrackingDetail(service: any, params: Record<string
 
 const TRACKING_CACHE_MAX_AGE_MS = 26 * 60 * 60 * 1000
 
+export class TrackingCacheNotReadyError extends Error {
+  constructor() { super('成效快照尚未准备完成，请等待后台更新') }
+}
+
 export async function loadGroupTrackingPayload(service: any, groupId: string): Promise<{
   rows: EnrichedTrackRow[]
   computedAt: string
   fromCache: boolean
+  stale: boolean
 }> {
   const { data: cached, error: cacheError } = await service
     .from('group_tracking_cache')
     .select('payload, computed_at')
     .eq('group_id', groupId)
     .maybeSingle()
-  if (cacheError) console.error('Group tracking cache read failed', { groupId, code: cacheError.code })
+  if (cacheError) throw new TrackingCacheNotReadyError()
 
   const cachedAt = cached?.computed_at ? Date.parse(cached.computed_at) : NaN
   const cacheHasDeviceRankings = Array.isArray(cached?.payload)
     && (cached.payload as Array<{ device_rankings?: unknown }>).every(row => Array.isArray(row.device_rankings))
   const cacheIsFresh = cacheHasDeviceRankings && Number.isFinite(cachedAt) && Date.now() - cachedAt <= TRACKING_CACHE_MAX_AGE_MS
-  let rows = cacheIsFresh ? cached.payload as EnrichedTrackRow[] : await computeGroupTrackingPayload(service, groupId)
-  let computedAt = cacheIsFresh ? cached.computed_at as string : new Date().toISOString()
-
-  if (!cacheIsFresh) {
-    try {
-      await saveGroupTrackingPayload(service, groupId, rows, computedAt)
-    } catch (error) {
-      console.error('Group tracking cache write failed', { groupId, error })
-    }
-  }
+  if (!cacheHasDeviceRankings || !Number.isFinite(cachedAt)) throw new TrackingCacheNotReadyError()
+  let rows = cached.payload as EnrichedTrackRow[]
+  const computedAt = cached.computed_at as string
 
   // Repair historical cached rows at read time as well. This makes profile name
   // changes visible immediately without forcing a costly tracking recompute.
   const names = await resolveUserDisplayNames(service, rows.map(row => row.user_id))
   rows = rows.map(row => ({ ...row, username: names.get(row.user_id) ?? row.username }))
-  return { rows, computedAt, fromCache: cacheIsFresh }
+  return { rows, computedAt, fromCache: true, stale: !cacheIsFresh }
 }
 
 type RawTrackRow = {

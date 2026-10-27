@@ -18,7 +18,7 @@ const config = [
     },
   },
   {
-    ignores: ['.next/**', 'node_modules/**', 'coverage/**'],
+    ignores: ['.next/**', 'node_modules/**', 'coverage/**', '.task-work/**'],
   },
 ]
 

@@ -95,6 +95,7 @@ export default function MonthlyTrendTab() {
   const [drillData, setDrillData] = useState<MonthlyDrillData | null>(null)
   const [drillLoading, setDrillLoading] = useState(false)
   const [drillError, setDrillError] = useState('')
+  const [staleSnapshotAt, setStaleSnapshotAt] = useState('')
   const [domainModal, setDomainModal] = useState<{ title: string; domains: string[] } | null>(null)
   const [streakModal, setStreakModal] = useState<{ title: string; siteCount: number; sites: StreakSite[] } | null>(null)
   const drillController = useRef<AbortController | null>(null)
@@ -141,11 +142,18 @@ export default function MonthlyTrendTab() {
     setDrillMonth(month)
     setDrillLoading(true)
     setDrillError('')
+    setStaleSnapshotAt('')
     setDrillData(null)
     fetch(`/api/charts/monthly-trend?month=${month}`, { signal: controller.signal, cache: 'no-store' })
       .then(async response => {
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || '该月趋势明细读取失败')
+        if (controller.signal.aborted) return
+        if (response.headers.get('X-Monthly-Trend-Cache') === 'stale') {
+          const timestamp = response.headers.get('X-Monthly-Trend-Computed-At')
+          setStaleSnapshotAt(timestamp && Number.isFinite(Date.parse(timestamp))
+            ? new Date(timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Kuala_Lumpur' }) : '未知时间')
+        }
         setDrillData({
           app: data.app ?? [], game: data.game ?? [], rankup: data.rankup ?? [], rankdown: data.rankdown ?? [], continuousTrend: data.continuousTrend ?? [],
           volumeRising: data.volumeRising ?? [], volumeFalling: data.volumeFalling ?? [], domainWeights: data.domainWeights ?? {},
@@ -181,6 +189,9 @@ export default function MonthlyTrendTab() {
   return (
     <div>
       <p className="text-sm text-gray-500 mb-4">全部监控站点按月汇总新增关键词数量（应用/游戏），用来发现"哪个月哪个类目在涨"这种跨站点规律。</p>
+      {staleSnapshotAt && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        当前显示 {staleSnapshotAt} 的趋势快照，后台更新后可重新读取。
+      </p>}
       {unavailableMonths.length > 0 && (
         <div role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p className="font-medium">部分月份概览尚未归档，未计入图表</p>

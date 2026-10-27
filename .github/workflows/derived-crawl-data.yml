@@ -221,6 +221,14 @@ jobs:
         run: npm run keywords:classify -- --provider=gemini --batch-size=100 --batches=20
 
 
+  collection_health:
+    needs: finish
+    if: always()
+    uses: ./.github/workflows/collection-readonly-check.yml
+    secrets:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
   finish:
     needs: [post_index_refresh, monthly_trend_refresh, tracking_finalize, post_tracking_refresh, classify_new_keywords]
     if: always()

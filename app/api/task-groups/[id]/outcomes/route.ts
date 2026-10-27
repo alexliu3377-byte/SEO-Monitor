@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { loadFastOutcomesPage, loadGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
+import { loadFastOutcomesPage, loadGroupTrackingPayload, TrackingCacheNotReadyError, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
 import type { UserRole } from '@/lib/user-context'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
@@ -84,12 +84,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 排名匹配词/更新型真新排名历史+逐行算分"那一整套很重（用户反馈"打开很
   // 慢"），改成读 group_tracking_cache（GitHub Actions 每天08:05 MYT算好写
   // 进去，见 lib/group-tracking-cache.ts + app/api/tracking-cache/refresh）。
-  // 缓存没命中（刚上线还没跑过定时任务、或者这个分组是新建的）才现场算一次
-  // 并顺手写回，跟 hot_radar_cache 的兜底逻辑一致。
+  // 缺失时提示等待后台；交互请求不再现场重算或写回缓存。
   let trackingPayload: Awaited<ReturnType<typeof loadGroupTrackingPayload>>
   try {
     trackingPayload = await loadGroupTrackingPayload(service, groupId)
   } catch (error) {
+    if (error instanceof TrackingCacheNotReadyError) return NextResponse.json(
+      { error: error.message, code: 'CACHE_NOT_READY' }, { status: 503, headers: { 'Retry-After': '300' } })
     console.error('Group tracking payload calculation failed', { groupId, error })
     return NextResponse.json({ error: '成效资料计算失败，后台已记录具体错误' }, { status: 500 })
   }

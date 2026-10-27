@@ -1,3 +1,4 @@
+import { parseCrawlContentDate } from './crawl-content-date'
 import * as cheerio from 'cheerio'
 import * as iconv from 'iconv-lite'
 import { fetchPublicUrl } from '@/lib/safe-remote-url'
@@ -144,33 +145,7 @@ function findNextPageUrl($: ReturnType<typeof cheerio.load>, currentUrl: string)
 }
 
 // Parse a date string like "2026-06-09 17:04", "2026/06/09", "26-07-01", or Chinese relative times to YYYY-MM-DD
-function parseEntryDateStr(dateStr: string | undefined): string | null {
-  if (!dateStr) return null
-  // 4-digit year: 2026-07-01
-  const m = dateStr.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-  // 2-digit year: 26-07-01 → 2026-07-01
-  const m2 = dateStr.match(/^(\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m2) return `20${m2[1]}-${m2[2].padStart(2, '0')}-${m2[3].padStart(2, '0')}`
-  // Relative times (MYT UTC+8)
-  const myt = (offsetDays: number) => new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10)
-  if (/^\d+(?:分钟|小时)前$/.test(dateStr)) return myt(0)
-  if (dateStr === '昨天' || dateStr === '一天前') return myt(-1)
-  const daysAgo = dateStr.match(/^(\d+)天前$/)
-  if (daysAgo) return myt(-parseInt(daysAgo[1]))
-  // MM-DD anywhere in the string (e.g. "07-20", "更新：06-28")
-  const md = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})/)
-  if (md) {
-    const mm = parseInt(md[1]); const dd = parseInt(md[2])
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      const todayMYT = myt(0)
-      const year = todayMYT.slice(0, 4)
-      const candidate = `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-      return candidate <= todayMYT ? candidate : `${parseInt(year) - 1}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  return null
-}
+const parseEntryDateStr = parseCrawlContentDate
 
 // 找"标题元素所在容器"里匹配某个选择器的元素——文章链接/日期选择器都要
 // 先找到标题元素最近的 li/article/.item/tr/p/dd 祖先当"容器"，再在容器里

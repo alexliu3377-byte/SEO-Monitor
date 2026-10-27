@@ -1,3 +1,4 @@
+import { parseCrawlContentDate } from '../lib/crawl-content-date'
 import { createClient } from '@supabase/supabase-js'
 import { appendFileSync } from 'node:fs'
 import {
@@ -33,34 +34,7 @@ function getMalaysiaDate(offsetDays = 0): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-function parseContentDate(dateStr: string | undefined): string | null {
-  if (!dateStr) return null
-  const m = dateStr.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-  const m2 = dateStr.match(/^(\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
-  if (m2) return `20${m2[1]}-${m2[2].padStart(2, '0')}-${m2[3].padStart(2, '0')}`
-  // Relative times (MYT UTC+8)
-  if (/^\d+(?:分钟|小时)前$/.test(dateStr)) return getMalaysiaDate(0)
-  if (dateStr === '昨天' || dateStr === '一天前') return getMalaysiaDate(-1)
-  const daysAgo = dateStr.match(/^(\d+)天前$/)
-  if (daysAgo) return getMalaysiaDate(-parseInt(daysAgo[1]))
-  // MM-DD anywhere in the string (e.g. "07-20", "更新：06-28")
-  const md = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})/)
-  if (md) {
-    const mm = parseInt(md[1]); const dd = parseInt(md[2])
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      const today = getMalaysiaDate(0)
-      const year = today.slice(0, 4)
-      const candidate = `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-      return candidate <= today ? candidate : `${parseInt(year) - 1}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  try {
-    const d = new Date(dateStr)
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  } catch { /* ignore */ }
-  return null
-}
+const parseContentDate = parseCrawlContentDate
 
 
 function shuffle<T>(arr: T[]): T[] {
@@ -240,9 +214,7 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
           return true
         })
 
-      // 日期解析失败（date_selector 没匹配到，或匹配到的文本认不出格式）不再静默处理——
-      // 写库时仍按 yesterday 填充（避免破坏下游一堆按 content_date 分组/统计的功能），
-      // 但这里统计出来，抓取日志里会显示这个站点这次有几条，方便定位选择器坏了的站点。
+      // 日期解析失败保留 NULL，不冒充昨日新增；记录 suspect，等待来源规则核查。
       const nullDateCount = cleanedEntries.filter((e) => !e.content_date).length
 
       let newCount = 0
@@ -260,9 +232,9 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
         }
 
         if (hasNullDate) {
-          const todayMYTStart = new Date(new Date(today + 'T16:00:00.000Z').getTime() - 86400000).toISOString()
+
           const existingNull = await fetchAllRows<{ id: string; keyword: string }>((from, to) => supabase
-            .from('raw_keywords').select('id, keyword').eq('site_id', site.id).gte('discovered_at', todayMYTStart).is('content_date', null)
+            .from('raw_keywords').select('id, keyword').eq('site_id', site.id).is('content_date', null)
             .order('id', { ascending: true }).range(from, to))
           for (const row of existingNull) existingKeys.add(`null|${row.keyword}`)
         }
@@ -278,7 +250,7 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
             keyword: e.keyword,
             site_id: site.id,
             discovered_at: new Date().toISOString(),
-            content_date: e.content_date || yesterday,
+            content_date: e.content_date,
             content_type: e.content_type || 'app',
             source_url: e.source_url ?? null,
           }))
@@ -318,8 +290,8 @@ async function runKeywords(sites: SiteRecord[], today: string, yesterday: string
         } else {
           ok++
           totalRows += newCount
-          const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（按昨日填充，请检查日期CSS选择器）` : ''
-          if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: 'ok', rowsWritten: newCount, detail: `新增${newCount}条${dateDetail}` })
+          const dateDetail = nullDateCount > 0 ? `，⚠${nullDateCount}条日期解析失败（保留未知日期，不计入昨日新增，请检查日期CSS选择器）` : ''
+          if (activityId) await siteLog(supabase, activityId, { domain: site.domain, status: nullDateCount > 0 ? 'suspect' : 'ok', rowsWritten: newCount, detail: `新增${newCount}条${dateDetail}` })
         }
       } else {
         ok++

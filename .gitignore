@@ -18,6 +18,7 @@
 
 # vercel
 .vercel
+/supabase/.temp/
 
 # typescript
 *.tsbuildinfo

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import {
-  loadFastTrackingMonth, loadGroupTrackingPayload,
+  loadFastTrackingMonth, loadGroupTrackingPayload, TrackingCacheNotReadyError,
   type EnrichedTrackRow, type RankMatchWithFlag,
 } from '@/lib/group-tracking-cache'
 import {
@@ -189,7 +189,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // lib/group-tracking-cache.ts）。缓存本身是这个分组的全量历史（不分月），
   // 这里按 submit_date 落在当月区间筛——submit_date 是claim级别固定值，
   // 缓存已经是"每个claim取最新一行"，按它筛不需要再去重一次。
-  const { rows: allRows, computedAt, fromCache } = await loadGroupTrackingPayload(service, groupId)
+  let trackingPayload: Awaited<ReturnType<typeof loadGroupTrackingPayload>>
+  try {
+    trackingPayload = await loadGroupTrackingPayload(service, groupId)
+  } catch (error) {
+    if (error instanceof TrackingCacheNotReadyError) return NextResponse.json(
+      { error: error.message, code: 'CACHE_NOT_READY' }, { status: 503, headers: { 'Retry-After': '300' } })
+    throw error
+  }
+  const { rows: allRows, computedAt, fromCache } = trackingPayload
   const rows = allRows.filter(r => r.submit_date >= start && r.submit_date <= end)
   const usernameOf = await resolveUserDisplayNames(
     service,
