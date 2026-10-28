@@ -13,6 +13,11 @@ import { callGeminiJSON, QUALITY_MODELS } from '@/lib/gemini'
 import { createDiagnosticCache, createQueryLimiter, mapWithConcurrency } from '@/lib/diagnostic-work'
 
 const siteSummaryCache = createDiagnosticCache<SiteResearchSummary>()
+const sharedInputCache = createDiagnosticCache<{
+  ownDomains: Awaited<ReturnType<typeof fetchOwnSiteDomains>>
+  envStats: Awaited<ReturnType<typeof computeEnvironmentStats>>
+  gapResult: Awaited<ReturnType<typeof computeOpportunityGaps>>
+}>()
 const scheduleDiagnosticPage = createQueryLimiter(4)
 const MAX_SITES = 15
 
@@ -50,12 +55,15 @@ export async function POST(req: Request) {
   const tokens = extractDomainTokens(question)
   const inputs = await (async () => {
     const resolved = await resolveDomains(service, tokens)
-    const [ownDomains, envStats, gapResult] = await Promise.all([
-      fetchOwnSiteDomains(service),
-      computeEnvironmentStats(service, dateEnd),
-      computeOpportunityGaps(service, dateStart, dateEnd),
-    ])
-    return { ...resolved, ownDomains, envStats, gapResult }
+    const shared = await sharedInputCache(JSON.stringify([user.id, dateStart, dateEnd]), async () => {
+      const [ownDomains, envStats, gapResult] = await Promise.all([
+        fetchOwnSiteDomains(service),
+        computeEnvironmentStats(service, dateEnd),
+        computeOpportunityGaps(service, dateStart, dateEnd),
+      ])
+      return { ownDomains, envStats, gapResult }
+    })
+    return { ...resolved, ...shared }
   })().catch(() => null)
   if (!inputs) return NextResponse.json({ error: '诊断基础资料读取失败，请稍后重试' }, { status: 503 })
   const { matched: matchedAll, unmatched, ownDomains, envStats, gapResult } = inputs

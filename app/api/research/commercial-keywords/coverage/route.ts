@@ -35,7 +35,7 @@ function isMissingCoverageRpc(error: { code?: string; message?: string } | null)
   if (!error) return false
   return error.code === '42883'
     || error.code === 'PGRST202'
-    || error.message?.includes('get_latest_commercial_keyword_coverage') === true
+
 }
 
 async function fetchCoverageRows(service: any, keywords: string[], since: string): Promise<RankRow[]> {
@@ -44,13 +44,18 @@ async function fetchCoverageRows(service: any, keywords: string[], since: string
     try {
       return await fetchAllRows<RankRow>((from, to) => service
         .rpc('get_latest_commercial_keyword_coverage', { p_keywords: keywords, p_since: since })
-        .range(from, to))
+        .range(from, to).then((result: { data: RankRow[] | null; error: { code?: string; message: string } | null }) => {
+          if (result.error) rpcError = result.error
+          return result
+        }))
     } catch (error) {
-      rpcError = error instanceof Error ? { message: error.message } : { message: String(error) }
+      rpcError ??= error instanceof Error ? { message: error.message } : { message: String(error) }
       if (isMissingCoverageRpc(rpcError)) break
       if (attempt === 0) await delay(200)
     }
   }
+
+  if (!isMissingCoverageRpc(rpcError)) throw new Error(rpcError?.message || 'Coverage query failed')
 
   // Safe deployment fallback: application code may reach Vercel just before
   // the migration. The old query remains available, but also gets one retry
@@ -96,7 +101,8 @@ export async function POST(req: Request) {
 
   let seedQuery = service.from('commercial_keywords').select('keyword, group_name').order('created_at', { ascending: true })
   if (scopeGroup && scopeGroup.trim()) seedQuery = seedQuery.eq('group_name', scopeGroup.trim())
-  const { data: seedRows } = await seedQuery
+  const { data: seedRows, error: seedError } = await seedQuery
+  if (seedError) return NextResponse.json({ error: '商业词清单读取失败，请稍后重试' }, { status: 503 })
   const allSeeds = ((seedRows ?? []) as { keyword: string; group_name: string | null }[])
   if (allSeeds.length === 0) return NextResponse.json({ error: scopeGroup ? '这个组没有别名' : '清单是空的，先贴几个商业词' }, { status: 400 })
 
@@ -151,7 +157,7 @@ export async function POST(req: Request) {
       .in('keyword', chunk)
     if (error) {
       console.error('商业词覆盖查询 keyword_volume 失败:', error.message)
-      continue
+      return NextResponse.json({ error: '搜索量读取失败，请稍后重试' }, { status: 503 })
     }
     for (const row of (data ?? []) as { keyword: string; volume: number | null }[]) {
       volumeMap.set(row.keyword, Number(row.volume) || 0)
@@ -169,10 +175,12 @@ export async function POST(req: Request) {
   const siteIds = Array.from(new Set(Array.from(latestByKey.values()).map(r => r.site_id)))
   const siteMap = new Map<string, { domain: string; name: string }>()
   if (siteIds.length > 0) {
-    const { data: sites } = await service.from('sites').select('id, domain, name').in('id', siteIds)
+    const { data: sites, error: sitesError } = await service.from('sites').select('id, domain, name').in('id', siteIds)
+    if (sitesError) return NextResponse.json({ error: '站点资料读取失败，请稍后重试' }, { status: 503 })
     for (const s of (sites ?? []) as { id: string; domain: string; name: string }[]) siteMap.set(s.id, { domain: s.domain, name: s.name })
   }
-  const ownDomains = await fetchOwnSiteDomains(service)
+  const ownDomains = await fetchOwnSiteDomains(service).catch(() => null)
+  if (!ownDomains) return NextResponse.json({ error: '自家站点资料读取失败，请稍后重试' }, { status: 503 })
 
   const coverage: CoverageRow[] = Array.from(latestByKey.values()).map(r => {
     const site = siteMap.get(r.site_id)

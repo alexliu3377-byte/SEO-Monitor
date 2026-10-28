@@ -25,7 +25,7 @@ export function createDiagnosticCache<T>(now = Date.now) {
     if (active) return active
     const promise = Promise.resolve().then(load).then(value => {
       // Bound retained summaries to 8 x 512 KiB; large results remain uncached.
-      if (Buffer.byteLength(JSON.stringify(value) ?? '') <= 512 * 1024) {
+      if (Buffer.byteLength(JSON.stringify(value, (_key, item) => item instanceof Map || item instanceof Set ? Array.from(item) : item) ?? '') <= 512 * 1024) {
         for (const [id, entry] of entries) if (entry.expires <= now()) entries.delete(id)
         while (entries.size >= 8) entries.delete(entries.keys().next().value!)
         entries.set(key, { expires: now() + 60_000, value })
