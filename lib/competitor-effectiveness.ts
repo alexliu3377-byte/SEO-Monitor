@@ -51,7 +51,8 @@ export async function fetchCompetitorEffectivenessSummary(service: any, dateStar
   const siteIds = Array.from(new Set(allRows.map(r => r.site_id)))
   const siteDomainMap = new Map<string, string>()
   if (siteIds.length > 0) {
-    const { data: sites } = await service.from('sites').select('id, domain').in('id', siteIds)
+    const { data: sites, error } = await service.from('sites').select('id, domain').in('id', siteIds)
+    if (error) throw error
     for (const s of (sites ?? []) as { id: string; domain: string }[]) siteDomainMap.set(s.id, s.domain)
   }
 
@@ -95,7 +96,7 @@ export interface CompetitorWinningKeyword {
   source_url: string | null
 }
 
-const GAP_CANDIDATE_CAP = 300
+
 
 // 研究报告"机会缺口"（scripts/research-report.ts Stage2）用——竞品这段时间
 // 真正拿到效果（effectiveness='有效'，不是"追踪中"这种还没确认的）的词，排除
@@ -130,7 +131,8 @@ export async function fetchCompetitorWinningKeywords(service: any, dateStart: st
   const siteIds = Array.from(new Set(allRows.map(r => r.site_id)))
   const siteDomainMap = new Map<string, string>()
   if (siteIds.length > 0) {
-    const { data: sites } = await service.from('sites').select('id, domain').in('id', siteIds)
+    const { data: sites, error } = await service.from('sites').select('id, domain').in('id', siteIds)
+    if (error) throw error
     for (const s of (sites ?? []) as { id: string; domain: string }[]) siteDomainMap.set(s.id, s.domain)
   }
 
@@ -154,5 +156,5 @@ export async function fetchCompetitorWinningKeywords(service: any, dateStart: st
     }))
     .sort((a, b) => b.volume - a.volume)
 
-  return { keywords: keywords.slice(0, GAP_CANDIDATE_CAP), totalCount: keywords.length }
+  return { keywords, totalCount: keywords.length }
 }

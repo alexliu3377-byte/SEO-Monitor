@@ -26,15 +26,17 @@ export async function computeEnvironmentStats(service: any, periodEnd: string): 
   let asOfDate = periodEnd
   let weightRows: { site_id: string; pc_weight: number | null; mobile_weight: number | null }[] = []
   for (let i = 0; i < 7; i++) {
-    const { data } = await service.from('weight_history')
+    const { data, error } = await service.from('weight_history')
       .select('site_id, pc_weight, mobile_weight').eq('record_date', asOfDate)
+    if (error) throw error
     if (data && data.length > 0) { weightRows = data; break }
-    asOfDate = new Date(new Date(asOfDate + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
+    asOfDate = new Date(new Date(asOfDate + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10)
   }
   if (weightRows.length === 0) return null
 
-  const { data: indexRows } = await service.from('index_snapshots')
+  const { data: indexRows, error: indexError } = await service.from('index_snapshots')
     .select('site_id, index_count').eq('snapshot_date', asOfDate)
+  if (indexError) throw indexError
   const indexBySite = new Map<string, number>((indexRows ?? []).map((r: { site_id: string; index_count: number }) => [r.site_id, r.index_count]))
 
   const tiers = computeWeightTiers(weightRows)

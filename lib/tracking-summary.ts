@@ -280,7 +280,8 @@ export async function fetchOwnCoveredKeywordSet(service: any): Promise<Set<strin
 // 研究中心"竞品成效"tab 和竞品成效汇总都要排除这些域名，不能把自己的站点当竞品追踪。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchOwnSiteDomains(service: any): Promise<Set<string>> {
-  const { data } = await service.from('task_groups').select('site_domains')
+  const { data, error } = await service.from('task_groups').select('site_domains')
+  if (error) throw error
   const domains = new Set<string>()
   for (const g of (data ?? []) as { site_domains: string[] | null }[]) {
     for (const d of g.site_domains ?? []) domains.add(d)

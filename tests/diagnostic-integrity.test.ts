@@ -31,7 +31,8 @@ test('all nested pagination shares four slots and keeps complete results', async
   assert.equal(await schedule(async () => 42), 42)
 })
 
-for (const allFail of [true, false]) test(`diagnostic failure reporting (allFail=${allFail})`, async () => {
+for (const mode of ['all', 'partial', 'shared', 'lookup']) test(`diagnostic failure reporting (${mode})`, async () => {
+  const allFail = mode !== 'partial'
   let modelCalls = 0
   const saved: any[] = []
   const sites = [{ id: 'good', domain: 'good.test' }, { id: 'bad', domain: 'bad.test' }]
@@ -44,10 +45,10 @@ for (const allFail of [true, false]) test(`diagnostic failure reporting (allFail
     'next/server': { NextResponse: { json: Response.json } },
     '@/lib/supabase-server': { createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'u' } } }) } }), createServiceClient: () => service },
     '@/lib/site-research-summary': { fetchSiteResearchSummary: async (_: unknown, id: string) => { if (allFail || id === 'bad') throw new Error('fixture error'); return {} } },
-    '@/lib/environment-stats': { computeEnvironmentStats: async () => null },
+    '@/lib/environment-stats': { computeEnvironmentStats: async () => { if (mode === 'shared') throw new Error('fixture shared failure'); return null } },
     '@/lib/tracking-summary': { fetchOwnSiteDomains: async () => new Set() },
     '@/lib/opportunity-gap': { computeOpportunityGaps: async () => ({ gaps: [] }) },
-    '@/lib/domain-lookup': { extractDomainTokens: () => [], resolveDomains: async () => ({ matched: sites, unmatched: [] }) },
+    '@/lib/domain-lookup': { extractDomainTokens: () => [], resolveDomains: async () => { if (mode === 'lookup') throw new Error('fixture lookup failure'); return { matched: sites, unmatched: [] } } },
     '@/lib/site-diagnostic-prompt': { buildDiagnosticPrompt: () => 'prompt' },
     '@/lib/gemini': { QUALITY_MODELS: [], callGeminiJSON: async () => { modelCalls++; return { result: { diagnosis: 'analysis' } } } },
     '@/lib/diagnostic-work': work,

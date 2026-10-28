@@ -48,15 +48,20 @@ export async function POST(req: Request) {
   const dateStart = getMY(-90)
 
   const tokens = extractDomainTokens(question)
-  const { matched: matchedAll, unmatched } = await resolveDomains(service, tokens)
+  const inputs = await (async () => {
+    const resolved = await resolveDomains(service, tokens)
+    const [ownDomains, envStats, gapResult] = await Promise.all([
+      fetchOwnSiteDomains(service),
+      computeEnvironmentStats(service, dateEnd),
+      computeOpportunityGaps(service, dateStart, dateEnd),
+    ])
+    return { ...resolved, ownDomains, envStats, gapResult }
+  })().catch(() => null)
+  if (!inputs) return NextResponse.json({ error: '诊断基础资料读取失败，请稍后重试' }, { status: 503 })
+  const { matched: matchedAll, unmatched, ownDomains, envStats, gapResult } = inputs
   const truncated = matchedAll.length > MAX_SITES
   const matched = matchedAll.slice(0, MAX_SITES)
 
-  const [ownDomains, envStats, gapResult] = await Promise.all([
-    fetchOwnSiteDomains(service),
-    computeEnvironmentStats(service, dateEnd),
-    computeOpportunityGaps(service, dateStart, dateEnd),
-  ])
 
   const groupSummaries = new Map<string, Promise<DiagnosticSiteEntry['groups'][number]>>()
   function groupSummary(g: { id: string; name: string }) {
