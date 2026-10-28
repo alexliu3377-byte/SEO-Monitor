@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { getContentCaller } from '@/lib/content-access-server'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
-import { computeGroupTrackingPayload, saveGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
-import { dedupeTrackingTargets } from '@/lib/tracking-target-dedupe'
 import { OVERWRITE_PAGE_SIZE, overwriteError, parseOverwriteRequest, validateOverwriteUrl } from '@/lib/submission-overwrite'
 
 export const maxDuration = 60
@@ -78,9 +76,7 @@ export async function POST(request: Request, context: Context) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof SyntaxError ? '请求格式不正确' : (error as Error).message }, { status: 400 })
   }
-  // Keep a server-only snapshot for incremental cache repair. The atomic RPC
-  // removes both old caches, so no stale former-owner report remains visible.
-  const cached = await service.from('group_tracking_cache').select('payload,computed_at').eq('group_id', groupId).maybeSingle()
+  // The atomic RPC invalidates report caches; background workers rebuild them.
   const { data: result, error } = await service.rpc('overwrite_group_submission', {
     p_actor_id: caller.id, p_group_id: groupId, p_claim_id: input.claimId,
     p_expected_version: input.version, p_keyword: input.keyword,
@@ -89,28 +85,7 @@ export async function POST(request: Request, context: Context) {
     const failure = overwriteError(error)
     return NextResponse.json({ error: failure.message }, { status: failure.status })
   }
-  let cacheReady = false
-  try {
-    const oldRows = cached.data?.payload as EnrichedTrackRow[] | undefined
-    const cachedAt = Date.parse(cached.data?.computed_at ?? '')
-    const usableCache = !cached.error && Array.isArray(oldRows) && Number.isFinite(cachedAt)
-      && Date.now() - cachedAt <= 26 * 3600000 && oldRows.every(row => Array.isArray(row.device_rankings))
-    const rows = usableCache
-      ? dedupeTrackingTargets([
-          ...oldRows!.filter(row => row.claim_id !== input.claimId),
-          ...await computeGroupTrackingPayload(service, groupId, input.claimId),
-        ])
-      : await computeGroupTrackingPayload(service, groupId)
-    await saveGroupTrackingPayload(service, groupId, rows)
-    cacheReady = true
-  } catch (cacheError) {
-    // The submission/history transaction has already committed. Do not return
-    // an apparent failed overwrite that encourages duplicate retries.
-    console.warn('Submission overwrite saved; tracking cache refresh pending', {
-      groupId, claimId: input.claimId, code: (cacheError as { code?: string }).code,
-    })
-  }
-  return NextResponse.json({ success: true, ...result, cacheReady,
-    message: cacheReady ? '覆盖成功，成效报告已同步' : '覆盖成功；成效缓存尚待刷新，提交与历史已保存',
+  return NextResponse.json({ ...result, success: true, cacheReady: false,
+    message: '覆盖成功；提交与历史已保存，成效报告等待后台更新，无需重复提交',
   }, { headers: privateHeaders })
 }

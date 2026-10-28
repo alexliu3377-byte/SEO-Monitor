@@ -117,7 +117,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
       const data = await read<Saved>(response)
       if (!alive.current) return
       setSaved(data); setSelected(null); setRows([]); setConfirmed(false); setShowHistory(false)
-      if (data.cacheReady) onSaved()
+      onSaved()
     } catch (reason) { if (alive.current) setError((reason as Error).message) }
     finally { if (alive.current) setSaving(false) }
   }
@@ -148,7 +148,7 @@ export default function SubmissionOverwriteDialog({ groupId, groupName, onClose,
         <p className="mt-2 break-words">{saved.keyword} · {saved.username} · {localDate(saved.submitDate)}</p>
         <p className="mt-1">搜索量：{saved.volumeMatched ? saved.volume.toLocaleString() : '未匹配到，已清除旧词搜索量'}</p>
         <p className="mt-1 break-all">{saved.pageUrl}</p>
-        {!saved.cacheReady && <button type="button" className={`${secondaryButton} mt-3`} onClick={() => { onSaved(); onClose() }}>刷新报告</button>}
+        {!saved.cacheReady && <button type="button" className={`${secondaryButton} mt-3`} onClick={() => { onSaved(); onClose() }}>返回报告</button>}
       </div> : <>
         {loading && <p role="status" className="py-6 text-center text-sm text-gray-500">正在查找已提交的记录…</p>}
         {!loading && searched && rows.length === 0 && !error && <p role="status" className="py-6 text-center text-sm text-gray-500">当前分组没有这个链接的已提交记录，请核对链接。</p>}
