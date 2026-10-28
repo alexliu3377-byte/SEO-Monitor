@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getTrendCaller } from '@/lib/trend-discovery-server'
+import { getContentCaller } from '@/lib/content-access-server'
 import { UUID_PATTERN } from '@/lib/content-transcript'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { caller, service } = await getTrendCaller()
+  const { caller, service } = await getContentCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { id } = await params
   if (!UUID_PATTERN.test(id)) return NextResponse.json({ error: '资料编号无效' }, { status: 400 })

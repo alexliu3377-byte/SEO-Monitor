@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getTrendCaller } from '@/lib/trend-discovery-server'
+import { getContentCaller } from '@/lib/content-access-server'
 import { canAccessTaskGroup } from '@/lib/task-group-access'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import { computeGroupTrackingPayload, saveGroupTrackingPayload, type EnrichedTrackRow } from '@/lib/group-tracking-cache'
@@ -12,7 +12,7 @@ const privateHeaders = { 'Cache-Control': 'private, no-store' }
 type Context = { params: Promise<{ id: string }> }
 
 async function authorize(context: Context) {
-  const { caller, service } = await getTrendCaller()
+  const { caller, service } = await getContentCaller()
   const { id: groupId } = await context.params
   if (!caller) return { response: NextResponse.json({ error: '请先登录' }, { status: 401 }) }
   if (!UUID.test(groupId)) return { response: NextResponse.json({ error: '分组编号无效' }, { status: 400 }) }

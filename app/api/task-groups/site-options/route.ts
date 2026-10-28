@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getTrendCaller } from '@/lib/trend-discovery-server'
+import { getContentCaller } from '@/lib/content-access-server'
 import { loadTaskGroupSiteOptions } from '@/lib/task-group-site-options'
 
 const headers = { 'Cache-Control': 'private, no-store' }
 
 export async function GET() {
   try {
-    const { caller, service } = await getTrendCaller()
+    const { caller, service } = await getContentCaller()
     if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers })
     if (caller.role !== 'admin' && caller.role !== 'super') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers })

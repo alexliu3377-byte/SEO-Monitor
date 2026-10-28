@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { authorizeTrendCollector } from '@/lib/trend-discovery-server'
+import { authorizeContentCollector } from '@/lib/content-access-server'
 import { createServiceClient } from '@/lib/supabase-server'
 import { TRANSCRIPT_SOURCES } from '@/lib/content-transcript'
 
 export async function POST(request: Request) {
-  const authorization = authorizeTrendCollector(request)
+  const authorization = authorizeContentCollector(request)
   if (!authorization.ok) return NextResponse.json({ error: '转写任务认证失败或密钥未配置' }, { status: authorization.missingConfiguration ? 503 : 401 })
   if (Number(request.headers.get('content-length')) > 2000) return NextResponse.json({ error: '请求过大' }, { status: 413 })
   const raw = await request.text()

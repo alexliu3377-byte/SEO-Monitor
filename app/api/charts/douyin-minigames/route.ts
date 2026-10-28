@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { getTrendCaller } from '@/lib/trend-discovery-server'
+import { getContentCaller } from '@/lib/content-access-server'
 import { DOUYIN_MINIGAME_SOURCE_URL, MINIGAME_BOARDS } from '@/lib/douyin-minigames'
 
 // Cache-only reads: opening, filtering, paging, and retrying never visit Douyin.
 export async function GET(request: Request) {
-  const { caller, service } = await getTrendCaller()
+  const { caller, service } = await getContentCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const params = new URL(request.url).searchParams
   const board = params.get('board') || 'new'

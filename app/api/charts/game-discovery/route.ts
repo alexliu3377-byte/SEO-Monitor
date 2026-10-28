@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getTrendCaller } from '@/lib/trend-discovery-server'
+import { getContentCaller } from '@/lib/content-access-server'
 import { GAME_DISCOVERY_SOURCES, isGameDiscoveryDataset } from '@/lib/game-discovery-sources'
 
 export async function GET(request: Request) {
-  const { caller, service }=await getTrendCaller()
+  const { caller, service }=await getContentCaller()
   if (!caller) return NextResponse.json({error:'Unauthorized'},{status:401})
   const params=new URL(request.url).searchParams, dataset=params.get('dataset'), page=Number(params.get('page') || '1')
   if (!isGameDiscoveryDataset(dataset) || !Number.isInteger(page) || page<1 || page>5) return NextResponse.json({error:'资料类型或页码无效'},{status:400})

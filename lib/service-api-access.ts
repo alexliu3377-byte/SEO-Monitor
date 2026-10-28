@@ -10,9 +10,6 @@ const SERVICE_AUTH_PATHS = [
   '/api/content-feed/transcripts/claim',
   '/api/content-feed/transcripts/result',
   '/api/tracking-cache/refresh',
-  '/api/trend-discovery/ingest',
-  '/api/trend-discovery/collector-config',
-  '/api/trend-discovery/claim',
 ] as const
 
 export function allowsServiceAuthPath(pathname: string): boolean {

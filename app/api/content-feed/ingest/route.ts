@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { authorizeTrendCollector } from '@/lib/trend-discovery-server'
+import { authorizeContentCollector } from '@/lib/content-access-server'
 import { isCollectorContentSource, parseCollectorContentItem } from '@/lib/content-feed-ingest'
 import { contentFeedDatabaseRows } from '@/lib/content-feed'
 import { createServiceClient } from '@/lib/supabase-server'
@@ -7,7 +7,7 @@ import { createServiceClient } from '@/lib/supabase-server'
 export const maxDuration = 60
 
 export async function POST(request: Request) {
-  const authorization = authorizeTrendCollector(request)
+  const authorization = authorizeContentCollector(request)
   if (!authorization.ok) {
     return NextResponse.json({ error: authorization.missingConfiguration ? '内容采集密钥尚未配置' : '内容采集认证失败' }, {
       status: authorization.missingConfiguration ? 503 : 401,

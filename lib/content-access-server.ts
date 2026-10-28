@@ -3,15 +3,14 @@ import 'server-only'
 import { timingSafeEqual } from 'node:crypto'
 import { createClient, createServiceClient } from './supabase-server'
 import { isProjectOwner } from './project-owner'
-import { isTrendPlatform, type TrendPlatform } from './trend-discovery'
 
-export type TrendCaller = {
+export type ContentCaller = {
   id: string
   role: 'normal' | 'admin' | 'super'
   isOwner: boolean
 }
 
-export async function getTrendCaller(): Promise<{ caller: TrendCaller | null; service: any }> {
+export async function getContentCaller(): Promise<{ caller: ContentCaller | null; service: any }> {
   const auth = await createClient()
   const { data: { user } } = await auth.auth.getUser()
   const service = createServiceClient() as any
@@ -41,7 +40,7 @@ function safeTokenEqual(actual: string, expected: string): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer)
 }
 
-export function authorizeTrendCollector(request: Request): { ok: true } | { ok: false; missingConfiguration: boolean } {
+export function authorizeContentCollector(request: Request): { ok: true } | { ok: false; missingConfiguration: boolean } {
   const expected = process.env.TREND_INGEST_SECRET?.trim() ?? ''
   if (expected.length < 24) return { ok: false, missingConfiguration: true }
   const authorization = request.headers.get('authorization') ?? ''
@@ -51,6 +50,3 @@ export function authorizeTrendCollector(request: Request): { ok: true } | { ok: 
     : { ok: false, missingConfiguration: false }
 }
 
-export function parseCollectorPlatform(value: unknown): TrendPlatform | null {
-  return isTrendPlatform(value) ? value : null
-}

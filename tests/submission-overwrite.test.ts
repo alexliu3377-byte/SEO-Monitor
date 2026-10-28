@@ -36,7 +36,7 @@ test('stale overwrites and duplicate conflicts explain recovery without claiming
 test('normal report privacy remains separate from exact-URL all-member overwrite lookup', () => {
   const lookup = readFileSync(new URL('../app/api/task-groups/[id]/submission-overwrite/route.ts', import.meta.url), 'utf8')
   const outcomes = readFileSync(new URL('../app/api/task-groups/[id]/outcomes/route.ts', import.meta.url), 'utf8')
-  assert.match(lookup, /getTrendCaller/)
+  assert.match(lookup, /getContentCaller/)
   assert.match(lookup, /canAccessTaskGroup/)
   assert.match(lookup, /p_actor_id: caller\.id/)
   assert.match(lookup, /p_group_id: groupId/)

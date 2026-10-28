@@ -22,7 +22,6 @@ test('system map server page rejects unauthenticated and non-super users', async
       require(name: string) {
         if (name === 'next/navigation') return { redirect: (path: string) => { throw new Error(`redirect:${path}`) } }
         if (name === '@/lib/get-user-profile') return { getUserProfile: async () => role ? { role } : null }
-        if (name === '@/lib/system-map') return { SYSTEM_MAP: [] }
         if (name === './system-map-client') return { default: 'client' }
         if (name === 'react/jsx-runtime') return { jsx: () => { rendered = true; return 'page' } }
         throw new Error(`Unexpected dependency ${name}`)

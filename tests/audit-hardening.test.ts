@@ -31,15 +31,6 @@ import {
   isFeedbackType,
   normalizeSubmittedSite,
 } from '../lib/feedback-access'
-import {
-  computeTrendScore,
-  extractCandidateTerms,
-  isAllowedTrendSourceUrl,
-  normalizeTrendQueries,
-  normalizeTrendSourceUrl,
-  normalizeTrendTerm,
-  parseTrendSuggestionInput,
-} from '../lib/trend-discovery'
 import { isCrawlStep, normalizeCrawlDomain } from '../lib/github-actions'
 import { allowsServiceAuthPath } from '../lib/service-api-access'
 
@@ -77,11 +68,11 @@ test('manual crawl dispatch accepts only valid domains and supported steps', () 
   assert.equal(isCrawlStep('unknown-step'), false)
 })
 
-test('trend collector service routes bypass browser login but unrelated APIs do not', () => {
-  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim'), true)
-  assert.equal(allowsServiceAuthPath('/api/trend-discovery/ingest'), true)
-  assert.equal(allowsServiceAuthPath('/api/trend-discovery/collector-config'), true)
-  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim/history'), true)
+test('active collector service routes bypass browser login but unrelated APIs do not', () => {
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim'), false)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/ingest'), false)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/collector-config'), false)
+  assert.equal(allowsServiceAuthPath('/api/trend-discovery/claim/history'), false)
   assert.equal(allowsServiceAuthPath('/api/content-feed/ingest'), true)
   assert.equal(allowsServiceAuthPath('/api/content-feed/refresh'), true)
   assert.equal(allowsServiceAuthPath('/api/content-feed'), false)
@@ -194,79 +185,6 @@ test('development log accepts only known statuses and normalizes list input', ()
   assert.equal(isDevelopmentRequestStatus('trial'), true)
   assert.equal(isDevelopmentRequestStatus('unknown'), false)
   assert.deepEqual(cleanStringList([' first ', '', 7, 'second']), ['first', 'second'])
-})
-
-test('trend discovery accepts only minimal links from the selected source platform', () => {
-  assert.equal(isAllowedTrendSourceUrl('xiaohongshu', 'https://www.xiaohongshu.com/explore/abc'), true)
-  assert.equal(isAllowedTrendSourceUrl('douyin', 'https://www.douyin.com/video/123'), true)
-  assert.equal(isAllowedTrendSourceUrl('douyin', 'http://www.douyin.com/video/123'), false)
-  assert.equal(isAllowedTrendSourceUrl('douyin', 'https://douyin.com.example.com/video/123'), false)
-  assert.equal(isAllowedTrendSourceUrl('xiaohongshu', 'file:///etc/passwd'), false)
-  assert.equal(
-    normalizeTrendSourceUrl('xiaohongshu', 'https://www.xiaohongshu.com/explore/abc?xsec_token=private#reply'),
-    'https://www.xiaohongshu.com/explore/abc',
-  )
-})
-
-test('trend discovery extracts explicit social terms without treating broad seeds as candidates', () => {
-  assert.deepEqual(
-    extractCandidateTerms('试玩《星火计划》之后发现这个效率工具很好用 #灵犀助手', ['灵犀助手']),
-    ['灵犀助手', '星火计划']
-  )
-  assert.equal(normalizeTrendTerm('#灵犀助手'), '灵犀助手')
-  assert.equal(normalizeTrendTerm('游戏'), null)
-})
-
-test('trend collection queries are trimmed, deduplicated and platform limited', () => {
-  assert.deepEqual(
-    normalizeTrendQueries('xiaohongshu', [' 新手游 ', '效率   工具', '新手游']),
-    ['新手游', '效率 工具']
-  )
-  assert.equal(normalizeTrendQueries('douyin', []), null)
-  assert.equal(normalizeTrendQueries('douyin', ['一']), null)
-  assert.equal(normalizeTrendQueries('douyin', Array.from({ length: 101 }, (_, index) => `词${index + 1}`)), null)
-})
-
-test('trend search suggestions accept only useful typed discovery leads', () => {
-  assert.deepEqual(parseTrendSuggestionInput({
-    term: ' 灵犀助手 ',
-    sourceKind: 'related_search',
-    seedQuery: '效率工具',
-    position: 2,
-    collectedAt: '2026-09-23T10:00:00.000Z',
-  }), {
-    term: '灵犀助手',
-    normalizedTerm: '灵犀助手',
-    sourceKind: 'related_search',
-    seedQuery: '效率工具',
-    position: 2,
-    collectedAt: '2026-09-23T10:00:00.000Z',
-  })
-  assert.equal(parseTrendSuggestionInput({
-    term: '游戏',
-    sourceKind: 'related_search',
-    seedQuery: '新手游',
-    collectedAt: '2026-09-23T10:00:00.000Z',
-  }), null)
-  assert.equal(parseTrendSuggestionInput({
-    term: '灵犀助手',
-    sourceKind: 'unknown',
-    seedQuery: '效率工具',
-    collectedAt: '2026-09-23T10:00:00.000Z',
-  }), null)
-})
-
-test('trend score rewards fresh cross-platform growth without SEO volume', () => {
-  const now = new Date('2026-09-08T12:00:00.000Z')
-  assert.deepEqual(computeTrendScore({
-    firstSeenAt: new Date('2026-09-08T10:00:00.000Z'),
-    lastSeenAt: now,
-    platformCount: 2,
-    signalCount: 5,
-    recentSignalCount: 4,
-    previousSignalCount: 1,
-    now,
-  }), { score: 77, confidence: 70, stage: 'hot', growthPercent: 300 })
 })
 
 test('Supabase pagination reads beyond the per-request row cap', async () => {

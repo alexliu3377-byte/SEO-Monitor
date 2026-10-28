@@ -55,14 +55,11 @@ const extraNodes: FlowNode[] = [
   { id: 'app-source', x: 30, y: 590, title: '应用更新来源', lines: ['App Store / Google Play / TapTap', '管理员登记的更新网页'], kind: 'entry' },
   { id: 'app-process', x: 420, y: 590, title: '发现应用与检查版本', lines: ['提取版本号、日期与更新日志', '按来源与版本去重'], kind: 'main' },
   { id: 'app-use', x: 810, y: 590, title: '应用更新中心', lines: ['新版本进入待审核', '人工通过后更新当前版本'], href: '/app-updates' },
-  { id: 'trend-source', x: 30, y: 775, title: '小红书 / 抖音搜索', lines: ['按设置的搜索词读取首屏', '标题、标签与可见互动数字'], kind: 'entry' },
-  { id: 'trend-process', x: 420, y: 775, title: '平台需求信号', lines: ['整理公开结果卡片', '保留来源与可见日期'], kind: 'main' },
-  { id: 'trend-use', x: 810, y: 775, title: '趋势发现', lines: ['观察平台上出现的话题', '人工判断是否值得做内容'], href: '/content/trend-discovery' },
-  { id: 'commercial-source', x: 30, y: 960, title: '商业词组与百度下拉', lines: ['手动词组 + 百度建议词', '结合已有站点排名资料'], kind: 'entry' },
-  { id: 'commercial-process', x: 420, y: 960, title: '覆盖匹配与新词发现', lines: ['对照自己 / 竞品排名覆盖', '从排名标题发现候选词'], kind: 'main' },
-  { id: 'commercial-use', x: 810, y: 960, title: '研究中心 · 商业词研究', lines: ['维护词组、核对覆盖与机会', '由人工决定后续内容方向'], href: '/content/research' },
+  { id: 'commercial-source', x: 30, y: 775, title: '商业词组与百度下拉', lines: ['手动词组 + 百度建议词', '结合已有站点排名资料'], kind: 'entry' },
+  { id: 'commercial-process', x: 420, y: 775, title: '覆盖匹配与新词发现', lines: ['对照自己 / 竞品排名覆盖', '从排名标题发现候选词'], kind: 'main' },
+  { id: 'commercial-use', x: 810, y: 775, title: '研究中心 · 商业词研究', lines: ['维护词组、核对覆盖与机会', '由人工决定后续内容方向'], href: '/content/research' },
 ]
-const extraEdges = [97, 282, 467, 652, 837, 1022].flatMap(y => [{ path: `M280 ${y} H420` }, { path: `M670 ${y} H810` }])
+const extraEdges = [97, 282, 467, 652, 837].flatMap(y => [{ path: `M280 ${y} H420` }, { path: `M670 ${y} H810` }])
 
 function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes: FlowNode[]; edges: FlowEdge[]; width: number; height: number; label: string }) {
   const [zoom, setZoom] = useState<number | null>(null)
@@ -102,11 +99,10 @@ function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes
 }
 
 export default function SystemMapClient() {
-  return <div className="space-y-8">
+  return <div className="space-y-6 p-6">
     <header>
-      <p className="text-xs font-medium text-emerald-700">系统地图</p>
-      <h1 className="mt-1 text-2xl font-bold text-slate-900">从资料采集，到内容成效</h1>
-      <p className="mt-2 text-sm text-slate-500">一张图看清主要业务流，另一张图说明额外资料任务。所有流程直接展开，无需切换分类。</p>
+      <h1 className="text-2xl font-bold text-slate-950">系统地图</h1>
+      <p className="mt-1 text-sm text-slate-500">查看资料来源、采集流向与内容成效，以及额外资料任务。</p>
     </header>
     <section aria-labelledby="main-flow-heading">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -119,7 +115,7 @@ export default function SystemMapClient() {
     <section aria-labelledby="extra-flow-heading">
       <h2 id="extra-flow-heading" className="mb-1 text-base font-semibold text-slate-900">额外资料任务 · 内容、榜单、版本与搜索</h2>
       <p className="mb-3 text-sm text-slate-500">这些任务提供额外资料，不默认进入上面的分发与发布流程。</p>
-      <Diagram id="extra-flow" nodes={extraNodes} edges={extraEdges} width={1100} height={1120} label="额外资料任务流程" />
+      <Diagram id="extra-flow" nodes={extraNodes} edges={extraEdges} width={1100} height={935} label="额外资料任务流程" />
     </section>
     <div className="border-t border-slate-200 pt-4 text-xs leading-6 text-slate-500">
       <p>资料口径：榜单热度不等于搜索量；首次发现日期不等于发布日期。</p>

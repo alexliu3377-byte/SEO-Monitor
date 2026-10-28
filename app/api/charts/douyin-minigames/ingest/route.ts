@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { authorizeTrendCollector } from '@/lib/trend-discovery-server'
+import { authorizeContentCollector } from '@/lib/content-access-server'
 import { createServiceClient } from '@/lib/supabase-server'
 import { validateMinigameRankings } from '@/lib/douyin-minigames'
 
 export async function POST(request: Request) {
-  const authorization = authorizeTrendCollector(request)
+  const authorization = authorizeContentCollector(request)
   if (!authorization.ok) return NextResponse.json({ error: '小游戏采集认证未通过' }, { status: authorization.missingConfiguration ? 503 : 401 })
   if (Number(request.headers.get('content-length')) > 500_000) return NextResponse.json({ error: '资料超过大小限制' }, { status: 413 })
   let items, collectedAt
