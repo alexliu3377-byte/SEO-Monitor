@@ -848,16 +848,36 @@ function BulkImportModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
 function DiscoveryEvidence({ discovery }: { discovery: Discovery }) {
   const [open, setOpen] = useState(false)
-  const evidence = discovery.evidence ?? []
+  const [evidence, setEvidence] = useState<DiscoveryEvidenceRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [limited, setLimited] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    if (!open || loaded) return
+    const controller = new AbortController()
+    setLoading(true)
+    setError('')
+    researchRequest('/api/research/commercial-keywords/discoveries?evidenceId=' + encodeURIComponent(discovery.id), { signal: controller.signal })
+      .then(data => {
+        if (controller.signal.aborted) return
+        setEvidence(data.evidence ?? [])
+        setLimited(data.limited === true)
+        setLoaded(true)
+      }).catch(err => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '判断依据读取失败') })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [open, loaded, discovery.id, retry])
   return (
     <div className="mt-2">
       <button type="button" onClick={() => setOpen(value => !value)}
         className="text-xs font-medium text-blue-600 hover:text-blue-700">
-        {open ? '收起判断依据' : `查看判断依据（${evidence.length || 1} 条标题）`}
+        {open ? '收起判断依据' : '查看判断依据'}
       </button>
       {open && (
         <div className="mt-2 overflow-hidden rounded-lg border border-gray-100 bg-gray-50/70 divide-y divide-gray-100">
-          {evidence.length > 0 ? evidence.map((item, index) => (
+          {loading ? <p className="p-3 text-xs text-gray-500">正在读取判断依据…</p> : error ? <div className="p-3 text-xs text-red-600" role="alert">{error} <button type="button" onClick={() => setRetry(value => value + 1)} className="underline">重试</button></div> : evidence.length > 0 ? evidence.map((item, index) => (
             <div key={`${item.domain}|${item.platform}|${item.title}|${index}`} className="px-3 py-2 text-xs">
               <div className="flex items-center gap-2 text-gray-400 flex-wrap">
                 <span className="font-medium text-gray-600">{item.domain}</span>
@@ -873,9 +893,10 @@ function DiscoveryEvidence({ discovery }: { discovery: Discovery }) {
           )) : (
             <div className="px-3 py-2 text-xs text-gray-500">
               <span className="font-medium">{discovery.domain ?? '未知站点'}</span>
-              <p className="mt-1 break-words">{discovery.title ?? '历史计数已保留，但近 30 天没有可展示的标题'}</p>
+              <p className="mt-1 break-words">近 30 天没有匹配的标题证据。</p>
             </div>
           )}
+          {!loading && !error && limited && <p className="p-3 text-xs text-gray-500">仅从最近 300 条匹配记录中展示最多 12 项去重证据，不代表完整历史。</p>}
         </div>
       )}
     </div>

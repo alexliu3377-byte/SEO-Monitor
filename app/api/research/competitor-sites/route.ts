@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { mapWithConcurrency } from '@/lib/diagnostic-work'
 import { fetchOwnSiteDomains } from '@/lib/tracking-summary'
 
 async function requireAdmin() {
@@ -40,13 +41,17 @@ export async function GET(req: Request) {
 
   const siteIds = sites.map((s: { id: string }) => s.id)
   const weightMap = new Map<string, { pc: number; mobile: number }>()
-  if (siteIds.length > 0) {
-    const { data: weightRows } = await service
-      .from('weight_history').select('site_id, record_date, pc_weight, mobile_weight')
-      .in('site_id', siteIds).order('record_date', { ascending: true })
-    for (const w of (weightRows ?? []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
-      weightMap.set(w.site_id, { pc: w.pc_weight, mobile: w.mobile_weight })
-    }
+  try {
+    await mapWithConcurrency(siteIds as string[], 4, async siteId => {
+      const { data, error } = await service.from('weight_history')
+        .select('pc_weight, mobile_weight').eq('site_id', siteId)
+        .order('record_date', { ascending: false }).order('id', { ascending: false })
+        .limit(1).maybeSingle()
+      if (error) throw error
+      if (data) weightMap.set(siteId, { pc: data.pc_weight, mobile: data.mobile_weight })
+    })
+  } catch {
+    return NextResponse.json({ error: '最新权重读取失败，请稍后重试' }, { status: 503 })
   }
 
   const result = sites.map((s: { id: string; domain: string; name: string; has_rank_title?: boolean }) => ({
