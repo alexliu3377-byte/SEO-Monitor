@@ -9,6 +9,7 @@ import dynamic from 'next/dynamic'
 import { useUser } from '@/lib/user-context'
 import { explainOutcomeScore, type UpdateEffectBreakdown } from '@/lib/outcome-score'
 import { isIncrementalOperation } from '@/lib/submission-operation'
+import { deferredRequest } from '@/lib/deferred-request'
 
 const SUBMISSION_PAGE_SIZE = 20
 const DETAIL_PAGE_SIZE = 50
@@ -360,9 +361,11 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
     p.set('sortDir', oSortDir)
     p.set('page',     String(oPage))
     p.set('pageSize', String(oPageSize))
-    fetch(`/api/task-groups/${activeTabId}/outcomes?${p}`)
-      .then(r => readResponse<{ rows?: OutcomeRow[]; summary?: OutcomeSummary; groupSummary?: OutcomeSummary; totalRows?: number; truncated?: boolean; computedAt?: string }>(r, '成效追踪加载失败'))
-      .then(d => {
+    return deferredRequest({
+      delayMs: 300,
+      request: signal => fetch(`/api/task-groups/${activeTabId}/outcomes?${p}`, { signal })
+        .then(r => readResponse<{ rows?: OutcomeRow[]; summary?: OutcomeSummary; groupSummary?: OutcomeSummary; totalRows?: number; truncated?: boolean; computedAt?: string }>(r, '成效追踪加载失败')),
+      success: d => {
         setOutcomes(d.rows || [])
         setOutcomeSummary(d.summary || null)
         setOutcomeGroupSummary(d.groupSummary || null)
@@ -370,9 +373,10 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
         setOutcomesTruncated(!!d.truncated)
         setOutcomesComputedAt(d.computedAt && Number.isFinite(Date.parse(d.computedAt)) ? d.computedAt : '')
         setLoadError(current => current?.scope === 'outcomes' ? null : current)
-      })
-      .catch(error => setLoadError({ scope: 'outcomes', message: error instanceof Error ? error.message : '成效追踪加载失败' }))
-      .finally(() => setOutcomesLoading(false))
+      },
+      failure: error => setLoadError({ scope: 'outcomes', message: error instanceof Error ? error.message : '成效追踪加载失败' }),
+      settled: () => setOutcomesLoading(false),
+    })
   }
   useEffect(loadOutcomes, [activeTabId, reportTab, oFilterMember, oFilterOp, oFilterKw, oFilterIndex, oFilterRankKw, oFilterOutcome, oSortBy, oSortDir, oPage, oPageSize, retryNonce])
 

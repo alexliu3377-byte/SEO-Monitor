@@ -99,6 +99,7 @@ export async function GET(req: Request) {
       .lte('claimed_date', endDate)
       .order('group_id', { ascending: true })
       .order('user_id', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, to)
     if (!canSeeAll) query = query.eq('user_id', user.id)
     return query
