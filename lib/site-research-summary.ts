@@ -35,12 +35,13 @@ export interface SiteTrendStats {
 // 收紧保留期会让年报的整年查询被静默截断。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fetchSiteTrendStats(service: any, siteId: string, dateStart: string, dateEnd: string): Promise<SiteTrendStats> {
-  const [{ data: weightRows }, { data: indexRows }] = await Promise.all([
+  const [{ data: weightRows, error: weightError }, { data: indexRows, error: indexError }] = await Promise.all([
     service.from('weight_history').select('record_date, pc_weight, mobile_weight, pc_ip, pc_ip_max, mobile_ip, mobile_ip_max')
       .eq('site_id', siteId).gte('record_date', dateStart).lte('record_date', dateEnd).order('record_date'),
     service.from('index_snapshots').select('snapshot_date, index_count')
       .eq('site_id', siteId).gte('snapshot_date', dateStart).lte('snapshot_date', dateEnd).order('snapshot_date'),
   ])
+  if (weightError || indexError) throw new Error('站点趋势资料读取失败，请重试')
   return { weightTrend: weightRows ?? [], indexTrend: indexRows ?? [] }
 }
 

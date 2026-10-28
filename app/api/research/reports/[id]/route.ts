@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { mapWithConcurrency } from '@/lib/diagnostic-work'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,10 +19,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // 拆分片改动的一部分——分片并行写不能共享同一个 JSONB 数组列，会互相覆盖）。
   // 拆分片之前生成的老报告在这张新表里没有行，这时 report.site_analyses（select('*')
   // 已经带出来的旧版 JSONB 列）还有真实数据，做个兜底不然老报告会显示"没有站点分析"。
-  const { data: siteRows } = await service
+  const { data: siteRows, error: siteRowsError } = await service
     .from('research_report_sites')
     .select('site_id, domain, name, skipped, skip_reason, analysis, error, pc_weight, mobile_weight, avg_index_count, avg_mobile_ip, momentum_keywords, findings')
     .eq('report_id', id)
+  if (siteRowsError) return NextResponse.json({ error: '报告站点分析读取失败，请稍后重试' }, { status: 503 })
   if (siteRows && siteRows.length > 0) report.site_analyses = siteRows
 
   // 附上"各站点分析"里每个站点的最新权重——SiteAZPicker 的名牌要带PC/M权重
@@ -32,13 +34,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const staleSiteIds = ((report.site_analyses ?? []) as { site_id: string; pc_weight: number | null; mobile_weight: number | null }[])
     .filter(s => s.pc_weight == null && s.mobile_weight == null).map(s => s.site_id)
   const siteWeights: Record<string, { pc: number; mobile: number }> = {}
-  if (staleSiteIds.length > 0) {
-    const { data: weightRows } = await service
-      .from('weight_history').select('site_id, record_date, pc_weight, mobile_weight')
-      .in('site_id', staleSiteIds).order('record_date', { ascending: true })
-    for (const w of (weightRows ?? []) as { site_id: string; pc_weight: number; mobile_weight: number }[]) {
-      siteWeights[w.site_id] = { pc: w.pc_weight, mobile: w.mobile_weight }
-    }
+  try {
+    await mapWithConcurrency([...new Set(staleSiteIds)], 4, async siteId => {
+      const { data, error: weightError } = await service.from('weight_history')
+        .select('pc_weight, mobile_weight').eq('site_id', siteId)
+        .order('record_date', { ascending: false }).order('id', { ascending: false })
+        .limit(1).maybeSingle()
+      if (weightError) throw weightError
+      if (data) siteWeights[siteId] = { pc: data.pc_weight, mobile: data.mobile_weight }
+    })
+  } catch {
+    return NextResponse.json({ error: '报告站点最新权重读取失败，请稍后重试' }, { status: 503 })
   }
 
   return NextResponse.json({ report, siteWeights })
