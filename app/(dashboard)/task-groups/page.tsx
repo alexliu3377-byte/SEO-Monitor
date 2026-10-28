@@ -13,6 +13,7 @@ import { getBrowserClient } from '@/lib/supabase-browser'
 import { buildGroupColorMap } from '@/lib/company-groups'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { useRadarPage } from '@/lib/use-radar-page'
+import { createRadarRefreshScheduler } from '@/lib/radar-refresh-scheduler'
 import { radarTabDate, radarTabScope } from '@/lib/radar-tab-state'
 import { isIncrementalOperation } from '@/lib/submission-operation'
 import { applyClaimRealtimeEvent } from '@/lib/claimed-task-realtime'
@@ -761,6 +762,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
   const [distributeClearing, setDistributeClearing] = useState(false)
 
   const [radarVersion, setRadarVersion] = useState(0)
+  const radarRefreshRef = useRef<ReturnType<typeof createRadarRefreshScheduler> | null>(null)
 
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -1980,7 +1982,7 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
         (payload) => {
           const rec = (payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old) as ClaimedKeyword & { user_id: string; claimed_date: string }
           setClaimedKeywords(prev => applyClaimRealtimeEvent(prev, payload.eventType, rec, effectiveViewingId, today))
-          setRadarVersion(version => version + 1)
+          radarRefreshRef.current?.invalidate()
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -1988,10 +1990,27 @@ export default function TaskGroupsPage({ groupId }: { groupId?: string }) {
 
   useEffect(() => {
     if (!isWorkspaceRoute || !activeGroupId) return
-    const refresh = () => { if (document.visibilityState === 'visible') setRadarVersion(version => version + 1) }
+    const scheduler = createRadarRefreshScheduler({
+      refresh: () => setRadarVersion(version => version + 1),
+      visible: () => document.visibilityState === 'visible',
+      now: Date.now,
+      schedule: (callback, delay) => {
+        const timer = window.setTimeout(callback, delay)
+        return () => window.clearTimeout(timer)
+      },
+    })
+    radarRefreshRef.current = scheduler
+    const refresh = scheduler.wake
     const interval = window.setInterval(refresh, 60000)
     window.addEventListener('focus', refresh)
-    return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh) }
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      scheduler.dispose()
+      radarRefreshRef.current = null
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
   }, [isWorkspaceRoute, activeGroupId])
 
   function setPage(tab: RightTab, p: number) { setTabPage(prev => ({ ...prev, [tab]: p })) }
