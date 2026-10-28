@@ -2,7 +2,7 @@ export const maxDuration = 240
 
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
-import { fetchSiteResearchSummary } from '@/lib/site-research-summary'
+import { fetchSiteResearchSummary, type SiteResearchSummary } from '@/lib/site-research-summary'
 import { computeEnvironmentStats } from '@/lib/environment-stats'
 import { fetchGroupEffectivenessSummary, fetchOwnSiteDomains } from '@/lib/tracking-summary'
 import { computeOpportunityGaps } from '@/lib/opportunity-gap'
@@ -10,6 +10,9 @@ import { extractDomainTokens, resolveDomains, type ResolvedSite } from '@/lib/do
 import { buildDiagnosticPrompt, type DiagnosticSiteEntry } from '@/lib/site-diagnostic-prompt'
 import { callGeminiJSON, QUALITY_MODELS } from '@/lib/gemini'
 
+import { createDiagnosticCache, mapWithConcurrency } from '@/lib/diagnostic-work'
+
+const siteSummaryCache = createDiagnosticCache<SiteResearchSummary>()
 const MAX_SITES = 15
 
 function getMY(offsetDays = 0) {
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
   const { service, user } = ctx
 
   const { question } = await req.json() as { question?: string }
-  if (!question || !question.trim()) return NextResponse.json({ error: '请输入问题' }, { status: 400 })
+  if (typeof question !== 'string' || !question.trim()) return NextResponse.json({ error: '请输入问题' }, { status: 400 })
 
   const dateEnd = getMY()
   const dateStart = getMY(-90)
@@ -54,25 +57,36 @@ export async function POST(req: Request) {
     computeOpportunityGaps(service, dateStart, dateEnd),
   ])
 
+  const groupSummaries = new Map<string, Promise<DiagnosticSiteEntry['groups'][number]>>()
+  function groupSummary(g: { id: string; name: string }) {
+    let pending = groupSummaries.get(g.id)
+    if (!pending) {
+      pending = Promise.all([
+        fetchGroupEffectivenessSummary(service, g.id, dateStart, dateEnd),
+        service.from('task_group_members').select('user_id', { count: 'exact', head: true }).eq('group_id', g.id),
+      ]).then(([effectiveness, result]) => {
+        if (result.error) throw result.error
+        return { group_name: g.name, memberCount: result.count ?? 0, ...effectiveness }
+      })
+      groupSummaries.set(g.id, pending)
+    }
+    return pending
+  }
+
   // 每个站点单独 try/catch，某一个站点拉数据失败不影响其它站点（照抄
   // scripts/research-report.ts Stage1 对多站点的容错模式）。
-  const entries: DiagnosticSiteEntry[] = (await Promise.all(matched.map(async (site: ResolvedSite): Promise<DiagnosticSiteEntry | null> => {
+  const entries: DiagnosticSiteEntry[] = (await mapWithConcurrency(matched, 2, async (site: ResolvedSite): Promise<DiagnosticSiteEntry | null> => {
     try {
       const isOwnSite = ownDomains.has(site.domain)
-      const summary = await fetchSiteResearchSummary(service, site.id, dateStart, dateEnd)
+      const summary = await siteSummaryCache(JSON.stringify([user.id, site.id, dateStart, dateEnd]),
+        () => fetchSiteResearchSummary(service, site.id, dateStart, dateEnd))
       const siteTier = envStats?.siteTiers.get(site.id) ?? null
 
       let groups: DiagnosticSiteEntry['groups'] = []
       if (isOwnSite) {
         const { data: groupsRaw } = await service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
-        groups = await Promise.all(
-          ((groupsRaw ?? []) as { id: string; name: string }[]).map(async (g) => {
-            const [effectiveness, { count }] = await Promise.all([
-              fetchGroupEffectivenessSummary(service, g.id, dateStart, dateEnd),
-              service.from('task_group_members').select('user_id', { count: 'exact', head: true }).eq('group_id', g.id),
-            ])
-            return { group_name: g.name, memberCount: count ?? 0, ...effectiveness }
-          })
+        groups = await mapWithConcurrency(
+          (groupsRaw ?? []) as { id: string; name: string }[], 2, groupSummary,
         )
       }
 
@@ -88,9 +102,9 @@ export async function POST(req: Request) {
       console.error(`站点诊断：${site.domain} 数据拉取失败`, e)
       return null
     }
-  }))).filter((e): e is DiagnosticSiteEntry => e !== null)
+  })).filter((e): e is DiagnosticSiteEntry => e !== null)
 
-  const prompt = buildDiagnosticPrompt(entries, unmatched, envStats, gapResult.gaps, question, dateStart, dateEnd)
+  const prompt = '资料说明：同一用户的站点资料可能复用最近60秒内的读取结果；不代表实时采集。\n' + buildDiagnosticPrompt(entries, unmatched, envStats, gapResult.gaps, question, dateStart, dateEnd)
   const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 8192, models: QUALITY_MODELS })
   if (!result) return NextResponse.json({ error: error || 'AI 诊断失败' }, { status: 500 })
 

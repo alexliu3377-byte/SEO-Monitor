@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { loadSubmissionTotals } from '@/lib/submission-totals'
 import { fetchAllRows } from '@/lib/supabase-paginate'
 import { resolveUserDisplayNames } from '@/lib/user-display-name'
 import type { UserRole } from '@/lib/user-context'
@@ -33,7 +34,6 @@ function getDateRange(period: string): { startDate: string; endDate: string } {
 
 interface RawGroup { id: string; name: string; created_at: string; site_domains: string[] }
 interface RawMember { group_id: string; user_id: string; username: string | null }
-interface RawClaim { group_id: string; user_id: string; source: string; search_volume: number }
 interface SourceTotal { count: number; volume: number }
 
 const SOURCE_ORDER = ['竞品涨排名', '共新增词', '交叉词', '连续上涨词', '更新词库', '搜索量查询']
@@ -90,7 +90,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ period, startDate, endDate, groups: [] })
   }
 
-  const claims = await fetchAllRows<RawClaim>((from, to) => {
+  const claims = await loadSubmissionTotals((from, to) => {
     let query = service.from('member_claimed_keywords')
       .select('group_id, user_id, source, search_volume')
       .in('group_id', groups.map(group => group.id))
@@ -115,22 +115,31 @@ export async function GET(req: Request) {
     const key = `${claim.group_id}|${claim.user_id}`
     const entry = claimsByMember.get(key) ?? { total: { count: 0, volume: 0 }, sources: new Map() }
     const volume = Number(claim.search_volume) || 0
-    entry.total.count += 1
+    entry.total.count += claim.count
     entry.total.volume += volume
     const source = entry.sources.get(claim.source) ?? { count: 0, volume: 0 }
-    source.count += 1
+    source.count += claim.count
     source.volume += volume
     entry.sources.set(claim.source, source)
     claimsByMember.set(key, entry)
   }
 
+  const membersByGroup = new Map<string, Map<string, RawMember>>()
+  for (const member of members) {
+    if (!canSeeAll && member.user_id !== user.id) continue
+    const groupMembers = membersByGroup.get(member.group_id) ?? new Map<string, RawMember>()
+    groupMembers.set(member.user_id, member)
+    membersByGroup.set(member.group_id, groupMembers)
+  }
+  for (const claim of claims) {
+    const groupMembers = membersByGroup.get(claim.group_id) ?? new Map<string, RawMember>()
+    if (!groupMembers.has(claim.user_id)) groupMembers.set(claim.user_id, {
+      group_id: claim.group_id, user_id: claim.user_id, username: null,
+    })
+    membersByGroup.set(claim.group_id, groupMembers)
+  }
   const result = groups.map(group => {
-    const currentMembers = members.filter(member => member.group_id === group.id && (canSeeAll || member.user_id === user.id))
-    const historicalMembers = claims
-      .filter(claim => claim.group_id === group.id && !currentMembers.some(member => member.user_id === claim.user_id))
-      .map(claim => ({ group_id: group.id, user_id: claim.user_id, username: null }))
-      .filter((member, index, rows) => rows.findIndex(row => row.user_id === member.user_id) === index)
-    const groupMembers = [...currentMembers, ...historicalMembers]
+    const groupMembers = [...(membersByGroup.get(group.id)?.values() ?? [])]
       .map(member => {
         const entry = claimsByMember.get(`${group.id}|${member.user_id}`)
         return {
