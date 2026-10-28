@@ -116,7 +116,13 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M8 11h8m-8 4h5m6-10v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2h10l4 4z" /></svg>,
       },
       {
-        href: '/feedback',
+          href: '/system-map',
+          label: '系统地图',
+          superOnly: true,
+          icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3h6v5H9zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4" /></svg>,
+        },
+        {
+          href: '/feedback',
         label: '反馈优化',
         icon: <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8m-8 4h5m8-2a9 9 0 11-4.219-7.63L21 4v4.219A8.96 8.96 0 0121 12z" /></svg>,
       },
@@ -186,6 +192,7 @@ const CONTENT_ITEMS: NavItem[] = [
     contentLeaf('/sites', '网站关联'),
     contentLeaf('/crawl-log'),
     contentLeaf('/development-log'),
+      contentLeaf('/system-map'),
     contentLeaf('/settings'),
   ]),
   contentLeaf('/feedback'),
