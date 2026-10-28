@@ -300,14 +300,17 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
       params.set('startDate', customStart)
       params.set('endDate', customEnd)
     }
-    fetch(`/api/task-groups/report-overview?${params}`)
-      .then(response => readResponse<{ groups?: OverviewGroup[] }>(response, '提交概况加载失败'))
-      .then(data => {
+    return deferredRequest({
+      delayMs: 0,
+      request: signal => fetch(`/api/task-groups/report-overview?${params}`, { signal })
+      .then(response => readResponse<{ groups?: OverviewGroup[] }>(response, '提交概况加载失败')),
+      success: data => {
         setOverviewGroups(data.groups || [])
         setLoadError(current => current?.scope === 'overview' ? null : current)
-      })
-      .catch(error => setLoadError({ scope: 'overview', message: error instanceof Error ? error.message : '提交概况加载失败' }))
-      .finally(() => setOverviewLoading(false))
+      },
+      failure: error => setLoadError({ scope: 'overview', message: error instanceof Error ? error.message : '提交概况加载失败' }),
+      settled: () => setOverviewLoading(false),
+    })
   }, [groupId, period, customStart, customEnd, retryNonce])
 
   // Load member report
@@ -388,38 +391,25 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
     return p
   }
 
-  async function refreshTrackingSummary() {
-    if (!activeTabId || !canSeeAll) return
-    setTrackingLoading(true)
-    try {
-      const refreshResponse = await fetch(`/api/tracking-cache/refresh?groupId=${encodeURIComponent(activeTabId)}`)
-      const refreshResult = await refreshResponse.json()
-      if (!refreshResponse.ok || !refreshResult.success) throw new Error(refreshResult.error || '刷新失败')
-      const response = await fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`)
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || '刷新结果加载失败')
-      setTrackingData(data)
-      setLoadError(current => current?.scope === 'tracking' ? null : current)
-    } catch (error) {
-      setLoadError({ scope: 'tracking', message: error instanceof Error ? error.message : '追踪汇总刷新失败' })
-    } finally {
-      setTrackingLoading(false)
-    }
-  }
+  const [trackingReload, setTrackingReload] = useState(0)
   useEffect(() => {
     if (reportTab !== 'trackingSummary' || !activeTabId) return
     setTrackingLoading(true)
-    fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`)
-      .then(r => readResponse<TrackingSummaryResponse>(r, '追踪汇总加载失败'))
-      .then(d => {
+    setTrackingData(null)
+    return deferredRequest({
+      delayMs: 0,
+      request: signal => fetch(`/api/task-groups/${activeTabId}/tracking-summary?${scopeParams(trackingMonth, trackingScope)}`, { signal })
+      .then(r => readResponse<TrackingSummaryResponse>(r, '追踪汇总加载失败')),
+      success: d => {
         setTrackingData(d)
         if (!d.canSeeAll && trackingScope !== 'own') setTrackingScope('own')
         setLoadError(current => current?.scope === 'tracking' ? null : current)
-      })
-      .catch(error => setLoadError({ scope: 'tracking', message: error instanceof Error ? error.message : '追踪汇总加载失败' }))
-      .finally(() => setTrackingLoading(false))
+      },
+      failure: error => setLoadError({ scope: 'tracking', message: error instanceof Error ? error.message : '追踪汇总加载失败' }),
+      settled: () => setTrackingLoading(false),
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportTab, activeTabId, trackingMonth, trackingScope, retryNonce])
+  }, [reportTab, activeTabId, trackingMonth, trackingScope, retryNonce, trackingReload])
 
   // Load source-detail drill-down (获取收录/排名区间"查看")，50条/页
   useEffect(() => {
@@ -430,11 +420,17 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
     p.set('kind', sourceDetailModal.kind)
     if (sourceDetailModal.bucket) p.set('bucket', sourceDetailModal.bucket)
     p.set('page', String(sourceDetailPage))
-    fetch(`/api/task-groups/${activeTabId}/tracking-summary/detail?${p}`)
-      .then(r => readResponse<{ rows?: SourceDetailRow[]; total?: number }>(r, '追踪详情加载失败'))
-      .then(d => { setSourceDetailRows(d.rows || []); setSourceDetailTotal(d.total || 0) })
-      .catch(error => setLoadError({ scope: 'sourceDetail', message: error instanceof Error ? error.message : '追踪详情加载失败' }))
-      .finally(() => setSourceDetailLoading(false))
+    return deferredRequest({
+      delayMs: 0,
+      request: signal => fetch(`/api/task-groups/${activeTabId}/tracking-summary/detail?${p}`, { signal })
+      .then(r => readResponse<{ rows?: SourceDetailRow[]; total?: number }>(r, '追踪详情加载失败')),
+      success: d => {
+        setSourceDetailRows(d.rows || []); setSourceDetailTotal(d.total || 0)
+        setLoadError(current => current?.scope === 'sourceDetail' ? null : current)
+      },
+      failure: error => setLoadError({ scope: 'sourceDetail', message: error instanceof Error ? error.message : '追踪详情加载失败' }),
+      settled: () => setSourceDetailLoading(false),
+    })
   }, [sourceDetailModal, activeTabId, trackingMonth, trackingScope, sourceDetailPage, retryNonce])
 
   // Load detail keywords on demand
@@ -997,8 +993,8 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                       </span>
                     )}
                     {trackingData.canSeeAll && (
-                      <button type="button" onClick={refreshTrackingSummary} disabled={trackingLoading} className="btn-secondary min-h-11 px-3 disabled:cursor-not-allowed disabled:opacity-60">
-                        {trackingLoading ? '正在重建缓存…' : '刷新最新数据'}
+                      <button type="button" onClick={() => setTrackingReload(value => value + 1)} disabled={trackingLoading} className="btn-secondary min-h-11 px-3 disabled:cursor-not-allowed disabled:opacity-60">
+                        {trackingLoading ? '正在读取…' : '读取最新快照'}
                       </button>
                     )}
                   </div>

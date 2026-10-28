@@ -1,41 +1,21 @@
 import { NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase-server'
+import { createServiceClient } from '@/lib/supabase-server'
 import { computeGroupTrackingPayload, saveGroupTrackingPayload } from '@/lib/group-tracking-cache'
-import { canAccessTaskGroup } from '@/lib/task-group-access'
-import type { UserRole } from '@/lib/user-context'
 
 export const maxDuration = 300
 
-// The final retry workflow calls this once per group after tracking. It
-// atomically writes paged rows, compact monthly summaries and the legacy
-// compatibility cache. Admin/super sessions may also refresh one group with
-// ?groupId=...; omitting it remains available as a legacy all-group fallback.
+// Service-only compatibility endpoint. Interactive pages read stored snapshots;
+// scheduled workers compute directly through scripts/refresh-derived-cache.ts.
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
-  let authed = !!(cronSecret && authHeader === `Bearer ${cronSecret}`)
-  let caller: { id: string; role: UserRole } | null = null
-
-  if (!authed) {
-    const authClient = await createClient()
-    const { data: { user } } = await authClient.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const svc = createServiceClient() as any
-    const { data: profile } = await svc.from('user_profiles').select('role').eq('id', user.id).single()
-    if (['super', 'admin'].includes(profile?.role)) {
-      caller = { id: user.id, role: profile.role as UserRole }
-      authed = true
-    }
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: '后台服务专用；页面请读取最新快照' }, { status: 403 })
   }
-  if (!authed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = createServiceClient() as any
   const requestedGroupId = new URL(req.url).searchParams.get('groupId')
-  if (requestedGroupId && caller && !await canAccessTaskGroup(service, caller.id, caller.role, requestedGroupId)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
   let groupsQuery = service.from('task_groups').select('id, name')
   if (requestedGroupId) groupsQuery = groupsQuery.eq('id', requestedGroupId)
   const { data: groups, error: groupsError } = await groupsQuery
