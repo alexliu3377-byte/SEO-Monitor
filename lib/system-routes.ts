@@ -18,6 +18,7 @@ export const CONTENT_LEGACY_ROOTS = [
   '/sites',
   '/crawl-log',
   '/development-log',
+  '/system-map',
   '/feedback',
   '/settings',
 ] as const
