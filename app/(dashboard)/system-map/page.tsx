@@ -1,11 +1,10 @@
 import { redirect } from 'next/navigation'
 import { getUserProfile } from '@/lib/get-user-profile'
-import { SYSTEM_MAP } from '@/lib/system-map'
 import SystemMapClient from './system-map-client'
 
 export default async function SystemMapPage() {
   const profile = await getUserProfile()
   if (!profile) redirect('/login')
   if (profile.role !== 'super') redirect('/')
-  return <SystemMapClient maps={SYSTEM_MAP} />
+  return <SystemMapClient />
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import type { CollectionSource } from '@/lib/system-map'
 
 type FlowNode = { id: string; x: number; y: number; title: string; lines: string[]; href?: string; kind?: 'entry' | 'main' | 'condition' }
 type FlowEdge = { path: string; dashed?: boolean }
@@ -15,34 +14,55 @@ const mainNodes: FlowNode[] = [
   { id: 'radar', x: 400, y: 470, title: '热词雷达', lines: ['匹配自制信号条件', '汇合新增、涨排与搜索量信号'], href: '/content/hot-keywords', kind: 'main' },
   { id: 'tasks', x: 770, y: 470, title: '任务工作台', lines: ['筛选站点 → 分发 → 组员认领', '任务提交：内容与自己站点链接'], href: '/content/task-groups', kind: 'main' },
   { id: 'report', x: 1140, y: 470, title: '成效报告', lines: ['以已提交链接进行追踪', '查看收录、排名与任务成效'], href: '/content/group-report', kind: 'main' },
-  { id: 'wordlib', x: 30, y: 690, title: '词库补充', lines: ['整理候选词、分类与补充词库', '供后续筛选和内容任务使用'], href: '/content/keyword-classification' },
-  { id: 'rank', x: 400, y: 690, title: '爱站排名 / 搜索量资料', lines: ['涨跌词、排名明细、搜索量', '作为雷达信号的补充依据'], kind: 'condition' },
+  { id: 'wordlib', x: 30, y: 690, title: '词库补充', lines: ['分类、分配站点与补充状态', '资料来自关键词搜索量库'], href: '/content/keyword-classification' },
+  { id: 'rank', x: 400, y: 690, title: '排名与关键词搜索量库', lines: ['涨跌词、排名明细、搜索量', '作为雷达信号的补充依据'], kind: 'condition' },
   { id: 'own', x: 770, y: 690, title: '自己站点的信号条件', lines: ['已有提交、涨排 / 跌排等信号', '配合站点过滤筛选任务'], kind: 'condition' },
+  { id: 'monthly', x: 30, y: 910, title: '内容发现 · 月度趋势', lines: ['竞品关键词与站点历史汇总', '观察每月内容与站点变化'], href: '/content/charts?section=monthly' },
+  { id: 'history', x: 400, y: 910, title: '站点历史与大环境', lines: ['权重、收录、关键词与排名', '汇合自己和竞品的成效资料'], kind: 'condition' },
+  { id: 'research', x: 770, y: 910, title: '研究中心', lines: ['竞品成效 · 站点诊断', '周 / 月 / 季 / 年研究报告'], href: '/content/research', kind: 'main' },
+  { id: 'gaps', x: 1140, y: 1130, title: '机会缺口', lines: ['竞品有效词 − 我方已提交词', '找出尚未覆盖的内容机会'], href: '/content/research', kind: 'condition' },
+  { id: 'decisions', x: 770, y: 1130, title: '人工选择与任务调整', lines: ['结合研究结论和机会缺口', '选择选题，再调整工作台任务'], kind: 'condition' },
+
 ]
 const mainEdges: FlowEdge[] = [
   { path: 'M740 154 V190 H155 V230' }, { path: 'M740 190 H525 V230' },
   { path: 'M740 190 H895 V230' }, { path: 'M740 190 H1265 V230' },
   { path: 'M525 354 V470' },
-  { path: 'M400 292 H330 V420 H155 V470' },
-  { path: 'M330 420 V655 H155 V690' },
+  { path: 'M400 752 H350 V532 H280' },
+  { path: 'M400 752 H280' },
   { path: 'M650 532 H770' }, { path: 'M1020 532 H1140' },
   { path: 'M525 690 V594', dashed: true }, { path: 'M895 690 V594', dashed: true },
+  { path: 'M400 972 H280' }, { path: 'M650 972 H770' },
+  { path: 'M1390 532 H1410 V972 H1020' },
+  { path: 'M895 1034 V1130' },
+  { path: 'M1020 972 H1265 V1130' },
+  { path: 'M1140 1192 H1020' },
+  { path: 'M895 1130 H1070 V640 H1020 V594', dashed: true },
+  { path: 'M650 752 H700 V620 H1265 V594', dashed: true },
+  { path: 'M1265 354 V470' },
+
 ]
 const extraNodes: FlowNode[] = [
-  { id: 'content-source', x: 30, y: 35, title: '内容平台与账号', lines: ['B 站 / 小红书 / 小黑盒', '吾爱破解 / 4399 / 虫虫助手'], kind: 'entry' },
-  { id: 'content-process', x: 420, y: 35, title: '资料采集与文字整理', lines: ['标题、原文、日期 → 去重入库', '正文 / 字幕 / 本地转写'], kind: 'main' },
-  { id: 'content-use', x: 810, y: 35, title: '内容发现', lines: ['软件、游戏资讯与内容动态', '查看原文与资料，准备选题'], href: '/content/charts' },
-  { id: 'game-source', x: 30, y: 220, title: '小游戏榜单来源', lines: ['抖音 / 微信小游戏', 'MomoRank 公开免费资料'], kind: 'entry' },
-  { id: 'game-process', x: 420, y: 220, title: '榜单与热度快照', lines: ['保留榜种、名次与来源日期', '热度不当作搜索量'], kind: 'main' },
-  { id: 'game-use', x: 810, y: 220, title: '内容发现 · 小游戏', lines: ['观察新游与榜单变化', '为游戏选题提供参考'], href: '/content/charts' },
-  { id: 'app-source', x: 30, y: 405, title: '应用更新来源', lines: ['App Store / Google Play / TapTap', '管理员登记的更新网页'], kind: 'entry' },
-  { id: 'app-process', x: 420, y: 405, title: '发现应用与检查版本', lines: ['提取版本号、日期与更新日志', '按来源与版本去重'], kind: 'main' },
-  { id: 'app-use', x: 810, y: 405, title: '应用更新中心', lines: ['新版本进入待审核', '人工通过后更新当前版本'], href: '/app-updates' },
-  { id: 'trend-source', x: 30, y: 590, title: '额外搜索任务', lines: ['小红书 / 抖音搜索', '百度下拉建议'], kind: 'entry' },
-  { id: 'trend-process', x: 420, y: 590, title: '按搜索词读取资料', lines: ['平台首屏卡片 / 百度建议词', '手动或页面按需触发'], kind: 'main' },
-  { id: 'trend-use', x: 810, y: 590, title: '趋势发现 / 研究中心', lines: ['平台信号进入趋势发现', '百度建议用于商业词覆盖查询'] },
+  { id: 'calendar-source', x: 30, y: 35, title: 'TapTap / 好游快爆', lines: ['游戏日历、热门榜与热门搜索', '即将上线、即将更新的游戏'], kind: 'entry' },
+  { id: 'calendar-process', x: 420, y: 35, title: '游戏资讯与搜索趋势', lines: ['读取公开页面 / 日历资料', '保留来源时间、榜种与标签'], kind: 'main' },
+  { id: 'calendar-use', x: 810, y: 35, title: '内容发现 · 游戏', lines: ['看上线时间与平台热度', '作为选题参考，不等于搜索量'], href: '/content/charts?section=game' },
+  { id: 'content-source', x: 30, y: 220, title: '资讯与视频来源', lines: ['B 站 / 小红书 / 小黑盒', '吾爱破解 / 4399 / 虫虫助手'], kind: 'entry' },
+  { id: 'content-process', x: 420, y: 220, title: '资料采集与文字整理', lines: ['标题、原文、日期 → 去重入库', '正文 / 字幕 / 语音转写'], kind: 'main' },
+  { id: 'content-use', x: 810, y: 220, title: '内容发现 · 资讯 / 应用', lines: ['软件分享、游戏资讯与视频', '查看资料，人工准备内容选题'], href: '/content/charts?section=content' },
+  { id: 'game-source', x: 30, y: 405, title: '小游戏榜单来源', lines: ['抖音 / 微信小游戏', 'MomoRank 公开免费资料'], kind: 'entry' },
+  { id: 'game-process', x: 420, y: 405, title: '榜单与热度快照', lines: ['保留榜种、名次与来源日期', '热度不当作搜索量'], kind: 'main' },
+  { id: 'game-use', x: 810, y: 405, title: '内容发现 · 小游戏', lines: ['观察新游与榜单变化', '为游戏选题提供参考'], href: '/content/charts?section=game&source=douyin_minigame&view=rankings' },
+  { id: 'app-source', x: 30, y: 590, title: '应用更新来源', lines: ['App Store / Google Play / TapTap', '管理员登记的更新网页'], kind: 'entry' },
+  { id: 'app-process', x: 420, y: 590, title: '发现应用与检查版本', lines: ['提取版本号、日期与更新日志', '按来源与版本去重'], kind: 'main' },
+  { id: 'app-use', x: 810, y: 590, title: '应用更新中心', lines: ['新版本进入待审核', '人工通过后更新当前版本'], href: '/app-updates' },
+  { id: 'trend-source', x: 30, y: 775, title: '小红书 / 抖音搜索', lines: ['按设置的搜索词读取首屏', '标题、标签与可见互动数字'], kind: 'entry' },
+  { id: 'trend-process', x: 420, y: 775, title: '平台需求信号', lines: ['整理公开结果卡片', '保留来源与可见日期'], kind: 'main' },
+  { id: 'trend-use', x: 810, y: 775, title: '趋势发现', lines: ['观察平台上出现的话题', '人工判断是否值得做内容'], href: '/content/trend-discovery' },
+  { id: 'commercial-source', x: 30, y: 960, title: '商业词组与百度下拉', lines: ['手动词组 + 百度建议词', '结合已有站点排名资料'], kind: 'entry' },
+  { id: 'commercial-process', x: 420, y: 960, title: '覆盖匹配与新词发现', lines: ['对照自己 / 竞品排名覆盖', '从排名标题发现候选词'], kind: 'main' },
+  { id: 'commercial-use', x: 810, y: 960, title: '研究中心 · 商业词研究', lines: ['维护词组、核对覆盖与机会', '由人工决定后续内容方向'], href: '/content/research' },
 ]
-const extraEdges = [97, 282, 467, 652].flatMap(y => [{ path: `M280 ${y} H420` }, { path: `M670 ${y} H810` }])
+const extraEdges = [97, 282, 467, 652, 837, 1022].flatMap(y => [{ path: `M280 ${y} H420` }, { path: `M670 ${y} H810` }])
 
 function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes: FlowNode[]; edges: FlowEdge[]; width: number; height: number; label: string }) {
   const [zoom, setZoom] = useState<number | null>(null)
@@ -58,7 +78,7 @@ function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes
     </div>
     <div className="overflow-auto bg-slate-50/60 p-3" tabIndex={0} role="region" aria-label={label + '画布'}>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: zoom === null ? '100%' : width * zoom / 100, minWidth: zoom === null ? 760 : undefined }} className="block" role="group" aria-labelledby={id + '-title'}>
-        <title id={id + '-title'}>{label}。实线表示资料或任务流向，虚线表示信号补充。页面节点可点击。</title>
+        <title id={id + '-title'}>{label}。实线表示资料或任务流向，虚线表示信号补充或人工反馈。页面节点可点击。</title>
         <defs>
           <pattern id={id + '-dots'} width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#dbe3eb" /></pattern>
           <marker id={id + '-arrow'} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="#6b928b" strokeWidth="1.4" /></marker>
@@ -71,8 +91,8 @@ function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes
           const content = <g>
             <rect x={node.x} y={node.y + 3} width="250" height="124" rx="12" fill="#0f172a" opacity=".035" />
             <rect x={node.x} y={node.y} width="250" height="124" rx="12" fill={entry ? '#163d3a' : main ? '#ecfdf5' : '#ffffff'} stroke={main ? '#8ed6bc' : node.kind === 'condition' ? '#cbd5e1' : '#d7e0e7'} strokeDasharray={node.kind === 'condition' ? '5 4' : undefined} />
-            <text x={node.x + 18} y={node.y + 34} fontSize="20" fontWeight="650" fill={entry ? '#ffffff' : '#163d3a'}>{node.title}</text>
-            {node.lines.map((line, index) => <text key={line} x={node.x + 18} y={node.y + 66 + index * 25} fontSize="15" fill={entry ? '#c1ded9' : '#526572'}>{line}</text>)}
+            <text x={node.x + 18} y={node.y + 34} fontSize="18" fontWeight="650" fill={entry ? '#ffffff' : '#163d3a'}>{node.title}</text>
+            {node.lines.map((line, index) => <text key={line} x={node.x + 18} y={node.y + 66 + index * 25} fontSize="14" fill={entry ? '#c1ded9' : '#526572'}>{line}</text>)}
           </g>
           return node.href ? <a key={node.id} href={node.href} aria-label={node.title + '：' + node.lines.join('；')} className="outline-offset-4 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600">{content}</a> : <g key={node.id}>{content}</g>
         })}
@@ -81,7 +101,7 @@ function Diagram({ id, nodes, edges, width, height, label }: { id: string; nodes
   </div>
 }
 
-export default function SystemMapClient({ maps }: { maps: CollectionSource[] }) {
+export default function SystemMapClient() {
   return <div className="space-y-8">
     <header>
       <p className="text-xs font-medium text-emerald-700">系统地图</p>
@@ -91,26 +111,19 @@ export default function SystemMapClient({ maps }: { maps: CollectionSource[] }) 
     <section aria-labelledby="main-flow-heading">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 id="main-flow-heading" className="text-base font-semibold text-slate-900">主流程 · 站点资料 → 信号筛选 → 内容任务 → 成效追踪</h2>
-        <div className="flex gap-4 text-xs text-slate-500"><span>实线：资料 / 任务流向</span><span>虚线：补充信号</span></div>
+        <div className="flex gap-4 text-xs text-slate-500"><span>实线：资料 / 任务流向</span><span>虚线：补充信号 / 人工反馈</span></div>
       </div>
-      <Diagram id="main-flow" nodes={mainNodes} edges={mainEdges} width={1430} height={850} label="站点资料与任务成效主流程" />
-      <p className="mt-2 text-xs leading-5 text-slate-500">连线表示业务关系，不代表自动发布。热词雷达还结合排名与搜索量资料；搜索量查询位于任务工作台内。成员认领和提交后，才有对应链接可追踪。</p>
+      <Diagram id="main-flow" nodes={mainNodes} edges={mainEdges} width={1430} height={1300} label="站点资料与任务成效主流程" />
+      <p className="mt-2 text-xs leading-5 text-slate-500">成效追踪结合已提交链接、收录与排名资料；研究中心汇合历史和成效，供人工调整下一轮任务。</p>
     </section>
     <section aria-labelledby="extra-flow-heading">
       <h2 id="extra-flow-heading" className="mb-1 text-base font-semibold text-slate-900">额外资料任务 · 内容、榜单、版本与搜索</h2>
       <p className="mb-3 text-sm text-slate-500">这些任务提供额外资料，不默认进入上面的分发与发布流程。</p>
-      <Diagram id="extra-flow" nodes={extraNodes} edges={extraEdges} width={1100} height={750} label="额外资料任务流程" />
+      <Diagram id="extra-flow" nodes={extraNodes} edges={extraEdges} width={1100} height={1120} label="额外资料任务流程" />
     </section>
-    <details className="rounded-xl border border-slate-200 bg-white">
-      <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-slate-700 focus-visible:outline-emerald-600">来源与排程依据 · 需要核对具体账号、字段时展开</summary>
-      <div className="grid gap-5 border-t border-slate-100 p-5 md:grid-cols-2">
-        {maps.map(source => <div key={source.id} className="min-w-0 border-l-2 border-emerald-200 pl-3">
-          <h3 className="text-sm font-semibold text-slate-800">{source.name}</h3>
-          <p className="mt-1 break-words text-xs leading-6 text-slate-600">{source.entry}<br />{source.executor} · {source.schedule}</p>
-          <p className="mt-1 text-xs leading-6 text-slate-500">{source.note}</p>
-        </div>)}
-      </div>
-    </details>
-    <p className="text-xs text-slate-500">代码核对：2026/10/28 · 计划时间为 MYT，不代表实时任务状态。查看地图不会启动采集或修改资料。</p>
+    <div className="border-t border-slate-200 pt-4 text-xs leading-6 text-slate-500">
+      <p>资料口径：榜单热度不等于搜索量；首次发现日期不等于发布日期。</p>
+      <p>任务边界：研究结论与内容资料由人工选择使用，不自动发布。</p>
+    </div>
   </div>
 }
