@@ -1,4 +1,19 @@
 // Best-effort per-instance reuse, never a shared authorization cache.
+export function createQueryLimiter(limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid concurrency')
+  let active = 0
+  const queue: Array<() => void> = []
+  return async function schedule<T>(work: () => PromiseLike<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>(resolve => queue.push(resolve))
+    else active++
+    try { return await work() } finally {
+      const next = queue.shift()
+      if (next) next()
+      else active--
+    }
+  }
+}
+
 export function createDiagnosticCache<T>(now = Date.now) {
   const entries = new Map<string, { expires: number; value: T }>()
   const pending = new Map<string, Promise<T>>()

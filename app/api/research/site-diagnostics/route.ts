@@ -10,9 +10,10 @@ import { extractDomainTokens, resolveDomains, type ResolvedSite } from '@/lib/do
 import { buildDiagnosticPrompt, type DiagnosticSiteEntry } from '@/lib/site-diagnostic-prompt'
 import { callGeminiJSON, QUALITY_MODELS } from '@/lib/gemini'
 
-import { createDiagnosticCache, mapWithConcurrency } from '@/lib/diagnostic-work'
+import { createDiagnosticCache, createQueryLimiter, mapWithConcurrency } from '@/lib/diagnostic-work'
 
 const siteSummaryCache = createDiagnosticCache<SiteResearchSummary>()
+const scheduleDiagnosticPage = createQueryLimiter(4)
 const MAX_SITES = 15
 
 function getMY(offsetDays = 0) {
@@ -79,12 +80,13 @@ export async function POST(req: Request) {
     try {
       const isOwnSite = ownDomains.has(site.domain)
       const summary = await siteSummaryCache(JSON.stringify([user.id, site.id, dateStart, dateEnd]),
-        () => fetchSiteResearchSummary(service, site.id, dateStart, dateEnd))
+        () => fetchSiteResearchSummary(service, site.id, dateStart, dateEnd, scheduleDiagnosticPage))
       const siteTier = envStats?.siteTiers.get(site.id) ?? null
 
       let groups: DiagnosticSiteEntry['groups'] = []
       if (isOwnSite) {
-        const { data: groupsRaw } = await service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
+        const { data: groupsRaw, error: groupsError } = await service.from('task_groups').select('id, name, site_domains').contains('site_domains', [site.domain])
+        if (groupsError) throw groupsError
         groups = await mapWithConcurrency(
           (groupsRaw ?? []) as { id: string; name: string }[], 2, groupSummary,
         )
@@ -104,21 +106,30 @@ export async function POST(req: Request) {
     }
   })).filter((e): e is DiagnosticSiteEntry => e !== null)
 
-  const prompt = '资料说明：同一用户的站点资料可能复用最近60秒内的读取结果；不代表实时采集。\n' + buildDiagnosticPrompt(entries, unmatched, envStats, gapResult.gaps, question, dateStart, dateEnd)
+  const successfulIds = new Set(entries.map(entry => entry.site.domain))
+  const failedSites = matched.filter(site => !successfulIds.has(site.domain)).map(site => site.domain)
+  if (matched.length > 0 && entries.length === 0) return NextResponse.json({
+    error: '所选站点资料读取失败，未生成诊断，请稍后重试', failed_sites: failedSites,
+  }, { status: 503 })
+  const failureNote = failedSites.length ? `资料不完整：${failedSites.join('、')} 读取失败，本次未分析这些站点。` : ''
+
+  const prompt = failureNote + '\n' + '资料说明：同一用户的站点资料可能复用最近60秒内的读取结果；不代表实时采集。\n' + buildDiagnosticPrompt(entries, unmatched, envStats, gapResult.gaps, question, dateStart, dateEnd)
   const { result, error } = await callGeminiJSON<{ diagnosis: string }>(prompt, { maxOutputTokens: 8192, models: QUALITY_MODELS })
   if (!result) return NextResponse.json({ error: error || 'AI 诊断失败' }, { status: 500 })
 
-  const siteIds = matched.map(s => s.id)
+  const siteIds = matched.filter(s => successfulIds.has(s.domain)).map(s => s.id)
+  const diagnosis = failureNote ? `${failureNote}\n\n${result.diagnosis}` : result.diagnosis
   const { data: saved, error: saveErr } = await service
     .from('site_diagnostics')
-    .insert({ site_ids: siteIds, question, result: result.diagnosis, created_by: user.id })
+    .insert({ site_ids: siteIds, question, result: diagnosis, created_by: user.id })
     .select('id, created_at')
     .single()
   if (saveErr) return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
 
   return NextResponse.json({
-    id: saved.id, created_at: saved.created_at, question, result: result.diagnosis,
-    matched_sites: matched.map(s => ({ id: s.id, domain: s.domain, name: s.name, isOwnSite: ownDomains.has(s.domain) })),
+    id: saved.id, created_at: saved.created_at, question, result: diagnosis,
+    failed_sites: failedSites,
+    matched_sites: matched.filter(s => successfulIds.has(s.domain)).map(s => ({ id: s.id, domain: s.domain, name: s.name, isOwnSite: ownDomains.has(s.domain) })),
     unmatched_domains: unmatched,
     truncated,
   })

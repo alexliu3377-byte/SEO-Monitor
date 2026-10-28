@@ -49,7 +49,7 @@ export async function fetchSiteTrendStats(service: any, siteId: string, dateStar
 // "拉这个站点这段时间已经抓到的数据、按天汇总、算排名成效分"逻辑，抽成这个
 // 函数避免两处重复维护。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function fetchSiteResearchSummary(service: any, siteId: string, dateStart: string, dateEnd: string): Promise<SiteResearchSummary> {
+export async function fetchSiteResearchSummary(service: any, siteId: string, dateStart: string, dateEnd: string, schedule?: <R>(work: () => PromiseLike<R>) => Promise<R>): Promise<SiteResearchSummary> {
   // rank_changes / site_keyword_ranks 时间跨度一长（月报/年报）单站点能有几万行，
   // fetchAllRows 不给 countHint 时是一页页顺序拉、拉完一页才发下一页请求——
   // 2026-08-07 跑真实月报时两个站点直接因为这个查询 "canceling statement due to
@@ -70,9 +70,13 @@ export async function fetchSiteResearchSummary(service: any, siteId: string, dat
       .eq('site_id', siteId).gte('content_date', dateStart).lte('content_date', dateEnd),
   ])
 
+  for (const result of [rankChangeCountRes, rankRowsCountRes, rawKwCountRes]) {
+    if (result.error || !Number.isSafeInteger(result.count) || result.count < 0) throw new Error('站点资料计数失败，请重试')
+  }
+
   const [
-    { data: weightRows },
-    { data: indexRows },
+    { data: weightRows, error: weightError },
+    { data: indexRows, error: indexError },
     rankChangeRows,
     rankRows,
     rawKwRows,
@@ -85,18 +89,20 @@ export async function fetchSiteResearchSummary(service: any, siteId: string, dat
       service.from('rank_changes').select('stat_date, keyword, type, volume')
         .eq('site_id', siteId).gte('stat_date', dateStart).lte('stat_date', dateEnd)
         .order('stat_date', { ascending: true }).order('id', { ascending: true }).range(from, to),
-      { countHint: rankChangeCountRes.count ?? 0 }),
+      { countHint: rankChangeCountRes.count, schedule }),
     fetchAllRows<{ keyword: string; stat_date: string; rank_position: number | null; prev_rank: number | null; volume: number; url: string | null }>((from, to) =>
       service.from('site_keyword_ranks').select('keyword, stat_date, rank_position, prev_rank, volume, url')
         .eq('site_id', siteId).eq('platform', 'mobile').gte('stat_date', dateStart).lte('stat_date', dateEnd)
         .order('stat_date', { ascending: false }).order('id', { ascending: true }).range(from, to),
-      { countHint: rankRowsCountRes.count ?? 0 }),
+      { countHint: rankRowsCountRes.count, schedule }),
     fetchAllRows<{ id: string; content_date: string | null; content_type: string }>((from, to) =>
       service.from('raw_keywords').select('id, content_date, content_type')
         .eq('site_id', siteId).gte('content_date', dateStart).lte('content_date', dateEnd)
         .order('content_date', { ascending: true }).order('id', { ascending: true }).range(from, to),
-      { countHint: rawKwCountRes.count ?? 0 }),
+      { countHint: rawKwCountRes.count, schedule }),
   ])
+
+  if (weightError || indexError) throw new Error('站点权重或收录资料读取失败')
 
   const rankChangeByDate = new Map<string, { date: string; rankup: number; rankdown: number }>()
   for (const r of rankChangeRows) {
@@ -125,9 +131,10 @@ export async function fetchSiteResearchSummary(service: any, siteId: string, dat
   const rankedKeywords = latestRankRows.filter(r => r.rank_position != null).map(r => r.keyword)
   const volumeTrendMap = new Map<string, { volume: number; prev_volume: number; volume_change: number }>()
   for (let i = 0; i < rankedKeywords.length; i += 150) {
-    const { data: kv } = await service.from('keyword_volume')
+    const { data: kv, error: volumeError } = await service.from('keyword_volume')
       .select('keyword, volume, prev_volume, volume_change')
       .in('keyword', rankedKeywords.slice(i, i + 150))
+    if (volumeError) throw new Error('站点搜索量资料读取失败')
     for (const k of (kv ?? []) as { keyword: string; volume: number; prev_volume: number; volume_change: number }[]) {
       volumeTrendMap.set(k.keyword, k)
     }

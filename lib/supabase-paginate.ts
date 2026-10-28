@@ -19,9 +19,10 @@
 // 不够，还要再加一层按 id 排序兜底去重复。
 export async function fetchAllRows<T>(
   buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-  opts: { pageSize?: number; countHint?: number } = {}
+  opts: { pageSize?: number; countHint?: number; schedule?: <R>(work: () => PromiseLike<R>) => Promise<R> } = {}
 ): Promise<T[]> {
   const pageSize = opts.pageSize ?? 3000
+  const read = (from: number, to: number) => opts.schedule ? opts.schedule(() => buildQuery(from, to)) : buildQuery(from, to)
 
   if (opts.countHint != null) {
     // 全部页一次性 Promise.all 会在页数很多时（80万行/3000一页=270+页）打爆
@@ -33,7 +34,7 @@ export async function fetchAllRows<T>(
     for (let batchStart = 0; batchStart < pages; batchStart += CONCURRENCY) {
       const batch = Array.from(
         { length: Math.min(CONCURRENCY, pages - batchStart) },
-        (_, j) => { const i = batchStart + j; return buildQuery(i * pageSize, i * pageSize + pageSize - 1) }
+        (_, j) => { const i = batchStart + j; return read(i * pageSize, i * pageSize + pageSize - 1) }
       )
       const results = await Promise.all(batch)
       for (const { data, error } of results) {
@@ -47,7 +48,7 @@ export async function fetchAllRows<T>(
   const out: T[] = []
   let from = 0
   for (;;) {
-    const { data, error } = await buildQuery(from, from + pageSize - 1)
+    const { data, error } = await read(from, from + pageSize - 1)
     if (error) throw new Error(error.message)
     if (!data || data.length === 0) break
     out.push(...data)

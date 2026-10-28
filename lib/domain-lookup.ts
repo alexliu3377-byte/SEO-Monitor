@@ -38,10 +38,11 @@ export async function resolveDomains(service: any, tokens: string[]): Promise<{
 }> {
   if (tokens.length === 0) return { matched: [], unmatched: [] }
 
-  const { data } = await service
+  const { data, error } = await service
     .from('sites')
     .select('id, domain, name, is_enabled, has_rank_data, has_rank_title, has_index_pages, focus_level')
     .in('domain', tokens)
+  if (error) throw new Error('站点匹配查询失败，请重试')
   const matched = (data ?? []) as ResolvedSite[]
   const matchedDomains = new Set(matched.map(s => s.domain.toLowerCase()))
   const unmatched = tokens.filter(t => !matchedDomains.has(t))
