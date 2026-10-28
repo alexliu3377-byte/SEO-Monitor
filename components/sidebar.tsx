@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { contentSystemPath } from '@/lib/system-routes'
 import { useUser } from '@/lib/user-context'
+import { watchFeedbackUnread } from '@/lib/feedback-unread-poll'
 
 type NavItem = {
   href: string
@@ -196,7 +197,7 @@ const CONTENT_ITEMS: NavItem[] = [
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { role } = useUser()
+  const { role, id: userId } = useUser()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [feedbackUnread, setFeedbackUnread] = useState(0)
@@ -231,34 +232,15 @@ export default function Sidebar() {
     return () => media.removeEventListener('change', sync)
   }, [])
 
+  const feedbackEnabled = !pathname.startsWith('/app-updates')
   useEffect(() => {
-    if (pathname.startsWith('/app-updates')) {
+    if (!feedbackEnabled || !userId) {
       setFeedbackUnread(0)
       return
     }
-    let cancelled = false
-    async function loadFeedbackUnread() {
-      try {
-        const response = await fetch('/api/feedback?summary=unread', { cache: 'no-store' })
-        if (!response.ok) return
-        const body = await response.json() as { unreadCount?: number }
-        if (!cancelled) setFeedbackUnread(Math.max(0, Number(body.unreadCount) || 0))
-      } catch {
-        // Keep the last known count when a background refresh fails.
-      }
-    }
-    const refresh = () => { void loadFeedbackUnread() }
-    refresh()
-    const interval = window.setInterval(refresh, 60_000)
-    window.addEventListener('focus', refresh)
-    window.addEventListener('feedback-unread-changed', refresh)
-    return () => {
-      cancelled = true
-      window.clearInterval(interval)
-      window.removeEventListener('focus', refresh)
-      window.removeEventListener('feedback-unread-changed', refresh)
-    }
-  }, [pathname, role])
+    setFeedbackUnread(0)
+    return watchFeedbackUnread(userId, role, setFeedbackUnread)
+  }, [feedbackEnabled, role, userId])
 
   useEffect(() => {
     if (!isMobile || !mobileOpen) return
