@@ -188,7 +188,7 @@ const CONTENT_ITEMS: NavItem[] = [
     contentLeaf('/index-pages'),
   ]),
   contentGroup('group:management', '系统管理', findContentItem('/sites').icon, [
-    contentLeaf('/sites', '网站关联'),
+    contentLeaf('/sites', '网站管理'),
     contentLeaf('/crawl-log'),
     contentLeaf('/development-log'),
       contentLeaf('/system-map'),
