@@ -90,7 +90,10 @@ export async function monthlyTrendResponse(service: any, searchParams: URLSearch
     )
     if (canUseCachedPayload) {
       const cacheState = isClosedMonth || isFresh(cached?.computed_at) ? 'fresh' : 'stale'
-      return NextResponse.json(cachedPayload, { headers: { 'X-Monthly-Trend-Cache': cacheState } })
+      return NextResponse.json(cachedPayload, { headers: {
+        'X-Monthly-Trend-Cache': cacheState,
+        ...(cached?.computed_at ? { 'X-Monthly-Trend-Computed-At': cached.computed_at } : {}),
+      } })
     }
 
     if (monthlyTrendArchiveState(drillMonth, malaysiaToday) === 'expired') {
@@ -99,6 +102,10 @@ export async function monthlyTrendResponse(service: any, searchParams: URLSearch
         code: 'MONTH_NOT_ARCHIVED', month: drillMonth,
       }, { status: 410 })
     }
+
+    if (!isCron) return NextResponse.json({
+      error: '月度趋势快照尚未准备完成，请等待后台更新', code: 'CACHE_NOT_READY', month: drillMonth,
+    }, { status: 503, headers: { 'Retry-After': '300' } })
 
     // 站点PC/M权重——给"查看"弹窗里的域名标注权重用，跟分组任务详情弹窗同一个
     // 展示方式（domain + "PC{x} · M{y}"）。取每个站点最近30天里最新一条
@@ -225,7 +232,7 @@ export async function monthlyTrendResponse(service: any, searchParams: URLSearch
     return !row || (month < currentMonth && !row.is_final) || forceRefresh
   })
 
-  if (monthsToRefresh.length > 0) {
+  if (isCron && monthsToRefresh.length > 0) {
     const refreshStartMonth = monthsToRefresh[0]
     const refreshEndMonth = monthsToRefresh[monthsToRefresh.length - 1]
     const { data: freshRows, error: refreshError } = await service.rpc('monthly_keyword_counts', {
@@ -258,6 +265,11 @@ export async function monthlyTrendResponse(service: any, searchParams: URLSearch
       }
       for (const row of rowsToCache) summaryByMonth.set(row.month, row)
     }
+  }
+
+  if (!isCron && monthsToRefresh.some(month => !summaryByMonth.has(month))) {
+    return NextResponse.json({ error: '月度趋势概览尚未准备完成，请等待后台更新', code: 'CACHE_NOT_READY' },
+      { status: 503, headers: { 'Retry-After': '300' } })
   }
 
   const unavailableMonths = months.filter(month => month < currentMonth && !summaryByMonth.get(month)?.is_final)

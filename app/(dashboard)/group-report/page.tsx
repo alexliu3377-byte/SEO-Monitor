@@ -208,6 +208,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
   const [outcomeTotalRows, setOutcomeTotalRows] = useState(0)
   const [outcomesLoading, setOutcomesLoading] = useState(false)
   const [outcomesTruncated, setOutcomesTruncated] = useState(false)
+  const [outcomesComputedAt, setOutcomesComputedAt] = useState('')
   const [oFilterMember, setOFilterMember] = useState('')
   const [oFilterOp, setOFilterOp] = useState('')
   const [oFilterKw, setOFilterKw] = useState('')
@@ -347,6 +348,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
   function loadOutcomes() {
     if (!activeTabId || reportTab !== 'outcomes') return
     setOutcomesLoading(true)
+    setOutcomesComputedAt('')
     const p = new URLSearchParams()
     if (oFilterMember)        p.set('memberId',      oFilterMember)
     if (oFilterOp)            p.set('opType',        oFilterOp)
@@ -359,13 +361,14 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
     p.set('page',     String(oPage))
     p.set('pageSize', String(oPageSize))
     fetch(`/api/task-groups/${activeTabId}/outcomes?${p}`)
-      .then(r => readResponse<{ rows?: OutcomeRow[]; summary?: OutcomeSummary; groupSummary?: OutcomeSummary; totalRows?: number; truncated?: boolean }>(r, '成效追踪加载失败'))
+      .then(r => readResponse<{ rows?: OutcomeRow[]; summary?: OutcomeSummary; groupSummary?: OutcomeSummary; totalRows?: number; truncated?: boolean; computedAt?: string }>(r, '成效追踪加载失败'))
       .then(d => {
         setOutcomes(d.rows || [])
         setOutcomeSummary(d.summary || null)
         setOutcomeGroupSummary(d.groupSummary || null)
         setOutcomeTotalRows(d.totalRows ?? 0)
         setOutcomesTruncated(!!d.truncated)
+        setOutcomesComputedAt(d.computedAt && Number.isFinite(Date.parse(d.computedAt)) ? d.computedAt : '')
         setLoadError(current => current?.scope === 'outcomes' ? null : current)
       })
       .catch(error => setLoadError({ scope: 'outcomes', message: error instanceof Error ? error.message : '成效追踪加载失败' }))
@@ -615,6 +618,12 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
             ))}
           </div>
 
+          {reportTab === 'outcomes' && !outcomesLoading && outcomesComputedAt && (
+            <p role="status" className="mb-3 text-xs text-slate-500">
+              数据更新于 {new Date(outcomesComputedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Kuala_Lumpur' })}
+              {Date.now() - Date.parse(outcomesComputedAt) > 26 * 60 * 60 * 1000 && ' · 当前为上次成功快照，等待后台更新'}
+            </p>
+          )}
           {/* ── 成效追踪 ── */}
           {reportTab === 'outcomes' && (() => {
             const OCOLS = 'grid-cols-[48px_2fr_60px_80px_70px_88px_1.5fr_60px_76px_56px_70px_70px_70px]'
@@ -980,6 +989,7 @@ export default function GroupReportPage({ groupId, initialTab = 'outcomes' }: {
                     {trackingData.computedAt && (
                       <span title={trackingData.computedAt}>
                         数据更新于 {new Date(trackingData.computedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Kuala_Lumpur' })}
+                        {Date.now() - Date.parse(trackingData.computedAt) > 26 * 60 * 60 * 1000 && ' · 当前为上次成功快照，等待后台更新'}
                       </span>
                     )}
                     {trackingData.canSeeAll && (
