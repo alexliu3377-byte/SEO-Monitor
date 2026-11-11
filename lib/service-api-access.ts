@@ -10,6 +10,8 @@ const SERVICE_AUTH_PATHS = [
   '/api/content-feed/transcripts/claim',
   '/api/content-feed/transcripts/result',
   '/api/tracking-cache/refresh',
+  // 奇心 Agent 推荐词（只读，专用密钥 AGENT_WORD_FEED_SECRET）
+  '/api/agent/word-feed',
 ] as const
 
 export function allowsServiceAuthPath(pathname: string): boolean {
