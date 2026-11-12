@@ -34,6 +34,25 @@ test('推荐词：搜索量上涨、多站新词、多竞品站新增算热词�
   assert.equal(feed.words[0].hot, true, '热词排在前面')
 })
 
+test('游戏 / 应用分类：只采用同时有游戏和应用的站点标的分类；只有一种分类的站点不采用；可信站点标得不一致时为 null', () => {
+  const feed = buildWordFeed(null, [
+    { keyword: '分开站游戏', content_type: 'game', site_id: 'split' },
+    { keyword: '分开站应用', content_type: 'app', site_id: 'split' },
+    { keyword: '混合站的词', content_type: 'game', site_id: 'mixed' },
+    { keyword: '两边都有', content_type: 'game', site_id: 'mixed' },
+    { keyword: '两边都有', content_type: 'app', site_id: 'split' },
+    { keyword: '标得不一致', content_type: 'game', site_id: 'split' },
+    { keyword: '标得不一致', content_type: 'app', site_id: 'split2' },
+    { keyword: '分开站二', content_type: 'game', site_id: 'split2' },
+  ], { date: '2026-11-10', now })
+  const by = Object.fromEntries(feed.words.map(w => [w.keyword, w.contentType]))
+  assert.equal(by['分开站游戏'], 'game')
+  assert.equal(by['分开站应用'], 'app')
+  assert.equal(by['混合站的词'], null, '只有游戏的站点可能是混在一起的，不采用')
+  assert.equal(by['两边都有'], 'app', '只采用可信站点（split）标的应用')
+  assert.equal(by['标得不一致'], null)
+})
+
 test('推荐词接口：没设密钥就关闭；密钥不对 401；默认取马来西亚昨天；日期只能最近 7 天', async () => {
   const dates: string[] = []
   const load = async (date: string): Promise<WordFeed> => { dates.push(date); return { date, generatedAt: '', words: [], counts: { hot: 0, total: 0 } } }

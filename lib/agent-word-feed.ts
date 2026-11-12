@@ -53,17 +53,31 @@ export function buildWordFeed(
   }
 
   // 竞品日收：同一个词按出现的竞品站数合并；2 个以上竞品站同一天新增的算热词。
-  const byKeyword = new Map<string, { keyword: string; sites: Set<string>; type: 'game' | 'app' | null }>()
+  // 游戏 / 应用分类（负责人 2026-11-12）：只有当天同时有游戏和应用的站点才算分了列表，它标的分类可信；
+  // 只有一种分类的站点可能是游戏、应用混在一起，它标的分类不采用。可信站点标得不一致或没有可信站点时为 null，交给 Agent 研究后判断。
+  const kindOf = (t: string | null) => (t === 'game' || t === 'app' ? t : null)
+  const siteKinds = new Map<string, Set<string>>()
+  for (const row of competitor) {
+    const kind = kindOf(row.content_type)
+    if (!kind) continue
+    const set = siteKinds.get(row.site_id) ?? new Set<string>()
+    set.add(kind)
+    siteKinds.set(row.site_id, set)
+  }
+  const splitSites = new Set([...siteKinds].filter(([, kinds]) => kinds.size === 2).map(([site]) => site))
+  const byKeyword = new Map<string, { keyword: string; sites: Set<string>; kinds: Set<'game' | 'app'> }>()
   for (const row of competitor) {
     if (!usable(row.keyword)) continue
     const key = keyOf(row.keyword)
-    const entry = byKeyword.get(key) ?? { keyword: row.keyword.trim(), sites: new Set<string>(), type: row.content_type === 'game' ? 'game' : row.content_type === 'app' ? 'app' : null }
+    const entry = byKeyword.get(key) ?? { keyword: row.keyword.trim(), sites: new Set<string>(), kinds: new Set<'game' | 'app'>() }
     entry.sites.add(row.site_id)
+    const kind = kindOf(row.content_type)
+    if (kind && splitSites.has(row.site_id)) entry.kinds.add(kind)
     byKeyword.set(key, entry)
   }
   const competitorWords = [...byKeyword.values()].sort((a, b) => b.sites.size - a.sites.size || a.keyword.localeCompare(b.keyword, 'zh-CN')).slice(0, WORD_FEED_LIMITS.competitor)
   for (const w of competitorWords) {
-    add({ keyword: w.keyword, source: 'competitor-daily', hot: w.sites.size >= 2, reason: `竞品日收：${date} ${w.sites.size} 个竞品站新增`, contentType: w.type })
+    add({ keyword: w.keyword, source: 'competitor-daily', hot: w.sites.size >= 2, reason: `竞品日收：${date} ${w.sites.size} 个竞品站新增`, contentType: w.kinds.size === 1 ? [...w.kinds][0] : null })
   }
 
   const list = [...words.values()].sort((a, b) => Number(b.hot) - Number(a.hot))
