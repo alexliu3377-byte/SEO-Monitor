@@ -53,6 +53,19 @@ test('游戏 / 应用分类：只采用同时有游戏和应用的站点标的�
   assert.equal(by['标得不一致'], null)
 })
 
+test('竞品词超过 300 个时不按拼音截断；过去 7 天已出现的单站旧词不重复占名额', () => {
+  const date = '2026-11-10'
+  const rows = Array.from({ length: 420 }, (_, i) => ({ keyword: `同站新词${String(i).padStart(3, '0')}`, content_type: 'app', site_id: 's1', content_date: date }))
+  rows.push({ keyword: '旧应用', content_type: 'app', site_id: 's1', content_date: date })
+  rows.push({ keyword: '旧应用', content_type: 'app', site_id: 's1', content_date: '2026-11-07' })
+  const feed = buildWordFeed(null, rows, { date, now })
+  const selected = feed.words.map(w => w.keyword)
+  assert.equal(selected.length, 300)
+  assert.equal(selected.includes('旧应用'), false)
+  assert.ok(selected.some(w => /同站新词3\d\d/.test(w)), '不能只保留按名称排序靠前的 000–299')
+  assert.deepEqual(buildWordFeed(null, rows, { date, now }).words.map(w => w.keyword), selected, '同一天排序必须稳定')
+})
+
 test('推荐词接口：没设密钥就关闭；密钥不对 401；默认取马来西亚昨天；日期只能最近 7 天', async () => {
   const dates: string[] = []
   const load = async (date: string): Promise<WordFeed> => { dates.push(date); return { date, generatedAt: '', words: [], counts: { hot: 0, total: 0 } } }
@@ -77,4 +90,20 @@ test('推荐词接口：没设密钥就关闭；密钥不对 401；默认取马�
 test('推荐词接口在服务访问白名单里（不需要用户登录，但要专用密钥）', () => {
   assert.equal(allowsServiceAuthPath('/api/agent/word-feed'), true)
   assert.equal(allowsServiceAuthPath('/api/agent/other'), false)
+})
+
+test('竞品日收按站轮流取词：一个站新增很多也不会占满名额；带上站点域名和日期', () => {
+  const date = '2026-11-16'
+  const rows = [
+    ...Array.from({ length: 400 }, (_, i) => ({ keyword: `大站词${i}`, content_type: null, site_id: 'big', content_date: date })),
+    ...Array.from({ length: 5 }, (_, i) => ({ keyword: `小站A词${i}`, content_type: null, site_id: 'a', content_date: date })),
+    ...Array.from({ length: 5 }, (_, i) => ({ keyword: `小站B词${i}`, content_type: null, site_id: 'b', content_date: date })),
+  ]
+  const feed = buildWordFeed(null, rows, { date, siteDomains: new Map([['big', 'big.com'], ['a', 'a.com'], ['b', 'b.com']]) })
+  const words = feed.words.filter(w => w.source === 'competitor-daily')
+  assert.equal(words.length, 300)
+  assert.equal(words.filter(w => w.keyword.startsWith('小站A')).length, 5, '小站的词全部取到')
+  assert.equal(words.filter(w => w.keyword.startsWith('小站B')).length, 5)
+  const a = words.find(w => w.keyword === '小站A词0')!
+  assert.deepEqual(a.sites, ['a.com']); assert.equal(a.date, date)
 })

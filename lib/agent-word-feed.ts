@@ -1,5 +1,5 @@
 // 奇心 Agent 推荐词（只读）：把热词雷达和竞品日收里的词整理成一份清单，供各电脑的 Agent 服务器拉取。
-// 只读：不写任何表；只返回词、来源、是否热词和原因，不返回站点明细、链接或用户资料。
+// 只读：不写任何表；只返回词、来源、是否热词、原因，竞品日收另带新增它的竞品站域名和日期；不返回链接或用户资料。
 // 热词判断：搜索量上涨的词；同时出现在 2 个以上站点的新词；昨天在 2 个以上竞品站同时新增的词。其他为普通词。
 import { fetchAllRows } from './supabase-paginate'
 import type { HotRadarPayload } from './hot-radar'
@@ -10,9 +10,12 @@ export interface FeedWord {
   hot: boolean
   reason: string
   contentType?: 'game' | 'app' | null
+  // 竞品日收：这个词是哪些竞品站新增的（域名）和哪一天（负责人 2026-11-17：服务器按站轮流发词）。
+  sites?: string[]
+  date?: string
 }
 export interface WordFeed { date: string; generatedAt: string; words: FeedWord[]; counts: { hot: number; total: number } }
-export interface CompetitorKeywordRow { keyword: string; content_type: string | null; site_id: string }
+export interface CompetitorKeywordRow { keyword: string; content_type: string | null; site_id: string; content_date?: string | null }
 
 export const WORD_FEED_LIMITS = { volumeRising: 40, newWords: 60, rankWords: 30, streakWords: 30, competitor: 300 } as const
 
@@ -21,13 +24,19 @@ export function malaysiaDate(offsetDays = 0, now = Date.now()): string {
 }
 
 const keyOf = (keyword: string) => keyword.replace(/\s+/g, '').toLowerCase()
+// 同站数时用“日期+词”的稳定散列打散，不再按拼音截前 300 个；同一天各客户端看到的顺序仍一致。
+const dailyRank = (date: string, keyword: string): number => {
+  let h = 2166136261
+  for (const ch of `${date}\0${keyOf(keyword)}`) { h ^= ch.codePointAt(0) ?? 0; h = Math.imul(h, 16777619) }
+  return h >>> 0
+}
 const usable = (keyword: unknown): keyword is string =>
   typeof keyword === 'string' && keyword.trim().length > 0 && keyword.trim().length <= 60 && !keyword.includes('电脑版')
 
 export function buildWordFeed(
   payload: Partial<HotRadarPayload> | null,
   competitor: CompetitorKeywordRow[],
-  { date, now = Date.now() }: { date: string; now?: number },
+  { date, now = Date.now(), siteDomains }: { date: string; now?: number; siteDomains?: Map<string, string> },
 ): WordFeed {
   const words = new Map<string, FeedWord>()
   const add = (word: FeedWord) => {
@@ -38,6 +47,8 @@ export function buildWordFeed(
     // 同一个词多个来源：只要有一个来源判为热词就算热词，原因合并。
     if (word.hot && !existing.hot) existing.hot = true
     if (!existing.reason.includes(word.reason)) existing.reason += `；${word.reason}`
+    // 热词雷达里也有的竞品日收词：带上竞品站和日期，服务器照样能按站轮流发。
+    if (word.sites && !existing.sites) { existing.sites = word.sites; existing.date = word.date; if (existing.contentType == null && word.contentType) existing.contentType = word.contentType }
   }
 
   const rising = [...(payload?.volumeRisingWords ?? [])].sort((a, b) => (b.netChange ?? 0) - (a.netChange ?? 0)).slice(0, WORD_FEED_LIMITS.volumeRising)
@@ -56,8 +67,10 @@ export function buildWordFeed(
   // 游戏 / 应用分类（负责人 2026-11-12）：只有当天同时有游戏和应用的站点才算分了列表，它标的分类可信；
   // 只有一种分类的站点可能是游戏、应用混在一起，它标的分类不采用。可信站点标得不一致或没有可信站点时为 null，交给 Agent 研究后判断。
   const kindOf = (t: string | null) => (t === 'game' || t === 'app' ? t : null)
+  const current = competitor.filter(row => !row.content_date || row.content_date === date)
+  const seenBefore = new Set(competitor.filter(row => row.content_date && row.content_date < date).map(row => keyOf(row.keyword)))
   const siteKinds = new Map<string, Set<string>>()
-  for (const row of competitor) {
+  for (const row of current) {
     const kind = kindOf(row.content_type)
     if (!kind) continue
     const set = siteKinds.get(row.site_id) ?? new Set<string>()
@@ -66,7 +79,7 @@ export function buildWordFeed(
   }
   const splitSites = new Set([...siteKinds].filter(([, kinds]) => kinds.size === 2).map(([site]) => site))
   const byKeyword = new Map<string, { keyword: string; sites: Set<string>; kinds: Set<'game' | 'app'> }>()
-  for (const row of competitor) {
+  for (const row of current) {
     if (!usable(row.keyword)) continue
     const key = keyOf(row.keyword)
     const entry = byKeyword.get(key) ?? { keyword: row.keyword.trim(), sites: new Set<string>(), kinds: new Set<'game' | 'app'>() }
@@ -75,9 +88,30 @@ export function buildWordFeed(
     if (kind && splitSites.has(row.site_id)) entry.kinds.add(kind)
     byKeyword.set(key, entry)
   }
-  const competitorWords = [...byKeyword.values()].sort((a, b) => b.sites.size - a.sites.size || a.keyword.localeCompare(b.keyword, 'zh-CN')).slice(0, WORD_FEED_LIMITS.competitor)
+  // 过去 7 天已出现过的单站词不再反复占名额；多站同时新增仍保留为热词。
+  const ranked = [...byKeyword.values()]
+    .filter(w => w.sites.size >= 2 || !seenBefore.has(keyOf(w.keyword)))
+    .sort((a, b) => b.sites.size - a.sites.size || Number(seenBefore.has(keyOf(a.keyword))) - Number(seenBefore.has(keyOf(b.keyword))) || dailyRank(date, a.keyword) - dailyRank(date, b.keyword))
+  // 每个竞品站轮流取词（负责人 2026-11-17：要每个不同站点去拿词，不要集中拿一个站点）。
+  // 各站按上面的顺序排好，第 1 轮每站取 1 个，第 2 轮再每站取 1 个……取满上限为止；多站同时新增的词只算一次。
+  const bySite = new Map<string, typeof ranked>()
+  for (const w of ranked) for (const s of w.sites) { const list = bySite.get(s) ?? []; list.push(w); bySite.set(s, list) }
+  const siteOrder = [...bySite.keys()].sort((a, b) => dailyRank(date, a) - dailyRank(date, b))
+  const picked = new Set<string>(), competitorWords: typeof ranked = []
+  for (let round = 0; competitorWords.length < WORD_FEED_LIMITS.competitor && siteOrder.some(s => (bySite.get(s)?.length ?? 0) > round); round++) {
+    for (const s of siteOrder) {
+      if (competitorWords.length >= WORD_FEED_LIMITS.competitor) break
+      const list = bySite.get(s)!
+      // 这一站这一轮：取下一个还没被选的词。
+      while (list.length > round && picked.has(keyOf(list[round].keyword))) list.splice(round, 1)
+      const w = list[round]
+      if (!w) continue
+      picked.add(keyOf(w.keyword)); competitorWords.push(w)
+    }
+  }
+  const domainOf = (id: string) => siteDomains?.get(id) ?? id
   for (const w of competitorWords) {
-    add({ keyword: w.keyword, source: 'competitor-daily', hot: w.sites.size >= 2, reason: `竞品日收：${date} ${w.sites.size} 个竞品站新增`, contentType: w.kinds.size === 1 ? [...w.kinds][0] : null })
+    add({ keyword: w.keyword, source: 'competitor-daily', hot: w.sites.size >= 2, reason: `竞品日收：${date} ${w.sites.size} 个竞品站新增`, contentType: w.kinds.size === 1 ? [...w.kinds][0] : null, sites: [...w.sites].map(domainOf), date })
   }
 
   const list = [...words.values()].sort((a, b) => Number(b.hot) - Number(a.hot))
@@ -96,12 +130,14 @@ export async function loadWordFeed(db: any, date: string, now = Date.now()): Pro
     db.from('sites').select('id, domain').eq('is_enabled', true).order('id').range(from, to))
   const competitorIds = sites.filter(s => !ownDomains.has(String(s.domain).trim().toLowerCase())).map(s => s.id)
   const rows: CompetitorKeywordRow[] = []
+  const oldest = malaysiaDate(-7, Date.parse(`${date}T04:00:00.000Z`))
   for (let i = 0; i < competitorIds.length; i += 100) {
     rows.push(...await fetchAllRows<CompetitorKeywordRow>((from, to) => db.from('raw_keywords')
-      .select('keyword, content_type, site_id').in('site_id', competitorIds.slice(i, i + 100)).eq('content_date', date)
-      .not('keyword', 'like', '%电脑版%').order('keyword').order('site_id').order('id').range(from, to)))
+      .select('keyword, content_type, site_id, content_date').in('site_id', competitorIds.slice(i, i + 100)).gte('content_date', oldest).lte('content_date', date)
+      .not('keyword', 'like', '%电脑版%').order('content_date', { ascending: false }).order('id').range(from, to)))
   }
-  return buildWordFeed(cache?.payload ?? null, rows, { date, now })
+  const siteDomains = new Map(sites.map(s => [s.id, String(s.domain).trim().toLowerCase()]))
+  return buildWordFeed(cache?.payload ?? null, rows, { date, now, siteDomains })
 }
 
 // 接口处理（便于测试）：只认专用密钥 AGENT_WORD_FEED_SECRET；没设置时接口关闭。
