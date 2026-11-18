@@ -12,6 +12,8 @@ const SERVICE_AUTH_PATHS = [
   '/api/tracking-cache/refresh',
   // 奇心 Agent 推荐词（只读，专用密钥 AGENT_WORD_FEED_SECRET）
   '/api/agent/word-feed',
+  // 奇心 Agent 词库补充取词（只读，专用密钥 KEYWORD_LIBRARY_FEED_KEY，也认 AGENT_WORD_FEED_SECRET）
+  '/api/agent/keyword-library',
 ] as const
 
 export function allowsServiceAuthPath(pathname: string): boolean {
