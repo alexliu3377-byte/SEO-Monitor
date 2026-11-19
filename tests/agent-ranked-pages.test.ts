@@ -9,7 +9,6 @@ type Call = { table: string; filters: [string, unknown][]; range: [number, numbe
 type Data = {
   words?: Record<string, unknown>[]
   sites?: { id: string; domain: string }[]
-  own?: { site_domains: string[] | null }[]
   ranks?: Record<string, unknown>[]
   failRanks?: boolean
 }
@@ -24,11 +23,12 @@ function database(data: Data) {
           const result = () => {
             if (table === 'keyword_volume') return { data: data.words ?? [], count: (data.words ?? []).length, error: null }
             if (table === 'sites') return { data: data.sites ?? [], error: null }
-            if (table === 'task_groups') return { data: data.own ?? [], error: null }
             if (table === 'site_keyword_ranks') {
               if (data.failRanks) return { data: null, error: { message: 'x' } }
               const site = call.filters.find(f => f[0] === 'eq:site_id')?.[1]
-              const kws = (call.filters.find(f => f[0] === 'in:keyword')?.[1] ?? []) as string[]
+              const kwFilter = call.filters.find(f => f[0] === 'in:keyword')
+              if (!kwFilter) return { data: (data.ranks ?? []).filter(r => r.site_id === site).slice(0, 1), error: null }   // 这个站有没有数据
+              const kws = kwFilter[1] as string[]
               return { data: (data.ranks ?? []).filter(r => r.site_id === site && kws.includes(r.keyword as string)), error: null }
             }
             return { data: [], error: null }
@@ -80,11 +80,10 @@ test('ranked pages: 查询参数有范围：搜索量上限默认 1000、至少 
   assert.deepEqual(big, { offset: 0, limit: 200, maxVolume: 1, minPages: 5, days: 40 })
 })
 
-test('ranked pages: 带页面的词按搜索量顺序返回，页面不够 minPages 的不返回，自己的站点不算', async () => {
-  const { GET } = handler({
+test('ranked pages: 带页面的词按搜索量顺序返回，页面不够 minPages 的不返回；自己的站点也算；排名表里没数据的站不查', async () => {
+  const { GET, calls } = handler({
     words: [word('塔防传奇', '游戏', 900), word('云盘', '应用', 500), word('孤页游戏', '游戏', 300)],
-    sites: [{ id: 's1', domain: 'a-down.com' }, { id: 's2', domain: 'b-down.com' }, { id: 'own', domain: 'mine.com' }],
-    own: [{ site_domains: ['www.mine.com'] }, { site_domains: null }],
+    sites: [{ id: 's1', domain: 'a-down.com' }, { id: 's2', domain: 'b-down.com' }, { id: 'own', domain: 'mine.com' }, { id: 'empty', domain: 'nodata.com' }],
     ranks: [
       rank('塔防传奇', 's1', 'https://m.a-down.com/game/1.html', '塔防传奇下载'),
       rank('塔防传奇', 's2', 'https://www.b-down.com/g/9', '塔防传奇安卓版', 3),
@@ -97,7 +96,11 @@ test('ranked pages: 带页面的词按搜索量顺序返回，页面不够 minPa
   assert.deepEqual(body.words.map((w: { keyword: string }) => w.keyword), ['塔防传奇'])   // 云盘、孤页游戏只有 1 个页面
   const w = body.words[0]
   assert.equal(w.contentType, 'game'); assert.equal(w.volume, 900)
-  assert.deepEqual(w.pages.map((p: { site: string }) => p.site).sort(), ['a-down.com', 'b-down.com'])   // 自己的站点 mine.com 不在
+  assert.deepEqual(w.pages.map((p: { site: string }) => p.site).sort(), ['a-down.com', 'b-down.com', 'mine.com'])   // 自己的站点 mine.com 也在
+  const rankCalls = calls.filter(c => c.table === 'site_keyword_ranks' && c.filters.some(f => f[0] === 'in:keyword'))
+  assert.equal(rankCalls.some(c => c.filters.some(f => f[0] === 'eq:site_id' && f[1] === 'empty')), false)   // 没有数据的站不查词
+  await GET(request())   // 第二次请求：站点列表用缓存，不再逐站查有没有数据
+  assert.equal(calls.filter(c => c.table === 'sites').length, 1)
   assert.equal(body.scanned, 3); assert.equal(body.nextOffset, 3); assert.equal(body.end, true)
   const one = await (await GET(request('?minPages=1'))).json()
   assert.deepEqual(one.words.map((x: { keyword: string }) => x.keyword), ['塔防传奇', '云盘', '孤页游戏'])

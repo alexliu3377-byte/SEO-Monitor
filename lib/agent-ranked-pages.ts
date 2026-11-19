@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'node:crypto'
 
 // 排名词取词接口（2026-11-19）：奇心 Agent 服务器取「竞品下载站在百度有排名的词」，每个词带着那几个站的页面链接。
-// 这些站（网站管理里开了「排名」抓取的）都是下载站，页面链接直接给 Agent 当转写资料，不用再去百度搜。
+// 这些站（排名表里有数据的站：网站管理里开了「排名」抓取的，或用「补录爱站排名 Excel」补进来的）都是下载站，页面链接直接给 Agent 当转写资料，不用再去百度搜。
+// 自己的站点也算（只是取资料给 AI 转写，负责人 2026-11-19）。
 // 只读；按搜索量从高到低扫「已确认分类」的游戏和应用词，只给搜索量在 maxVolume 以下、至少有 minPages 个不同页面的词；
 // 专用密钥认证（和词库补充同一套密钥），不使用登录会话。
 const headers = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }
@@ -37,6 +38,7 @@ export type RankedPagesService = {
 const MAX_OFFSET = 200_000
 const KEYWORD_BATCH = 50 // 每次 .in() 查多少个词（请求地址太长会被拒）
 const ROW_LIMIT = 1000
+const SITE_CACHE_MS = 30 * 60_000
 
 function safeEqual(actual: string, expected: string): boolean {
   const a = Buffer.from(actual)
@@ -119,6 +121,23 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 // getKeys：允许的密钥（和词库补充一样：专用密钥，或已有的推荐词密钥），任何一个对得上就行；没有一个配置好（至少 24 位）接口就关闭。
 export function createRankedPagesHandler(deps: { getService: () => RankedPagesService; getKeys: () => (string | undefined)[]; now?: () => number }) {
+  let siteCache: { at: number; since: string; sites: Map<string, string> } | null = null
+  async function rankSites(service: RankedPagesService, since: string, nowMs: number): Promise<Map<string, string> | null> {
+    if (siteCache && siteCache.since === since && nowMs - siteCache.at < SITE_CACHE_MS) return siteCache.sites
+    const all = await service.from('sites').select('id, domain')
+    if (all.error) return null
+    const sites = ((all.data ?? []) as { id: string; domain: string }[]).filter(site => site?.id && site.domain)
+    const has = await mapLimit(sites, 8, async site => {
+      const r = await service.from('site_keyword_ranks').select('id')
+        .eq('site_id', site.id).eq('platform', 'mobile').not('url', 'is', null).gte('stat_date', since).limit(1)
+      return r.error ? null : ((r.data ?? []).length > 0)
+    })
+    if (has.some(value => value === null)) return null
+    const map = new Map<string, string>()
+    sites.forEach((site, index) => { if (has[index]) map.set(site.id, normalizeDomain(site.domain)) })
+    siteCache = { at: nowMs, since, sites: map }
+    return map
+  }
   return async function GET(request: Request) {
     const expected = deps.getKeys().map(key => (key ?? '').trim()).filter(key => key.length >= 24)
     if (expected.length === 0) return Response.json({ error: '排名词取词密钥尚未配置' }, { status: 503, headers })
@@ -157,20 +176,12 @@ export function createRankedPagesHandler(deps: { getService: () => RankedPagesSe
 
       let words: RankedWord[] = []
       if (keywords.length) {
-        // 2) 开了「排名」抓取的站点，去掉自己的站点（任务分组里填的）——自己站的页面不能当资料。
-        const [siteResult, ownResult] = await Promise.all([
-          service.from('sites').select('id, domain').eq('has_rank_title', true),
-          service.from('task_groups').select('site_domains'),
-        ])
-        if (siteResult.error || ownResult.error) return Response.json({ error: '排名词读取失败，请稍后重试' }, { status: 503, headers })
-        const own = new Set<string>()
-        for (const group of (ownResult.data ?? []) as { site_domains: string[] | null }[]) for (const d of group.site_domains ?? []) own.add(normalizeDomain(d))
-        const siteDomains = new Map<string, string>()
-        for (const site of (siteResult.data ?? []) as { id: string; domain: string }[]) {
-          if (site?.id && site.domain && !own.has(normalizeDomain(site.domain))) siteDomains.set(site.id, normalizeDomain(site.domain))
-        }
+        // 2) 排名表里最近 days 天有手机版页面链接的站点（不看有没有开「排名」抓取：用爱站 Excel 补录的站也算），半小时缓存一次。
+        const nowMs = deps.now?.() ?? Date.now()
+        const since = new Date(nowMs - query.days * 86_400_000).toISOString().slice(0, 10)
+        const siteDomains = await rankSites(service, since, nowMs)
+        if (!siteDomains) return Response.json({ error: '排名词读取失败，请稍后重试' }, { status: 503, headers })
         // 3) 每个站点、每 50 个词查一次排名表（用「站点+词」的索引），只要手机版、有页面链接、最近 days 天的。
-        const since = new Date((deps.now?.() ?? Date.now()) - query.days * 86_400_000).toISOString().slice(0, 10)
         const batches: string[][] = []
         for (let i = 0; i < keywords.length; i += KEYWORD_BATCH) batches.push(keywords.slice(i, i + KEYWORD_BATCH))
         const jobs = [...siteDomains.keys()].flatMap(siteId => batches.map(batch => ({ siteId, batch })))
