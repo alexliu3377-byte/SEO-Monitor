@@ -62,7 +62,7 @@ export function parseRankedPagesQuery(url: URL) {
 }
 
 // 页面地址整理：只收 http(s)；去掉 www./m./wap. 前缀和末尾斜杠后算同一页。
-const MOBILE_HOST = /^(?:m|3g|h5|mobile)./i
+const MOBILE_HOST = /^(?:m|3g|h5|mobile)\./i
 export function pageKey(rawUrl: string): { key: string; host: string; href: string } | null {
   let u: URL
   try { u = new URL(rawUrl) } catch { return null }
@@ -84,7 +84,7 @@ export function pickPages(keyword: string, rows: RankRow[], siteDomains: Map<str
     const page = pageKey(row.url)
     if (!page) continue
     // wap. 开头的是站点新开的子域名页面，不是下载页（负责人 2026-11-19）：不要。
-    if (/^wap./i.test(new URL(page.href).hostname)) continue
+    if (/^wap\./i.test(new URL(page.href).hostname)) continue
     const rank = Number.isInteger(row.rank_position) && (row.rank_position as number) > 0 ? (row.rank_position as number) : null
     const date = typeof row.stat_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.stat_date) ? row.stat_date : null
     const title = String(row.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)

@@ -153,6 +153,18 @@ test('ranked pages: wap. 开头的页面不是下载页，不要', () => {
   assert.deepEqual(pages.map(p => p.url), ['https://m.a-down.com/g/2.html'])
 })
 
+test('ranked pages: 只有真的 wap. / m. 开头才算（点要转义：wapower.com、mp3.com 是正常站点）', () => {
+  const sites = new Map([['s1', 'a-down.com']])
+  const pages = pickPages('塔防传奇', [
+    rank('塔防传奇', 's1', 'https://wapower.com/g/1.html', '塔防传奇下载', 3),
+    rank('塔防传奇', 's1', 'https://mp3.com/g/2.html', '塔防传奇安卓版', 5),
+    rank('塔防传奇', 's1', 'https://m.mp3.com/g/2.html', '塔防传奇安卓版', 4),
+  ], sites)
+  assert.equal(pages.length, 2)
+  assert.ok(pages.some(p => p.url === 'https://wapower.com/g/1.html'))
+  assert.equal(pages.find(p => p.url.includes('/g/2'))?.url, 'https://mp3.com/g/2.html')   // 同一页有 m. 和电脑版：留电脑版
+})
+
 test('ranked pages: 同一页有手机版和电脑版地址时留电脑版的', () => {
   const sites = new Map([['s1', 'a-down.com']])
   const pages = pickPages('塔防传奇', [
