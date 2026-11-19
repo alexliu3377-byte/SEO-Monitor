@@ -144,6 +144,15 @@ test('ranked pages: 页面整理——www./m./wap. 和末尾斜杠算同一页�
   assert.equal(pages.find(p => p.url.includes('/g/1'))?.rank, 1)
 })
 
+test('ranked pages: wap. 开头的页面不是下载页，不要', () => {
+  const sites = new Map([['s1', 'a-down.com']])
+  const pages = pickPages('塔防传奇', [
+    rank('塔防传奇', 's1', 'https://wap.a-down.com/g/1.html', '塔防传奇下载', 3),
+    rank('塔防传奇', 's1', 'https://m.a-down.com/g/2.html', '塔防传奇安卓版', 5),
+  ], sites)
+  assert.deepEqual(pages.map(p => p.url), ['https://m.a-down.com/g/2.html'])
+})
+
 test('ranked pages: 同一页有手机版和电脑版地址时留电脑版的', () => {
   const sites = new Map([['s1', 'a-down.com']])
   const pages = pickPages('塔防传奇', [
