@@ -62,6 +62,7 @@ export function parseRankedPagesQuery(url: URL) {
 }
 
 // 页面地址整理：只收 http(s)；去掉 www./m./wap. 前缀和末尾斜杠后算同一页。
+const MOBILE_HOST = /^(?:m|wap|3g|h5|mobile)./i
 export function pageKey(rawUrl: string): { key: string; host: string; href: string } | null {
   let u: URL
   try { u = new URL(rawUrl) } catch { return null }
@@ -86,6 +87,8 @@ export function pickPages(keyword: string, rows: RankRow[], siteDomains: Map<str
     const date = typeof row.stat_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.stat_date) ? row.stat_date : null
     const title = String(row.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
     const old = merged.get(page.key)
+    // 同一页有手机版和电脑版地址时留电脑版的（电脑版页面更完整，也少被拦：负责人 2026-11-19）。
+    if (old && MOBILE_HOST.test(new URL(old.url).hostname) && !MOBILE_HOST.test(new URL(page.href).hostname)) old.url = page.href
     if (!old) { merged.set(page.key, { url: page.href, title, site: siteDomains.get(row.site_id) ?? page.host, rank, date, siteId: row.site_id }); continue }
     if (rank !== null && (old.rank === null || rank < old.rank)) old.rank = rank
     if (date && (!old.date || date > old.date)) { old.date = date; if (title) old.title = title; old.url = page.href }
@@ -129,7 +132,7 @@ export function createRankedPagesHandler(deps: { getService: () => RankedPagesSe
     const sites = ((all.data ?? []) as { id: string; domain: string }[]).filter(site => site?.id && site.domain)
     const has = await mapLimit(sites, 8, async site => {
       const r = await service.from('site_keyword_ranks').select('id')
-        .eq('site_id', site.id).eq('platform', 'mobile').not('url', 'is', null).gte('stat_date', since).limit(1)
+        .eq('site_id', site.id).not('url', 'is', null).gte('stat_date', since).limit(1)
       return r.error ? null : ((r.data ?? []).length > 0)
     })
     if (has.some(value => value === null)) return null
@@ -181,14 +184,14 @@ export function createRankedPagesHandler(deps: { getService: () => RankedPagesSe
         const since = new Date(nowMs - query.days * 86_400_000).toISOString().slice(0, 10)
         const siteDomains = await rankSites(service, since, nowMs)
         if (!siteDomains) return Response.json({ error: '排名词读取失败，请稍后重试' }, { status: 503, headers })
-        // 3) 每个站点、每 50 个词查一次排名表（用「站点+词」的索引），只要手机版、有页面链接、最近 days 天的。
+        // 3) 每个站点、每 50 个词查一次排名表（用「站点+词」的索引），手机版、电脑版都要，有页面链接、最近 days 天的。
         const batches: string[][] = []
         for (let i = 0; i < keywords.length; i += KEYWORD_BATCH) batches.push(keywords.slice(i, i + KEYWORD_BATCH))
         const jobs = [...siteDomains.keys()].flatMap(siteId => batches.map(batch => ({ siteId, batch })))
         const results = await mapLimit(jobs, 8, async ({ siteId, batch }) => {
           const r = await service.from('site_keyword_ranks')
             .select('keyword, url, title, rank_position, stat_date, site_id')
-            .eq('site_id', siteId).eq('platform', 'mobile')
+            .eq('site_id', siteId)
             .not('url', 'is', null)
             .gte('stat_date', since)
             .in('keyword', batch)

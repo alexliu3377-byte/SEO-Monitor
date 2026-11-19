@@ -106,7 +106,7 @@ test('ranked pages: 带页面的词按搜索量顺序返回，页面不够 minPa
   assert.deepEqual(one.words.map((x: { keyword: string }) => x.keyword), ['塔防传奇', '云盘', '孤页游戏'])
 })
 
-test('ranked pages: 只查「已确认分类的游戏和应用词、搜索量 1 到上限」；排名表只看手机版、有链接、最近 N 天', async () => {
+test('ranked pages: 只查「已确认分类的游戏和应用词、搜索量 1 到上限」；排名表只看有链接、最近 N 天的（手机版电脑版都要）', async () => {
   const { GET, calls } = handler({ words: [word('塔防传奇')], sites: [{ id: 's1', domain: 'a-down.com' }], ranks: [] })
   await GET(request('?maxVolume=500&days=10&offset=200&limit=50'))
   const lib = calls.find(c => c.table === 'keyword_volume')!
@@ -114,7 +114,7 @@ test('ranked pages: 只查「已确认分类的游戏和应用词、搜索量 1 
   assert.deepEqual(lib.range, [200, 249])
   const rk = calls.find(c => c.table === 'site_keyword_ranks')!
   assert.ok(rk.filters.some(f => f[0] === 'eq:site_id' && f[1] === 's1'))
-  assert.ok(rk.filters.some(f => f[0] === 'eq:platform' && f[1] === 'mobile'))
+  assert.equal(rk.filters.some(f => f[0] === 'eq:platform'), false)   // 手机版和电脑版的排名都要
   assert.ok(rk.filters.some(f => f[0] === 'not:url:is'))
   assert.ok(rk.filters.some(f => f[0] === 'gte:stat_date' && f[1] === '2026-11-09'))
 })
@@ -142,6 +142,17 @@ test('ranked pages: 页面整理——www./m./wap. 和末尾斜杠算同一页�
   assert.equal(pages[1].site, 'b-down.com')        // 第二个站排第二（每个站先出一个）
   assert.equal(pages.filter(p => p.url.includes('/g/1')).length, 1)
   assert.equal(pages.find(p => p.url.includes('/g/1'))?.rank, 1)
+})
+
+test('ranked pages: 同一页有手机版和电脑版地址时留电脑版的', () => {
+  const sites = new Map([['s1', 'a-down.com']])
+  const pages = pickPages('塔防传奇', [
+    rank('塔防传奇', 's1', 'https://m.a-down.com/g/1.html', '塔防传奇下载', 3),
+    rank('塔防传奇', 's1', 'https://www.a-down.com/g/1.html', '塔防传奇下载', 5),
+  ], sites)
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0].url, 'https://www.a-down.com/g/1.html')
+  assert.equal(pages[0].rank, 3)   // 名次取最好的
 })
 
 test('ranked pages: 同一个站、标题一样的页面只留一个（名次最好的）', () => {
