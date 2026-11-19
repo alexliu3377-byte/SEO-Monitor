@@ -141,6 +141,17 @@ test('ranked pages: 页面整理——www./m./wap. 和末尾斜杠算同一页�
   assert.equal(pages.find(p => p.url.includes('/g/1'))?.rank, 1)
 })
 
+test('ranked pages: 同一个站、标题一样的页面只留一个（名次最好的）', () => {
+  const sites = new Map([['s1', 'a-down.com']])
+  const pages = pickPages('塔防传奇', [
+    rank('塔防传奇', 's1', 'https://a-down.com/az/1.html', '塔防传奇下载', 11),
+    rank('塔防传奇', 's1', 'https://a-down.com/an/1.html', '塔防传奇下载', 4),
+    rank('塔防传奇', 's1', 'https://a-down.com/an/2.html', '塔防传奇安卓版', 8),
+  ], sites)
+  assert.equal(pages.length, 2)
+  assert.equal(pages.find(p => p.title === '塔防传奇下载')?.rank, 4)
+})
+
 test('ranked pages: 在服务接口白名单里（用专用密钥，不走登录）', () => {
   assert.equal(allowsServiceAuthPath('/api/agent/ranked-pages'), true)
   assert.equal(allowsServiceAuthPath('/api/agent/other'), false)

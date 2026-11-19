@@ -88,8 +88,15 @@ export function pickPages(keyword: string, rows: RankRow[], siteDomains: Map<str
     if (rank !== null && (old.rank === null || rank < old.rank)) old.rank = rank
     if (date && (!old.date || date > old.date)) { old.date = date; if (title) old.title = title; old.url = page.href }
   }
+  // 同一个站、标题一样的页面当作同一页（站内常有多个地址指向同一个游戏页，例如不同的分类路径）。
+  const byTitle = new Map<string, RankedPage & { siteId: string }>()
+  for (const p of merged.values()) {
+    const key = p.title ? `${p.siteId}|${normalizeText(p.title)}` : `${p.siteId}|${p.url}`
+    const old = byTitle.get(key)
+    if (!old || (p.rank ?? 999) < (old.rank ?? 999)) byTitle.set(key, p)
+  }
   const kw = normalizeText(keyword)
-  const sorted = [...merged.values()].sort((a, b) =>
+  const sorted = [...byTitle.values()].sort((a, b) =>
     Number(normalizeText(b.title).includes(kw)) - Number(normalizeText(a.title).includes(kw)) ||
     (a.rank ?? 999) - (b.rank ?? 999) ||
     String(b.date ?? '').localeCompare(String(a.date ?? '')) ||
