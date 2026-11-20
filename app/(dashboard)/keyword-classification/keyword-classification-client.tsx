@@ -10,6 +10,7 @@ import {
   type KeywordClassificationStatus,
   type KeywordPrimaryCategory,
 } from '@/lib/keyword-classification'
+import { buildExportCsv, type ExportRow } from '@/lib/keyword-rank-pages-csv'
 
 type LayoutStatus = 'unassigned' | 'assigned' | 'issue'
 
@@ -80,7 +81,62 @@ function siteStyle(domain: string) {
   return SITE_STYLES[hash % SITE_STYLES.length]
 }
 
-export function KeywordClassificationClient({ canDelete }: { canDelete: boolean }) {
+// 导出词和链接（2026-11-20）：按页读提前算好的「词 → 竞品下载站页面」表，在浏览器里拼成 CSV 下载。
+function WordLinksExport() {
+  const [maxVolume, setMaxVolume] = useState('1000')
+  const [progress, setProgress] = useState('')
+  const [note, setNote] = useState('')
+  const [failure, setFailure] = useState('')
+
+  async function run() {
+    const limit = Number.parseInt(maxVolume, 10)
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100000) { setFailure('搜索量上限要填 1～100000'); return }
+    setFailure(''); setNote(''); setProgress('正在读取…')
+    try {
+      const rows: ExportRow[] = []
+      let offset = 0, total = 0, refreshedAt: string | null = null
+      for (let guard = 0; guard < 1000; guard++) {
+        const response = await fetch(`/api/keyword-rank-pages?offset=${offset}&maxVolume=${limit}`, { cache: 'no-store' })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || '导出失败')
+        rows.push(...data.rows)
+        total = data.total
+        if (data.refreshedAt && (!refreshedAt || data.refreshedAt > refreshedAt)) refreshedAt = data.refreshedAt
+        setProgress(`已读取 ${formatNumber(rows.length)} / ${formatNumber(total)} 个词…`)
+        if (data.end) break
+        offset = data.nextOffset
+      }
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(new Blob([buildExportCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+      link.download = `词和链接-搜索量${limit}以下-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000)
+      const withLinks = rows.filter(row => row.pageCount > 0).length
+      setNote(`已导出 ${formatNumber(rows.length)} 个词，其中有链接的 ${formatNumber(withLinks)} 个${refreshedAt ? `；资料更新于 ${new Date(refreshedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Kuala_Lumpur' })}` : ''}`)
+    } catch (reason) {
+      setFailure(reason instanceof Error ? reason.message : '导出失败')
+    } finally {
+      setProgress('')
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          搜索量上限
+          <input type="number" min={1} max={100000} value={maxVolume} onChange={event => setMaxVolume(event.target.value)} disabled={Boolean(progress)} className="min-h-11 w-24 rounded-lg border border-slate-200 px-2 text-sm tabular-nums focus:border-emerald-500 focus:outline-none" />
+        </label>
+        <button type="button" onClick={run} disabled={Boolean(progress)} className="btn-secondary min-h-11 px-4 disabled:opacity-40">{progress ? '导出中…' : '导出词和链接'}</button>
+      </div>
+      <p aria-live="polite" className={`max-w-md text-right text-xs ${failure ? 'text-red-600' : 'text-slate-500'}`}>
+        {failure || progress || note || '已确认的游戏/应用词，每个词最多 5 个竞品下载站链接和标题（最近 30 天排名，每天排名抓取后更新）；不含搜索量'}
+      </p>
+    </div>
+  )
+}
+
+export function KeywordClassificationClient({ canDelete, canExport = false }: { canDelete: boolean; canExport?: boolean }) {
   const [items, setItems] = useState<Row[]>([])
   const [summary, setSummary] = useState<SummaryRow[]>([])
   const [siteGroups, setSiteGroups] = useState<SiteGroup[]>([])
@@ -436,9 +492,12 @@ export function KeywordClassificationClient({ canDelete }: { canDelete: boolean 
 
   return (
     <div className="p-6">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-slate-950">词库补充</h1>
-        <p className="mt-1 text-sm text-slate-500">查看各站点的词库补充情况，或切换到单个站点后直接完成该站补充。</p>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-950">词库补充</h1>
+          <p className="mt-1 text-sm text-slate-500">查看各站点的词库补充情况，或切换到单个站点后直接完成该站补充。</p>
+        </div>
+        {canExport && <WordLinksExport />}
       </div>
 
       {error && <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

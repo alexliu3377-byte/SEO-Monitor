@@ -146,6 +146,7 @@ export const CRAWL_RULES: RuleSection[] = [
       { label: '写入表', text: 'site_keyword_ranks 含 prev_rank/title/url，按 site_id+keyword+stat_date+platform+type 唯一。每个平台/涨跌组合在非空结果校验后原子替换，失败或空结果保留旧资料。keyword_volume 合并移动端涨入/跌出，rankup 优先，写入前计算搜索量变化。' },
       { label: '趋势更新分批', text: '未取得搜索量的趋势标记更新使用与rank相同的300词/约16KB双重限制，长词自动缩小批次；只更新latest_trend，不改已有搜索量及累计基准。' },
       { label: '数据保留', text: 'site_keyword_ranks 排名明细保留40天，历史报告与成效追踪继续保留。' },
+      { label: '词和链接表', text: '2026-11-20 新增：rank-title 全部分片 finalize 成功后，daily-crawl.yml 的 keyword_rank_pages job（调用 keyword-rank-pages.yml，脚本 scripts/refresh-keyword-rank-pages.ts）重算 keyword_rank_pages：每个已确认分类的游戏/应用词（keyword_volume），取最近30天 site_keyword_ranks 里有 url 的行，按 lib/agent-ranked-pages.ts 的 pickPages 同样规则（同页去重留电脑版、wap. 不要、同站同标题只留一个、每站先出一个）留最多5个页面和标题。数据库函数 refresh_keyword_rank_pages 按词名每批2000个分批计算，全部批次成功后 finish_keyword_rank_pages 才删除这一轮没再出现的词；中途失败保留上一轮结果。补录爱站 Excel 后的 rank-import-effectiveness.yml 也会跑一次。读这张表的是奇心 Agent 排名词接口 /api/agent/ranked-pages（表空或读失败时现算）和词库补充页「导出词和链接」。' },
       { label: '限流风险', text: '爱站返回空时标记为"无数据（疑似限流或无词）"，不写入；站点间 60s 间隔降低限流概率' },
     ],
   },

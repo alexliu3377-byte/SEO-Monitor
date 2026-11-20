@@ -39,3 +39,8 @@ jobs:
     needs: tracking
     uses: ./.github/workflows/group-tracking-cache.yml
     secrets: inherit
+
+  # 补录进来的排名也要进「词 → 竞品下载站页面」表（2026-11-20）。
+  keyword-rank-pages:
+    uses: ./.github/workflows/keyword-rank-pages.yml
+    secrets: inherit

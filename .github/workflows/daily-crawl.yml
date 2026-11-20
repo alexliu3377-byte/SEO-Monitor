@@ -361,6 +361,13 @@ jobs:
     with:
       date: ${{ needs.setup.outputs.date }}
     secrets: inherit
+
+  # 排名抓取（rank-title）写完 site_keyword_ranks 后，重算「词 → 竞品下载站页面」表（2026-11-20）。
+  keyword_rank_pages:
+    needs: [setup, finalize]
+    if: ${{ always() && needs.finalize.result == 'success' && needs.setup.outputs.step == 'rank-title' }}
+    uses: ./.github/workflows/keyword-rank-pages.yml
+    secrets: inherit
   crawl:
     needs: setup
     runs-on: ubuntu-latest

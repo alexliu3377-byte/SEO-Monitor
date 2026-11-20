@@ -1,0 +1,32 @@
+name: Keyword Rank Pages Refresh
+
+# 重算「词 → 竞品下载站页面」表 keyword_rank_pages（2026-11-20）。
+# 每天排名抓取（daily-crawl.yml 的 rank-title 步骤）结束后、补录爱站 Excel 后（rank-import-effectiveness.yml）调用；也可以手动跑。
+# 只写 keyword_rank_pages 这一张表，不改排名表和搜索量词库。
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keyword-rank-pages-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Refresh keyword rank pages
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/refresh-keyword-rank-pages.ts

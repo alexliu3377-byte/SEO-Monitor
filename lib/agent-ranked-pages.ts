@@ -115,6 +115,59 @@ export function pickPages(keyword: string, rows: RankRow[], siteDomains: Map<str
   return out.map(({ siteId: _siteId, ...page }) => page)
 }
 
+// 提前算好的表（2026-11-20，supabase/migrations/20261120_keyword_rank_pages.sql）：每天排名抓取后由
+// scripts/refresh-keyword-rank-pages.ts 刷新，整理规则和上面的 pickPages 一样（每个词最多 5 个页面）。
+// 表里有数据就直接读（快，和词库补充页导出的一致）；表还没建、还没刷新过、读失败，就照原来现算。
+// 读表时 offset / nextOffset 是表里符合条件的词的位置（现算时是搜索量词库里扫描的位置），客户端只管往后翻，两种都能用。
+const PRECOMPUTED_TABLE = 'keyword_rank_pages'
+type StoredRow = { keyword?: unknown; content_category?: unknown; content_subcategory?: unknown; volume?: unknown; pages?: unknown }
+export function storedPages(value: unknown): RankedPage[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    const p = (item ?? {}) as Record<string, unknown>
+    const url = typeof p.url === 'string' ? p.url.trim() : ''
+    if (!/^https?:\/\//i.test(url) || url.length > 500) return []
+    return [{
+      url,
+      title: typeof p.title === 'string' ? p.title.slice(0, 100) : '',
+      site: typeof p.site === 'string' ? p.site.slice(0, 100) : '',
+      rank: Number.isInteger(p.rank) && (p.rank as number) > 0 ? (p.rank as number) : null,
+      date: typeof p.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : null,
+    }]
+  })
+}
+async function readPrecomputed(service: RankedPagesService, query: ReturnType<typeof parseRankedPagesQuery>) {
+  const r = await service.from(PRECOMPUTED_TABLE)
+    .select('keyword, content_category, content_subcategory, volume, pages', { count: 'exact' })
+    .gte('page_count', query.minPages)
+    .gt('volume', 0)
+    .lte('volume', query.maxVolume)
+    .order('volume', { ascending: false, nullsFirst: false })
+    .order('keyword', { ascending: true })
+    .range(query.offset, query.offset + query.limit - 1)
+  if (r.error) return null
+  const rows = (r.data ?? []) as StoredRow[]
+  if (rows.length === 0) {
+    const any = await service.from(PRECOMPUTED_TABLE).select('keyword').limit(1)
+    if (any.error || (any.data ?? []).length === 0) return null
+  }
+  const words: RankedWord[] = rows.flatMap(row => {
+    const keyword = typeof row.keyword === 'string' ? row.keyword.trim() : ''
+    const category = row.content_category
+    if (!keyword || keyword.length > 100 || (category !== '游戏' && category !== '应用')) return []
+    const pages = storedPages(row.pages)
+    if (pages.length < query.minPages) return []
+    const subcategory = typeof row.content_subcategory === 'string' && row.content_subcategory.trim() ? row.content_subcategory.trim() : null
+    const volume = typeof row.volume === 'number' && Number.isFinite(row.volume) ? row.volume : null
+    return [{ keyword, contentType: CATEGORY_TYPE[category as Category], category: category as Category, subcategory, volume, pages }]
+  })
+  const scanned = rows.length
+  return {
+    words, offset: query.offset, scanned, nextOffset: query.offset + scanned, end: scanned < query.limit,
+    total: r.count ?? 0, maxVolume: query.maxVolume, minPages: query.minPages, order: 'volume_desc', source: 'table',
+  }
+}
+
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
@@ -154,6 +207,9 @@ export function createRankedPagesHandler(deps: { getService: () => RankedPagesSe
     const query = parseRankedPagesQuery(new URL(request.url))
     try {
       const service = deps.getService()
+      // 0) 先读提前算好的表；读不到再照下面现算。
+      const precomputed = await readPrecomputed(service, query).catch(() => null)
+      if (precomputed) return Response.json(precomputed, { headers })
       // 1) 按搜索量从高到低扫一段已确认分类的游戏和应用词（搜索量 1 到上限）。
       const library = await service.from('keyword_volume')
         .select('keyword, volume, content_category, content_subcategory', { count: 'exact' })

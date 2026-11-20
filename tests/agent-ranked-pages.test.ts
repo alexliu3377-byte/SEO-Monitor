@@ -11,6 +11,8 @@ type Data = {
   sites?: { id: string; domain: string }[]
   ranks?: Record<string, unknown>[]
   failRanks?: boolean
+  table?: Record<string, unknown>[]
+  failTable?: boolean
 }
 function database(data: Data) {
   const calls: Call[] = []
@@ -21,6 +23,14 @@ function database(data: Data) {
           const call: Call = { table, filters: [], range: null }
           calls.push(call)
           const result = () => {
+            if (table === 'keyword_rank_pages') {
+              if (data.failTable) return { data: null, error: { message: 'relation does not exist' } }
+              const min = Number(call.filters.find(f => f[0] === 'gte:page_count')?.[1] ?? 0)
+              const max = Number(call.filters.find(f => f[0] === 'lte:volume')?.[1] ?? Infinity)
+              const all = (data.table ?? []).filter(r => !call.filters.length || ((r.page_count as number) >= min && (r.volume as number) <= max && (r.volume as number) > 0))
+              const [a, b] = call.range ?? [0, all.length]
+              return { data: all.slice(a, b + 1), count: all.length, error: null }
+            }
             if (table === 'keyword_volume') return { data: data.words ?? [], count: (data.words ?? []).length, error: null }
             if (table === 'sites') return { data: data.sites ?? [], error: null }
             if (table === 'site_keyword_ranks') {
@@ -190,4 +200,50 @@ test('ranked pages: 同一个站、标题一样的页面只留一个（名次最
 test('ranked pages: 在服务接口白名单里（用专用密钥，不走登录）', () => {
   assert.equal(allowsServiceAuthPath('/api/agent/ranked-pages'), true)
   assert.equal(allowsServiceAuthPath('/api/agent/other'), false)
+})
+
+// ===== 提前算好的表 keyword_rank_pages（2026-11-20）=====
+const stored = (keyword: string, volume: number, pages: unknown[], category = '游戏', sub: string | null = null) =>
+  ({ keyword, content_category: category, content_subcategory: sub, volume, page_count: pages.length, pages })
+const sp = (n: number, site = 'a.com') => ({ url: `https://www.${site}/g/${n}.html`, title: `标题${n}`, site, rank: n, date: '2026-11-19' })
+
+test('ranked pages: 表里有数据就直接读表（不再扫搜索量词库和排名表），带上搜索量上限、最少页面数，翻页位置按表里的词算', async () => {
+  const table = [stored('甲游戏', 900, [sp(1), sp(2, 'b.com')]), stored('乙应用', 800, [sp(3), sp(4, 'b.com'), sp(5, 'c.com')], '应用', '工具'), stored('丙游戏', 700, [sp(6)])]
+  const { GET, calls } = handler({ table, words: [word('不该被读到')] })
+  const res = await GET(request('?maxVolume=850&minPages=2&limit=10'))
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.source, 'table')
+  assert.deepEqual(body.words.map((w: { keyword: string }) => w.keyword), ['乙应用'])
+  assert.equal(body.words[0].contentType, 'app'); assert.equal(body.words[0].subcategory, '工具'); assert.equal(body.words[0].pages.length, 3)
+  assert.equal(body.scanned, 1); assert.equal(body.nextOffset, 1); assert.equal(body.end, true)
+  assert.ok(calls.every(c => c.table === 'keyword_rank_pages'), '只读表')
+  const main = calls[0]
+  assert.deepEqual(main.filters.filter(f => f[0] === 'gte:page_count' || f[0] === 'lte:volume'), [['gte:page_count', 2], ['lte:volume', 850]])
+  assert.deepEqual(main.range, [0, 9])
+})
+
+test('ranked pages: 表里存的页面先整理一遍——地址不是 http(s) 的去掉，去掉后不够最少页面数的词不给', async () => {
+  const table = [stored('甲游戏', 900, [sp(1), { url: 'javascript:alert(1)', title: 'x' }]), stored('乙游戏', 800, [sp(2), sp(3, 'b.com'), { url: 'ftp://x.com/a' }])]
+  const { GET } = handler({ table })
+  const body = await (await GET(request('?minPages=2'))).json()
+  assert.deepEqual(body.words.map((w: { keyword: string }) => w.keyword), ['乙游戏'])
+  assert.deepEqual(body.words[0].pages.map((p: { url: string }) => p.url), [sp(2).url, sp(3, 'b.com').url])
+})
+
+test('ranked pages: 表还没建、读表出错、表是空的（还没刷新过）：照原来现算', async () => {
+  const data = { words: [word('甲游戏')], sites: [{ id: 's1', domain: 'a.com' }, { id: 's2', domain: 'b.com' }],
+    ranks: [rank('甲游戏', 's1', 'https://a.com/g/1.html', '甲游戏下载'), rank('甲游戏', 's2', 'https://b.com/g/2.html', '甲游戏官方版')] }
+  for (const extra of [{ failTable: true }, { table: [] }, {}]) {
+    const { GET, calls } = handler({ ...data, ...extra })
+    const body = await (await GET(request())).json()
+    assert.equal(body.source, undefined)
+    assert.deepEqual(body.words.map((w: { keyword: string }) => w.keyword), ['甲游戏'])
+    assert.ok(calls.some(c => c.table === 'keyword_volume'), '退回现算')
+  }
+  // 表里有数据、只是这一页之后没有更多词了：不退回现算，直接告诉客户端到头了。
+  const { GET, calls } = handler({ ...data, table: [stored('乙游戏', 500, [sp(1), sp(2, 'b.com')])] })
+  const body = await (await GET(request('?offset=50'))).json()
+  assert.equal(body.source, 'table'); assert.deepEqual(body.words, []); assert.equal(body.end, true)
+  assert.ok(!calls.some(c => c.table === 'keyword_volume'))
 })
